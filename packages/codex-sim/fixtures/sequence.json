@@ -1,0 +1,16 @@
+{
+  "calls": [
+    {
+      "threadId": "sim-0001",
+      "items": [{ "type": "reasoning", "text": "first call" }],
+      "finalMessage": "first",
+      "usage": { "input_tokens": 10, "output_tokens": 1 }
+    },
+    {
+      "threadId": "sim-0002",
+      "items": [],
+      "finalMessage": "second",
+      "usage": { "input_tokens": 20, "output_tokens": 2 }
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "calls": [
+    {
+      "threadId": "sim-crash-1",
+      "behavior": "crash-mid-stream",
+      "exitCode": 3,
+      "items": [
+        { "type": "reasoning", "text": "Halfway through the turn." },
+        {
+          "type": "command_execution",
+          "command": "python compute.py",
+          "aggregated_output": "Killed\n",
+          "exit_code": 137
+        }
+      ],
+      "finalMessage": "never emitted",
+      "usage": { "input_tokens": 700, "output_tokens": 5 }
+    }
+  ]
+}

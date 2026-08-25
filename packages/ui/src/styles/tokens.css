@@ -1,0 +1,97 @@
+/*
+ * Design tokens — UI-SPEC §2, exact values.
+ *
+ * Theme resolution: `data-theme="dark" | "light"` on <html> (explicit choice,
+ * persisted in localStorage `inventio.theme`). The bootstrap in App.tsx
+ * always writes an explicit value, following prefers-color-scheme while the
+ * stored choice is "system"; the media query below is the no-JS fallback.
+ *
+ * Role colors for light theme are the dark hue at ~70% of the dark lightness
+ * (UI-SPEC §2), computed and frozen here:
+ *   solver      #a371f7  hsl(262, 89%, 71%) → hsl(262, 89%, 49%) = #610def
+ *   explorer    #58d0d0  hsl(180, 56%, 58%) → hsl(180, 56%, 41%) = #2da2a2
+ *   reviewer    #d29922  hsl( 41, 72%, 48%) → hsl( 41, 72%, 34%) = #936b18
+ *   synthesizer #4f8ef7  hsl(218, 91%, 64%) → hsl(218, 91%, 45%) = #0a58da
+ *   planner     var(--muted) in both themes
+ */
+
+:root,
+:root[data-theme="dark"] {
+  --bg: #0e1116;
+  --panel: #161b22;
+  --panel-2: #1c232d;
+  --border: #2a323e;
+  --text: #e6edf3;
+  --muted: #8b98a8;
+  --accent: #4f8ef7;
+  --running: #58a6ff;
+  --ok: #3fb950;
+  --warn: #d29922;
+  --danger: #f85149;
+  --queued: #6e7681;
+  --seal: #a371f7;
+
+  --role-solver: #a371f7;
+  --role-explorer: #58d0d0;
+  --role-reviewer: #d29922;
+  --role-synthesizer: #4f8ef7;
+  --role-planner: var(--muted);
+
+  --shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  --selected-ring: 0 0 0 2px var(--accent);
+}
+
+:root[data-theme="light"] {
+  --bg: #f8f9fb;
+  --panel: #ffffff;
+  --panel-2: #eff2f6;
+  --border: #d5dbe3;
+  --text: #1f2430;
+  --muted: #5b6675;
+  --accent: #2f6bdb;
+  --running: #2f6bdb;
+  --ok: #1a7f37;
+  --warn: #9a6700;
+  --danger: #cf222e;
+  --queued: #8b98a8;
+  --seal: #8250df;
+
+  --role-solver: #610def;
+  --role-explorer: #2da2a2;
+  --role-reviewer: #936b18;
+  --role-synthesizer: #0a58da;
+  --role-planner: var(--muted);
+
+  --shadow: 0 8px 28px rgba(31, 36, 48, 0.14);
+}
+
+/* No-JS / pre-hydration fallback: follow the OS unless a theme is pinned. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]):not([data-theme="light"]) {
+    --bg: #f8f9fb;
+    --panel: #ffffff;
+    --panel-2: #eff2f6;
+    --border: #d5dbe3;
+    --text: #1f2430;
+    --muted: #5b6675;
+    --accent: #2f6bdb;
+    --running: #2f6bdb;
+    --ok: #1a7f37;
+    --warn: #9a6700;
+    --danger: #cf222e;
+    --queued: #8b98a8;
+    --seal: #8250df;
+    --role-solver: #610def;
+    --role-explorer: #2da2a2;
+    --role-reviewer: #936b18;
+    --role-synthesizer: #0a58da;
+    --shadow: 0 8px 28px rgba(31, 36, 48, 0.14);
+  }
+}
+
+:root {
+  --font-ui: ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --radius: 8px;
+  --radius-sm: 5px;
+}

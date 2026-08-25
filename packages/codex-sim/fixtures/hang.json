@@ -1,0 +1,10 @@
+{
+  "calls": [
+    {
+      "threadId": "sim-hang-1",
+      "behavior": "hang",
+      "items": [{ "type": "reasoning", "text": "Thinking forever." }],
+      "finalMessage": "never emitted"
+    }
+  ]
+}

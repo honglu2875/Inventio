@@ -1,0 +1,20 @@
+{
+  "name": "@inventio/conductor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p .",
+    "smoke": "tsx scripts/smoke.ts"
+  },
+  "dependencies": {
+    "@inventio/schema": "*",
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "fastify": "^5.0.0",
+    "tsx": "^4.19.0",
+    "zod": "^4.0.0"
+  }
+}

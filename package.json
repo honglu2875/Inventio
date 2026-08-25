@@ -1,0 +1,30 @@
+{
+  "name": "inventio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "An evidence-first multi-agent research environment for difficult mathematics.",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/honglu2875/Inventio.git"
+  },
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": "^20.0.0 || ^22.0.0 || >=24.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.11"
+  },
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm test --workspaces --if-present",
+    "dev": "npm run dev -w @inventio/conductor",
+    "dev:ui": "npm run dev -w @inventio/ui",
+    "smoke": "npm run smoke -w @inventio/conductor"
+  }
+}

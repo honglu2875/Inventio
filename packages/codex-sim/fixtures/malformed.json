@@ -1,0 +1,12 @@
+{
+  "calls": [
+    {
+      "match": { "promptContains": "Execute assignment.md" },
+      "threadId": "sim-bad-1",
+      "behavior": "malformed-output",
+      "items": [{ "type": "reasoning", "text": "Answering in prose instead of JSON." }],
+      "finalMessage": "Sure! Here is my proof, but not in the schema you asked for.",
+      "usage": { "input_tokens": 500, "output_tokens": 40 }
+    }
+  ]
+}

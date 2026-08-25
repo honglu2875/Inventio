@@ -1,0 +1,11 @@
+{
+  "calls": [
+    {
+      "threadId": "sim-fail-1",
+      "behavior": "exit-nonzero",
+      "exitCode": 7,
+      "items": [{ "type": "reasoning", "text": "never emitted" }],
+      "finalMessage": "never emitted"
+    }
+  ]
+}

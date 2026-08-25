@@ -1,0 +1,330 @@
+import type {
+  Ambiguity,
+  Clarification,
+  ArtifactKind,
+  CardStatus,
+  ClaimStatus,
+  DecisionKind,
+  IssueSeverity,
+  IntakeMemory,
+  IntakeSource,
+  Phase,
+  ProposedCard,
+  Result,
+  RosterEntry,
+  Usage,
+} from "./events.js";
+import type { ProjectConfig, WorkerRole } from "./config.js";
+import type { IdKind } from "./ids.js";
+
+/**
+ * ProjectState is the pure fold of the event log (DESIGN §5). It is plain
+ * serializable data; the same reducer runs in the conductor and the UI.
+ */
+
+export type TaskStatus = "queued" | "running" | "completed" | "interrupted" | "failed";
+
+export interface TaskState {
+  id: string;
+  waveId: string;
+  role: WorkerRole;
+  methodTag: string;
+  direction: string;
+  status: TaskStatus;
+  budgetTokens: number;
+  packetManifest: string[];
+  threadId: string | null;
+  estimatedTokens: number;
+  lastItem: { type: string; preview: string } | null;
+  usage: Usage | null;
+  artifactIds: string[];
+  reviewOf: string | null;
+  computation: boolean;
+  invalidOutputErrors: string[] | null;
+  interruptReason: string | null;
+  error: string | null;
+  crossExams: { questionMarkdown: string; refIds: string[]; answerMarkdown: string | null }[];
+  /** Curator's durable decision about whether and how later work should use this attempt. */
+  disposition: "carry_forward" | "needs_precise_unblock" | "set_aside" | null;
+  dispositionReason: string | null;
+  preciseUnblock: string | null;
+}
+
+export type WaveStatus = "open" | "softInterrupted" | "closed";
+
+export interface WaveState {
+  id: string;
+  title: string;
+  status: WaveStatus;
+  decisionId: string;
+  roster: RosterEntry[];
+  reserveTokens: number;
+  rationale: string;
+  taskIds: string[];
+  docketMarkdown: string | null;
+  resolutionPath: string | null;
+}
+
+export interface ArtifactMeta {
+  id: string;
+  kind: ArtifactKind;
+  taskId: string | null;
+  path: string;
+  conclusion: string | null;
+  recordedAtSeq: number;
+}
+
+export interface LineageState {
+  id: string;
+  title: string;
+  status: "active" | "abandoned" | "established";
+  abandonReason: string | null;
+  establishedCandidateId: string | null;
+  versionIds: string[];
+}
+
+export interface CandidateState {
+  id: string;
+  lineageId: string;
+  version: number;
+  fromArtifact: string;
+  obligations: string[];
+  reviewQuestions: string[];
+  usedClaimIds: string[];
+  /** null = a candidate for the whole problem; text = a scoped partial result */
+  scope: string | null;
+  reviewIds: string[];
+  issueIds: string[];
+  acceptance: { passed: boolean; failing: string[] } | null;
+}
+
+export interface ReviewState {
+  id: string;
+  candidateId: string;
+  verdict: "PASS" | "FAIL";
+  issueIds: string[];
+  taskId: string;
+}
+
+export interface ClaimState {
+  id: string;
+  statement: string;
+  status: ClaimStatus;
+  provenance: string;
+  /** The proposing task, when known. Replayed legacy events infer this from provenance. */
+  sourceTaskId: string | null;
+  dependsOn: string[];
+  history: { from: ClaimStatus; to: ClaimStatus; justification: string; by: string; seq: number }[];
+}
+
+export interface IssueState {
+  id: string;
+  candidateId: string;
+  severity: IssueSeverity;
+  location: string;
+  summary: string;
+  by: string;
+  status: "open" | "resolved";
+  disposition: "repaired" | "rejected" | "stale" | null;
+  dispositionReason: string | null;
+}
+
+export interface CardState {
+  id: string;
+  card: ProposedCard;
+  proposedBy: string;
+  status: CardStatus | "PENDING"; // PENDING = proposed, not yet through admission
+  admissionReason: string | null;
+}
+
+export interface QuestionState {
+  id: string;
+  text: string;
+  blocking: boolean;
+  context: string;
+  raisedBy: string;
+  /** Whether the owner must answer, retry an operation, or only acknowledge it. */
+  interaction: "answer" | "retry" | "acknowledge";
+  status: "open" | "answered" | "dismissed";
+  answer: string | null;
+}
+
+export interface DirectiveState {
+  id: string;
+  text: string;
+  urgent: boolean;
+  status: "pending" | "consumed";
+  consumedByDecision: string | null;
+}
+
+export interface DecisionState {
+  id: string;
+  kind: DecisionKind;
+  waveId: string | null;
+  status: "requested" | "proposed" | "rejected" | "accepted" | "gated" | "gateResolved";
+  action: unknown;
+  violations: string[][];
+  gateResolution: "approve" | "edit" | "reject" | null;
+  plannerSpend: number;
+}
+
+export interface ComputationState {
+  id: string;
+  taskId: string;
+  entry: string;
+  inputsHash: string;
+  outputHash: string;
+  /** null means the baseline predates process-status recording. */
+  exitCode: number | null;
+  stderr: string;
+  repairedReason: string | null;
+  reproduced: {
+    match: boolean;
+    outputHash: string;
+    /** null means the rerun predates process-status recording. */
+    exitCode: number | null;
+    stderr: string;
+  } | null;
+}
+
+export interface BudgetState {
+  totalTokens: number;
+  /** worker spend (tasks), by the DESIGN §6.5 metric */
+  spentTokens: number;
+  /** planner/curation/intake/final spend */
+  plannerSpentTokens: number;
+}
+
+export interface TerminalRecord {
+  result: Result;
+  finalPath: string;
+  reachedAtSeq: number;
+}
+
+export interface ContinuationState {
+  previousResult: Result;
+  previousFinalPath: string;
+  note: string;
+  addTokens: number;
+  addWaves: number;
+  by: string;
+  atSeq: number;
+}
+
+/** One recurrent Research Manager view, rewritten after a completed round. */
+export interface ResearchManagerNoteState {
+  waveId: string;
+  path: string;
+  abstract: string;
+  markdown: string;
+  source: "research_manager" | "human_edited" | "fallback";
+  recordedAtSeq: number;
+  recordedAt: string;
+}
+
+export interface ProjectState {
+  slug: string;
+  title: string;
+  config: ProjectConfig;
+  seq: number;
+  phase: Phase;
+  paused: boolean;
+  autonomy: "auto" | "gated";
+  statement: string;
+  /** Long owner-supplied notes, kept verbatim and separate from the objective. */
+  contextMarkdown: string;
+  problem: {
+    normalizedMarkdown: string | null;
+    confirmedMarkdown: string | null;
+    contextDigestMarkdown: string;
+    rawMemories: IntakeMemory[];
+    /** Verbatim intake items with compact catalog descriptions. */
+    sources: IntakeSource[];
+    ambiguities: Ambiguity[];
+    /** open questions the owner can answer before confirming */
+    clarifications: Clarification[];
+    /** answers given so far, by clarification id */
+    answers: Record<string, string>;
+    /** true once the statement has been re-normalized against the answers */
+    revised: boolean;
+  };
+  waves: Record<string, WaveState>;
+  waveOrder: string[];
+  tasks: Record<string, TaskState>;
+  artifacts: Record<string, ArtifactMeta>;
+  lineages: Record<string, LineageState>;
+  activeLineageId: string | null;
+  candidates: Record<string, CandidateState>;
+  reviews: Record<string, ReviewState>;
+  claims: Record<string, ClaimState>;
+  claimOrder: string[];
+  issues: Record<string, IssueState>;
+  cards: Record<string, CardState>;
+  questions: Record<string, QuestionState>;
+  directives: Record<string, DirectiveState>;
+  directiveOrder: string[];
+  decisions: Record<string, DecisionState>;
+  decisionOrder: string[];
+  /** Chronological snapshots; the last entry is the Manager's current view. */
+  researchManagerNotes: ResearchManagerNoteState[];
+  computations: Record<string, ComputationState>;
+  budget: BudgetState;
+  openGateDecisionId: string | null;
+  terminal: { result: Result; finalPath: string } | null;
+  /** Every stopping report, including the current one when terminal. */
+  terminalHistory: TerminalRecord[];
+  /** Owner-authorized resumptions; prior reports remain immutable evidence. */
+  continuations: ContinuationState[];
+  counters: Partial<Record<IdKind, number>>;
+}
+
+export function initialState(): ProjectState {
+  return {
+    slug: "",
+    title: "",
+    // populated by project.created; placeholder keeps the type total
+    config: undefined as unknown as ProjectConfig,
+    seq: 0,
+    phase: "CREATED",
+    paused: false,
+    autonomy: "auto",
+    statement: "",
+    contextMarkdown: "",
+    problem: {
+      normalizedMarkdown: null,
+      confirmedMarkdown: null,
+      contextDigestMarkdown: "",
+      rawMemories: [],
+      sources: [],
+      ambiguities: [],
+      clarifications: [],
+      answers: {},
+      revised: false,
+    },
+    waves: {},
+    waveOrder: [],
+    tasks: {},
+    artifacts: {},
+    lineages: {},
+    activeLineageId: null,
+    candidates: {},
+    reviews: {},
+    claims: {},
+    claimOrder: [],
+    issues: {},
+    cards: {},
+    questions: {},
+    directives: {},
+    directiveOrder: [],
+    decisions: {},
+    decisionOrder: [],
+    researchManagerNotes: [],
+    computations: {},
+    budget: { totalTokens: 0, spentTokens: 0, plannerSpentTokens: 0 },
+    openGateDecisionId: null,
+    terminal: null,
+    terminalHistory: [],
+    continuations: [],
+    counters: {},
+  };
+}

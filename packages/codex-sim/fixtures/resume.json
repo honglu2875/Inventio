@@ -1,0 +1,16 @@
+{
+  "calls": [
+    {
+      "match": { "promptContains": "start" },
+      "threadId": "sim-thread-7",
+      "finalMessage": "{\"conclusion\":\"UNCERTAIN\"}",
+      "usage": { "input_tokens": 100, "output_tokens": 10 }
+    },
+    {
+      "match": { "resumeOf": "sim-thread-7", "promptContains": "again" },
+      "threadId": "ignored-when-resuming",
+      "finalMessage": "{\"conclusion\":\"PROVED\"}",
+      "usage": { "input_tokens": 150, "cached_input_tokens": 100, "output_tokens": 12 }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "calls": [
+    {
+      "match": { "cwdContains": "packet-T007", "promptContains": "Execute" },
+      "threadId": "sim-cwd-1",
+      "items": [],
+      "finalMessage": "{\"conclusion\":\"PASS\"}",
+      "usage": { "input_tokens": 42 }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "calls": [
+    {
+      "threadId": "sim-hang-2",
+      "behavior": "hang",
+      "stubbornSigint": true,
+      "items": [{ "type": "reasoning", "text": "Ignoring your SIGINT." }],
+      "finalMessage": "never emitted"
+    }
+  ]
+}

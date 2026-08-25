@@ -1,0 +1,11 @@
+{
+  "calls": [
+    {
+      "threadId": "sim-slow-1",
+      "delayMs": 40,
+      "items": [{ "type": "reasoning", "text": "slowly" }],
+      "finalMessage": "done",
+      "usage": { "input_tokens": 1 }
+    }
+  ]
+}

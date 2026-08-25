@@ -1,0 +1,28 @@
+{
+  "name": "@inventio/codex-sim",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fake codex CLI (codex-cli 0.149.0 exec dialect) driven by a scenario file, for developing and testing the Inventio orchestrator without burning API quota.",
+  "type": "module",
+  "bin": {
+    "codex-sim": "./bin/codex-sim.mjs"
+  },
+  "exports": {
+    ".": "./lib/run.mjs",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "CONTRACT.md"
+  ],
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.11"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "calls": [
+    {
+      "match": { "promptContains": "Execute assignment.md" },
+      "threadId": "sim-0001",
+      "behavior": "ok",
+      "items": [
+        { "type": "reasoning", "text": "Reading assignment.md and planning the attempt." },
+        {
+          "type": "command_execution",
+          "command": "ls -la",
+          "aggregated_output": "assignment.md\nAGENTS.md\n",
+          "exit_code": 0
+        }
+      ],
+      "finalMessage": {
+        "conclusion": "PROVED",
+        "artifactMarkdown": "# Attempt\n\nThe inequality holds by AM-GM.\n",
+        "memo": {
+          "summary": "Closed the main lemma.",
+          "newClaims": [],
+          "obligations": [],
+          "deadEnds": [],
+          "proposedCards": [],
+          "computations": [],
+          "budgetReport": "used ~1.2k tokens"
+        },
+        "recallLog": []
+      },
+      "usage": {
+        "input_tokens": 1000,
+        "cached_input_tokens": 128,
+        "output_tokens": 200,
+        "reasoning_output_tokens": 50
+      }
+    }
+  ]
+}

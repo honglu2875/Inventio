@@ -1,0 +1,652 @@
+[
+  {
+    "seq": 1,
+    "ts": "2023-11-14T22:13:21.000Z",
+    "type": "project.created",
+    "slug": "test-problem",
+    "title": "Test problem",
+    "statement": "Prove that P.",
+    "config": {
+      "budget": {
+        "totalTokens": 40000000,
+        "defaultTaskTokens": 1500000,
+        "taskWallClockMinutes": 30,
+        "reserveFraction": 0.25
+      },
+      "models": {
+        "planner": {
+          "model": null,
+          "effort": "high"
+        },
+        "solver": {
+          "model": null,
+          "effort": "high"
+        },
+        "explorer": {
+          "model": null,
+          "effort": "medium"
+        },
+        "reviewer": {
+          "model": null,
+          "effort": "high"
+        },
+        "synthesizer": {
+          "model": null,
+          "effort": "high"
+        }
+      },
+      "autonomy": "auto",
+      "limits": {
+        "maxWaves": 20,
+        "maxRepairRounds": 2,
+        "maxConcurrentWorkers": 3
+      },
+      "sourceMounts": []
+    }
+  },
+  {
+    "seq": 2,
+    "ts": "2023-11-14T22:13:22.000Z",
+    "type": "phase.changed",
+    "from": "CREATED",
+    "to": "INTAKE",
+    "reason": "start"
+  },
+  {
+    "seq": 3,
+    "ts": "2023-11-14T22:13:23.000Z",
+    "type": "intake.completed",
+    "problemMarkdown": "# Problem\nProve that P.",
+    "ambiguities": [
+      {
+        "text": "Is n a natural number?",
+        "material": true
+      }
+    ]
+  },
+  {
+    "seq": 4,
+    "ts": "2023-11-14T22:13:24.000Z",
+    "type": "phase.changed",
+    "from": "INTAKE",
+    "to": "AWAITING_CONFIRMATION",
+    "reason": "intake done"
+  },
+  {
+    "seq": 5,
+    "ts": "2023-11-14T22:13:25.000Z",
+    "type": "problem.confirmed",
+    "problemMarkdown": "# Problem\nProve that P, n ∈ ℕ."
+  },
+  {
+    "seq": 6,
+    "ts": "2023-11-14T22:13:26.000Z",
+    "type": "phase.changed",
+    "from": "AWAITING_CONFIRMATION",
+    "to": "DISCOVERY",
+    "reason": "confirmed"
+  },
+  {
+    "seq": 7,
+    "ts": "2023-11-14T22:13:27.000Z",
+    "type": "autonomy.changed",
+    "mode": "auto",
+    "by": "human"
+  },
+  {
+    "seq": 8,
+    "ts": "2023-11-14T22:13:28.000Z",
+    "type": "directive.submitted",
+    "id": "D001",
+    "text": "Try induction first.",
+    "urgent": false
+  },
+  {
+    "seq": 9,
+    "ts": "2023-11-14T22:13:29.000Z",
+    "type": "decision.requested",
+    "decisionId": "DEC001",
+    "kind": "next_move",
+    "waveId": null
+  },
+  {
+    "seq": 10,
+    "ts": "2023-11-14T22:13:30.000Z",
+    "type": "decision.proposed",
+    "decisionId": "DEC001",
+    "action": {
+      "action": "plan_wave"
+    },
+    "usage": {
+      "input_tokens": 10000,
+      "cached_input_tokens": 4000,
+      "output_tokens": 2000,
+      "reasoning_output_tokens": 500
+    }
+  },
+  {
+    "seq": 11,
+    "ts": "2023-11-14T22:13:31.000Z",
+    "type": "decision.rejected",
+    "decisionId": "DEC001",
+    "violations": [
+      "reserve below 25%"
+    ]
+  },
+  {
+    "seq": 12,
+    "ts": "2023-11-14T22:13:32.000Z",
+    "type": "decision.proposed",
+    "decisionId": "DEC001",
+    "action": {
+      "action": "plan_wave"
+    },
+    "usage": {
+      "input_tokens": 10000,
+      "cached_input_tokens": 4000,
+      "output_tokens": 2000,
+      "reasoning_output_tokens": 500
+    }
+  },
+  {
+    "seq": 13,
+    "ts": "2023-11-14T22:13:33.000Z",
+    "type": "decision.accepted",
+    "decisionId": "DEC001",
+    "action": {
+      "action": "plan_wave"
+    }
+  },
+  {
+    "seq": 14,
+    "ts": "2023-11-14T22:13:34.000Z",
+    "type": "directive.consumed",
+    "id": "D001",
+    "decisionId": "DEC001"
+  },
+  {
+    "seq": 15,
+    "ts": "2023-11-14T22:13:35.000Z",
+    "type": "gate.opened",
+    "decisionId": "DEC001"
+  },
+  {
+    "seq": 16,
+    "ts": "2023-11-14T22:13:36.000Z",
+    "type": "gate.resolved",
+    "decisionId": "DEC001",
+    "resolution": "approve"
+  },
+  {
+    "seq": 17,
+    "ts": "2023-11-14T22:13:37.000Z",
+    "type": "wave.planned",
+    "waveId": "W001",
+    "title": "Independent discovery",
+    "decisionId": "DEC001",
+    "reserveTokens": 500000,
+    "rationale": "little is known",
+    "roster": [
+      {
+        "taskId": "T001",
+        "role": "solver",
+        "methodTag": "induction",
+        "direction": "Direct proof by induction",
+        "briefMarkdown": "Prove P by induction.",
+        "tokenBudget": 1000000,
+        "computation": false,
+        "reviewOf": null,
+        "grants": {
+          "artifactIds": [],
+          "cardIds": [],
+          "sourceMounts": []
+        }
+      },
+      {
+        "taskId": "T002",
+        "role": "explorer",
+        "methodTag": "small-cases",
+        "direction": "Small cases",
+        "briefMarkdown": "Compute small cases.",
+        "tokenBudget": 500000,
+        "computation": true,
+        "reviewOf": null,
+        "grants": {
+          "artifactIds": [],
+          "cardIds": [],
+          "sourceMounts": []
+        }
+      },
+      {
+        "taskId": "T003",
+        "role": "solver",
+        "methodTag": "contradiction",
+        "direction": "Contradiction",
+        "briefMarkdown": "Assume not-P.",
+        "tokenBudget": 800000,
+        "computation": false,
+        "reviewOf": null,
+        "grants": {
+          "artifactIds": [],
+          "cardIds": [],
+          "sourceMounts": []
+        }
+      }
+    ]
+  },
+  {
+    "seq": 18,
+    "ts": "2023-11-14T22:13:38.000Z",
+    "type": "task.dispatched",
+    "taskId": "T001",
+    "waveId": "W001",
+    "role": "solver",
+    "methodTag": "induction",
+    "direction": "Direct proof by induction",
+    "packetManifest": [
+      "AGENTS.md",
+      "problem.md",
+      "assignment.md"
+    ],
+    "budgetTokens": 1000000
+  },
+  {
+    "seq": 19,
+    "ts": "2023-11-14T22:13:39.000Z",
+    "type": "task.session",
+    "taskId": "T001",
+    "threadId": "thr-001"
+  },
+  {
+    "seq": 20,
+    "ts": "2023-11-14T22:13:40.000Z",
+    "type": "task.progress",
+    "taskId": "T001",
+    "estimatedTokens": 1234,
+    "lastItem": {
+      "type": "reasoning",
+      "preview": "…"
+    }
+  },
+  {
+    "seq": 21,
+    "ts": "2023-11-14T22:13:41.000Z",
+    "type": "task.extended",
+    "taskId": "T001",
+    "addTokens": 200000,
+    "by": "human"
+  },
+  {
+    "seq": 22,
+    "ts": "2023-11-14T22:13:42.000Z",
+    "type": "task.completed",
+    "taskId": "T001",
+    "usage": {
+      "input_tokens": 10000,
+      "cached_input_tokens": 4000,
+      "output_tokens": 2000,
+      "reasoning_output_tokens": 500
+    }
+  },
+  {
+    "seq": 23,
+    "ts": "2023-11-14T22:13:43.000Z",
+    "type": "artifact.recorded",
+    "artifactId": "A001",
+    "kind": "attempt",
+    "taskId": "T001",
+    "path": "artifacts/attempts/A001.md",
+    "conclusion": "UNCERTAIN"
+  },
+  {
+    "seq": 24,
+    "ts": "2023-11-14T22:13:44.000Z",
+    "type": "crossexam.sent",
+    "taskId": "T001",
+    "decisionId": "DEC001",
+    "refIds": [
+      "K001"
+    ],
+    "questionMarkdown": "Clarify step 3."
+  },
+  {
+    "seq": 25,
+    "ts": "2023-11-14T22:13:45.000Z",
+    "type": "crossexam.answered",
+    "taskId": "T001",
+    "answerMarkdown": "Step 3 uses monotonicity."
+  },
+  {
+    "seq": 26,
+    "ts": "2023-11-14T22:13:46.000Z",
+    "type": "task.dispatched",
+    "taskId": "T002",
+    "waveId": "W001",
+    "role": "explorer",
+    "methodTag": "small-cases",
+    "direction": "Small cases",
+    "packetManifest": [
+      "AGENTS.md"
+    ],
+    "budgetTokens": 500000
+  },
+  {
+    "seq": 27,
+    "ts": "2023-11-14T22:13:47.000Z",
+    "type": "task.outputInvalid",
+    "taskId": "T002",
+    "errors": [
+      "memo.summary: required"
+    ]
+  },
+  {
+    "seq": 28,
+    "ts": "2023-11-14T22:13:48.000Z",
+    "type": "task.interrupted",
+    "taskId": "T002",
+    "reason": "budget",
+    "usage": null
+  },
+  {
+    "seq": 29,
+    "ts": "2023-11-14T22:13:49.000Z",
+    "type": "task.dispatched",
+    "taskId": "T003",
+    "waveId": "W001",
+    "role": "solver",
+    "methodTag": "contradiction",
+    "direction": "Contradiction",
+    "packetManifest": [
+      "AGENTS.md"
+    ],
+    "budgetTokens": 800000
+  },
+  {
+    "seq": 30,
+    "ts": "2023-11-14T22:13:50.000Z",
+    "type": "task.failed",
+    "taskId": "T003",
+    "error": "codex exited 1"
+  },
+  {
+    "seq": 31,
+    "ts": "2023-11-14T22:13:51.000Z",
+    "type": "claim.added",
+    "claimId": "K001",
+    "statement": "P holds for n=1.",
+    "status": "UNVERIFIED",
+    "provenance": "A001 §2",
+    "dependsOn": []
+  },
+  {
+    "seq": 32,
+    "ts": "2023-11-14T22:13:52.000Z",
+    "type": "claim.added",
+    "claimId": "K002",
+    "statement": "P(n) implies P(n+1).",
+    "status": "UNVERIFIED",
+    "provenance": "A001 §3",
+    "dependsOn": [
+      "K001"
+    ]
+  },
+  {
+    "seq": 33,
+    "ts": "2023-11-14T22:13:53.000Z",
+    "type": "claim.status",
+    "claimId": "K001",
+    "from": "UNVERIFIED",
+    "to": "VERIFIED",
+    "justification": "checked by hand",
+    "by": "human"
+  },
+  {
+    "seq": 34,
+    "ts": "2023-11-14T22:13:54.000Z",
+    "type": "memory.cardProposed",
+    "cardId": "M001",
+    "by": "T001",
+    "card": {
+      "type": "LEMMA",
+      "title": "Base case",
+      "content": "P(1) holds.",
+      "abstract": "Base case verified.",
+      "tags": [
+        "induction"
+      ],
+      "provenance": "A001 §2",
+      "sourceArtifact": "A001",
+      "dependsOn": []
+    }
+  },
+  {
+    "seq": 35,
+    "ts": "2023-11-14T22:13:55.000Z",
+    "type": "memory.cardAdmitted",
+    "cardId": "M001",
+    "status": "PROPOSED",
+    "reason": "new claim, not self-verified"
+  },
+  {
+    "seq": 36,
+    "ts": "2023-11-14T22:13:56.000Z",
+    "type": "memory.cardStatus",
+    "cardId": "M001",
+    "from": "PROPOSED",
+    "to": "VERIFIED",
+    "reason": "K001 verified",
+    "by": "conductor"
+  },
+  {
+    "seq": 37,
+    "ts": "2023-11-14T22:13:57.000Z",
+    "type": "memory.recall",
+    "taskId": "T001",
+    "op": "search",
+    "args": "induction base",
+    "returnedIds": [
+      "M001"
+    ],
+    "refusedIds": []
+  },
+  {
+    "seq": 38,
+    "ts": "2023-11-14T22:13:58.000Z",
+    "type": "computation.recorded",
+    "compId": "X001",
+    "taskId": "T002",
+    "entry": "python3 cases.py",
+    "inputsHash": "abc",
+    "outputHash": "def"
+  },
+  {
+    "seq": 39,
+    "ts": "2023-11-14T22:13:59.000Z",
+    "type": "computation.reproduced",
+    "compId": "X001",
+    "match": true,
+    "outputHash": "def"
+  },
+  {
+    "seq": 40,
+    "ts": "2023-11-14T22:14:00.000Z",
+    "type": "wave.softInterrupted",
+    "waveId": "W001",
+    "by": "human"
+  },
+  {
+    "seq": 41,
+    "ts": "2023-11-14T22:14:01.000Z",
+    "type": "wave.closed",
+    "waveId": "W001",
+    "docketMarkdown": "## Docket\n- K001, K002 proposed"
+  },
+  {
+    "seq": 42,
+    "ts": "2023-11-14T22:14:02.000Z",
+    "type": "resolution.recorded",
+    "waveId": "W001",
+    "path": "artifacts/resolutions/W001.md"
+  },
+  {
+    "seq": 43,
+    "ts": "2023-11-14T22:14:03.000Z",
+    "type": "capsule.updated",
+    "role": "solver",
+    "waveId": "W001",
+    "path": "memory/capsules/solver.md"
+  },
+  {
+    "seq": 44,
+    "ts": "2023-11-14T22:14:04.000Z",
+    "type": "digest.updated"
+  },
+  {
+    "seq": 45,
+    "ts": "2023-11-14T22:14:05.000Z",
+    "type": "lineage.created",
+    "lineageId": "C001",
+    "title": "Induction route"
+  },
+  {
+    "seq": 46,
+    "ts": "2023-11-14T22:14:06.000Z",
+    "type": "candidate.frozen",
+    "candidateId": "C001.v1",
+    "lineageId": "C001",
+    "version": 1,
+    "fromArtifact": "A001",
+    "obligations": [
+      "Close the inductive step for even n"
+    ],
+    "usedClaimIds": [
+      "K001",
+      "K002"
+    ]
+  },
+  {
+    "seq": 47,
+    "ts": "2023-11-14T22:14:07.000Z",
+    "type": "phase.changed",
+    "from": "DISCOVERY",
+    "to": "REVIEW",
+    "reason": "candidate frozen"
+  },
+  {
+    "seq": 48,
+    "ts": "2023-11-14T22:14:08.000Z",
+    "type": "issue.raised",
+    "issueId": "I001",
+    "candidateId": "C001.v1",
+    "severity": "CRITICAL",
+    "location": "step 3, uses K002",
+    "summary": "Inductive step unproved for even n.",
+    "by": "R001"
+  },
+  {
+    "seq": 49,
+    "ts": "2023-11-14T22:14:09.000Z",
+    "type": "review.recorded",
+    "reviewId": "R001",
+    "candidateId": "C001.v1",
+    "verdict": "FAIL",
+    "issueIds": [
+      "I001"
+    ],
+    "taskId": "T001"
+  },
+  {
+    "seq": 50,
+    "ts": "2023-11-14T22:14:10.000Z",
+    "type": "acceptance.evaluated",
+    "candidateId": "C001.v1",
+    "passed": false,
+    "failing": [
+      "open CRITICAL issue I001"
+    ]
+  },
+  {
+    "seq": 51,
+    "ts": "2023-11-14T22:14:11.000Z",
+    "type": "issue.resolved",
+    "issueId": "I001",
+    "disposition": "rejected",
+    "reason": "even case covered by symmetry argument in §4",
+    "by": "planner"
+  },
+  {
+    "seq": 52,
+    "ts": "2023-11-14T22:14:12.000Z",
+    "type": "question.raised",
+    "id": "Q001",
+    "text": "Allow analytic tools?",
+    "blocking": false,
+    "context": "solver asked",
+    "raisedBy": "planner"
+  },
+  {
+    "seq": 53,
+    "ts": "2023-11-14T22:14:13.000Z",
+    "type": "question.answered",
+    "id": "Q001",
+    "answer": "Yes."
+  },
+  {
+    "seq": 54,
+    "ts": "2023-11-14T22:14:14.000Z",
+    "type": "question.raised",
+    "id": "Q002",
+    "text": "Extend budget?",
+    "blocking": false,
+    "context": "",
+    "raisedBy": "conductor"
+  },
+  {
+    "seq": 55,
+    "ts": "2023-11-14T22:14:15.000Z",
+    "type": "question.dismissed",
+    "id": "Q002"
+  },
+  {
+    "seq": 56,
+    "ts": "2023-11-14T22:14:16.000Z",
+    "type": "human.intervention",
+    "kind": "note",
+    "target": "C001.v1",
+    "note": "Watch the parity split."
+  },
+  {
+    "seq": 57,
+    "ts": "2023-11-14T22:14:17.000Z",
+    "type": "project.paused",
+    "by": "human"
+  },
+  {
+    "seq": 58,
+    "ts": "2023-11-14T22:14:18.000Z",
+    "type": "project.resumed",
+    "by": "human"
+  },
+  {
+    "seq": 59,
+    "ts": "2023-11-14T22:14:19.000Z",
+    "type": "lineage.abandoned",
+    "lineageId": "C001",
+    "reason": "structural flaw"
+  },
+  {
+    "seq": 60,
+    "ts": "2023-11-14T22:14:20.000Z",
+    "type": "phase.changed",
+    "from": "REVIEW",
+    "to": "TERMINAL",
+    "reason": "budget exhausted"
+  },
+  {
+    "seq": 61,
+    "ts": "2023-11-14T22:14:21.000Z",
+    "type": "terminal.reached",
+    "result": "UNCERTAIN",
+    "finalPath": "artifacts/final.md"
+  }
+]
