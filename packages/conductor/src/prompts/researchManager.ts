@@ -1,20 +1,34 @@
 import { candidateLifecycle, type ProjectState } from "@inventio/schema";
-import { TEX_LAYOUT_GUIDANCE } from "./contracts.js";
-import { reviewBacklog, unassessedClaimSources } from "./validate.js";
+import { reviewBacklog, unassessedClaimSources } from "../engine/validate.js";
 import { RESEARCH_MANAGER_EXAMPLES } from "./managerExamples.js";
+import { TEX_LAYOUT_GUIDANCE } from "./shared.js";
 
 /**
- * Research Manager input composition (DESIGN §6.2/§6.3/§8.3). The legacy
- * filename is retained to keep this refactor narrow. Each call receives a
- * read-only directory of bounded files plus a short prompt; the action space
- * and constraints are described in AGENTS.md.
+ * Complete Research Manager prompt surface (DESIGN §6.2/§6.3/§8.3).
+ *
+ * ProjectEngine imports this module for W000 intake, statement revision,
+ * between-round decisions, completed-round assessment, and final composition.
+ * Each call receives both a short stdin prompt and a read-only directory built
+ * by the packet functions below. The generated AGENTS.md holds the long-lived
+ * behavioral contract; the other generated files hold bounded project state.
+ * See prompts/README.md for the exact call sites and lifecycle.
  */
 
+/**
+ * engine/engine.ts → decisionPoint(): stdin message for every ordinary
+ * between-round next-move call. The detailed legal/mathematical contract is
+ * NEXT_MOVE_CONTRACT in the generated AGENTS.md.
+ */
 export const DECISION_PROMPT =
   "Read every file in this directory and no parent-directory instructions. You are the Research Manager of a small mathematics working group: understand where the mathematics actually stands, continue or revise your current view, then choose one proportionate next step. " +
   "Before replying, check assignment references carefully: grants.artifactIds takes existing full write-up IDs; grants.cardIds takes only M-prefixed research-library note IDs; K-prefixed claim IDs are labels in the record and never belong in either grants list. " +
   "Reply with ONLY one JSON object conforming to the provided output schema (no prose, no fences).";
 
+/**
+ * Base stdin message for W000 generation. engine/engine.ts calls
+ * intakePrompt(false) at first start and explicit pre-confirmation regeneration.
+ * The production W000 call is offline and receives the full raw submission.
+ */
 export const INTAKE_PROMPT =
   `Read the complete raw intake materials in this directory. Think about them
 as a mathematician who understands the subject and will manage a group of
@@ -31,6 +45,7 @@ later choose and brief researchers.
 
 Reply with ONLY one JSON object conforming to the provided output schema.`;
 
+/** Adds the explicit literature-access policy to INTAKE_PROMPT. */
 export function intakePrompt(webSearch: boolean): string {
   return `${INTAKE_PROMPT}\n\n${
     webSearch
@@ -44,14 +59,23 @@ memory: mark the point as unverified and preserve the owner's intended meaning.`
   }`;
 }
 
+/**
+ * engine/engine.ts → runCuration(): stdin message after a research round
+ * closes. CURATION_CONTRACT and curationPacketFiles provide the real work.
+ */
 export const CURATION_PROMPT =
   "Read only the files in this directory. Assess the completed research round using its summary, full reports, earlier notes, and your previous mathematical view. Rewrite that view in your own mathematical voice, then decide explicitly which attempts deserve continuation, one precise follow-up, or no further time. " +
   "Reply with ONLY one JSON object conforming to the provided output schema.";
 
+/**
+ * engine/engine.ts → finalize(): stdin message for optional final prose
+ * composition after the result has already been determined in code.
+ */
 export const FINAL_PROMPT =
   "Compose the final report per AGENTS.md. " +
   "Reply with ONLY one JSON object conforming to the provided output schema.";
 
+/** Generated as AGENTS.md for an ordinary between-round decision call. */
 const NEXT_MOVE_CONTRACT = `# Choosing the next mathematical step
 
 You are the Research Manager of a small research group. Read the problem, your
@@ -228,6 +252,7 @@ ${TEX_LAYOUT_GUIDANCE}
 Reply with ONLY one JSON object per the output schema: set "action" and fill
 exactly that one field, all other action fields null.`;
 
+/** Generated as AGENTS.md for the initial or regenerated W000 reading. */
 const INTAKE_CONTRACT = `# Initial mathematical view
 
 This is a private reading pass by the Research Manager, not a research round.
@@ -268,6 +293,10 @@ ${TEX_LAYOUT_GUIDANCE}
 Because the reply is JSON, double every TeX backslash (for example
 \`\\\\frac\`, never \`\\frac\`) so JSON cannot turn it into a control character.`;
 
+/**
+ * Generated as AGENTS.md only for the legacy clarification-answer path; new
+ * W000 projects normally use direct human editing instead.
+ */
 const REVISION_CONTRACT = `# Revising the problem statement
 
 The owner has answered your questions. Rewrite the normalized statement so it
@@ -286,6 +315,7 @@ the statement.
 Write mathematics as LaTeX delimited by $ … $ inline and $$ … $$ for display;
 never \\( … \\) or \\[ … \\], which do not render for the reader.`;
 
+/** Generated as AGENTS.md for completed-round assessment and library revision. */
 const CURATION_CONTRACT = `# Assessing a completed research round
 
 Read the findings from the round, the complete reports, and the earlier
@@ -393,6 +423,7 @@ this vocabulary in the mathematical prose:
   schema field \`provenance\` records a concise source citation. Put the
   conclusion-only body of each condensation in \`conclusionsMarkdown\`.`;
 
+/** Generated as AGENTS.md for final-report composition. */
 const FINAL_CONTRACT = `# Final mathematical report
 
 Compose a standalone final report from the supplied mathematical record only.
@@ -688,6 +719,10 @@ export function ledgerSummary(state: ProjectState): string {
   return out.join("\n");
 }
 
+/**
+ * Builds the bounded file map written by runResearchManagerCall() for a
+ * next-move decision. Called only when no research round is open.
+ */
 export function decisionPacketFiles(
   state: ProjectState,
   extras: {
@@ -728,6 +763,7 @@ export function decisionPacketFiles(
   return files;
 }
 
+/** Builds the initial W000 directory before raw source files are copied in. */
 export function intakePacketFiles(statement: string, contextMarkdown: string): Record<string, string> {
   return {
     "AGENTS.md": INTAKE_CONTRACT,
@@ -736,6 +772,7 @@ export function intakePacketFiles(statement: string, contextMarkdown: string): R
   };
 }
 
+/** Stdin message for the legacy clarification-answer revision call. */
 export const REVISION_PROMPT =
   "Rewrite the normalized statement to incorporate the owner's answers per AGENTS.md. " +
   "Reply with ONLY one JSON object conforming to the provided output schema.";
@@ -757,6 +794,7 @@ export function revisionPacketFiles(
   };
 }
 
+/** Builds the file map for assessment immediately after a round closes. */
 export function curationPacketFiles(
   state: ProjectState,
   waveId: string,
@@ -806,6 +844,7 @@ export function intakeContextMarkdown(state: ProjectState): string | null {
   return out.join("\n");
 }
 
+/** Builds the final-composition file map after code has fixed the result. */
 export function finalPacketFiles(
   state: ProjectState,
   resultHint: string,

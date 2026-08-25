@@ -14,8 +14,8 @@ Rules for whoever (human or agent) picks this up:
 - Record every deliberate divergence from DESIGN.md in the deviation log
   at the bottom, with a reason.
 
-**Status: M0–M10 complete; M12 behavioral tuning, M13 selective rebase, M14 working-library curation, M15 single-controller Research Manager, M16 per-project model settings, M17 verbatim intake/editable W000, and M18 intake-summary discipline/project Web search are green. The Research Manager now carries a recurrent mathematical view between rounds, owns research judgment and library organization, can inspect the working library and original intake sources on demand, may direct up to eight research workers per round, and uses separately budgeted rigorous synthesis. 279 tests pass (schema 26, conductor 137, UI 95, codex-sim 21), all three TypeScript packages typecheck, and the production UI builds. An isolated migration audit of every computation present in the active genus-2 project at the final snapshot repaired 32/32 baselines: every command exited 0 and every pristine rerun matched exactly. The revised lifecycle also established one substantive scoped theorem after two independent PASS reviews, while retiring 66 unsupported leads and preserving four unresolved background leads. Remaining before the first milestone commit: owner review of the four explicitly marked draft voice examples and optional M11 polish. Do not commit until the owner explicitly asks.**
-Last updated: 2026-08-25 by Codex (task Notes projection and compatibility guard).
+**Status: M0–M10 complete; M12 behavioral tuning, M13 selective rebase, M14 working-library curation, M15 single-controller Research Manager, M16 per-project model settings, M17 verbatim intake/editable W000, M18 intake-summary discipline/project Web search, and M19 central prompt architecture are green. The Research Manager now carries a recurrent mathematical view between rounds, owns research judgment and library organization, can inspect the working library and original intake sources on demand, may direct up to eight research workers per round, and uses separately budgeted rigorous synthesis. 281 tests pass (schema 26, conductor 139, UI 95, codex-sim 21), all three TypeScript packages typecheck, and the production UI builds. An isolated migration audit of every computation present in the active genus-2 project at the final snapshot repaired 32/32 baselines: every command exited 0 and every pristine rerun matched exactly. The revised lifecycle also established one substantive scoped theorem after two independent PASS reviews, while retiring 66 unsupported leads and preserving four unresolved background leads. The standalone repository has been released; remaining work is owner review of the four explicitly marked draft voice examples and optional M11 polish.**
+Last updated: 2026-08-25 by Codex (central prompt architecture).
 
 Quota note: work has been interrupted twice by Opus subagent quota limits. The
 tracker is the recovery point — check the milestone boxes, then
@@ -50,7 +50,7 @@ where things stand before writing code.
 - [x] `src/store/eventLog.ts`: fsync append, torn-tail tolerance, seq-gap/corruption rejection, validate-before-append
 - [x] `src/store/projectStore.ts`: layout, atomic writes, project.json, slug listing (+ decisions/ dir)
 - [x] `src/engine/engine.ts`: ProjectEngine — sequential protocol loop (intake→confirm→decision→wave→curation→acceptance→final), gates (pause/blocking questions/gated decisions), recovery via replay + stale-task resume
-- [x] `src/engine/packets.ts`: jail composer — copies only, symlinks never followed, seal violations throw, mount excludes + size caps; `contracts.ts`: role contracts + AGENTS.md/assignment.md generation
+- [x] `src/engine/packets.ts`: jail composer — copies only, symlinks never followed, seal violations throw, mount excludes + size caps; `src/prompts/workers.ts`: role contracts + AGENTS.md/research-question.md generation
 - [x] `src/engine/pool.ts` worker pool; soft/hard interrupts; estimator budget + wall-clock enforcement
 - [x] `src/engine/docket.ts` mechanical docket with dedup + author-neutral claims (unit tested)
 - [x] `src/engine/validate.ts` action validation table; `acceptance.ts` predicate; `computations.ts` record/reproduce
@@ -178,7 +178,7 @@ approval, but approval policy is never`. 57 curated cards, none ever readable.
 A probe (`packages/conductor/scripts/probe-mcp-approval.ts`) showed no
 `mcp_servers.<n>.approval_mode` value fixes it under non-interactive `exec`.
 
-Fix: the catalog now travels **inside the packet** as `memory-index.md`,
+Fix: the catalog now travels **inside the packet** as `research-library-index.md`,
 role-filtered by the Conductor (reviewers see only VERIFIED; quarantined rows
 render as explicit warnings; PENDING current-wave cards never appear), exactly
 the file-based protocol PROTOCOL §7 already specifies as the fallback. MCP
@@ -200,14 +200,14 @@ statement it establishes.
   `CandidateState.scope`.
 - The acceptance predicate refuses a scoped candidate by construction, so a
   partial result can never be mistaken for a solution.
-- Reviewers of a scoped candidate are told the scope in `assignment.md` and
+- Reviewers of a scoped candidate are told the scope in `research-question.md` and
   instructed to judge against it: failing it for not proving more is wrong,
   and so is letting it overreach or letting the scope be written to match a
   weaker argument (a CRITICAL issue either way).
-- The Planner contract now pushes for this ("the usual case in research… do
+- The Research Manager contract now pushes for this ("the usual case in research… do
   not wait for the whole problem to fall") and `terminate` asks explicitly
   whether anything provable is being left unreviewed.
-- `ledger.md` marks a scoped candidate with 2 PASS and no open issues as a
+- `current-record.md` marks a scoped candidate with 2 PASS and no open issues as a
   VERIFIED PARTIAL RESULT; the final packet carries a "Verified partial
   results" section, and the final contract demands three visibly distinct
   tiers: verified-by-review, asserted-but-unreviewed, and conjecture.
@@ -237,7 +237,7 @@ run with internet material must be a deliberate choice:
 - `PlannedTask.webSearch` / `RosterEntry.webSearch` grants it per task;
 - the validator rejects any grant when the project has it off, with a message
   telling the Planner to use the owner's supplied sources instead;
-- `ledger.md` states availability so the Planner never proposes an illegal
+- `current-record.md` states availability so the Research Manager never proposes an illegal
   grant blindly;
 - the worker contract says a search result is a citation needing precise
   provenance, never a proof, and never a substitute for its own reasoning;
@@ -630,6 +630,26 @@ follow-up, and stopping.
 - [x] Full repository verification: 275 tests (schema 26, conductor 136,
       UI 92, codex-sim 21), all package typechecks, production UI build, diff
       whitespace check, and source control-character scan.
+
+## M19 — Central prompt architecture (2026-08-25)
+
+- [x] Put all deliberate runtime model instructions under
+      `packages/conductor/src/prompts/`: Research Manager contracts and
+      context composition, worker roles and assignment composition, shared
+      mathematical-writing guidance, voice examples, operational recovery
+      turns, model-visible MCP tool descriptions, and manual diagnostic
+      prompts.
+- [x] Add a maintainer guide that maps every prompt layer to its direct code
+      consumer, exact lifecycle condition, generated packet files, output
+      schema, retry path, and deterministic enforcement boundary.
+- [x] Keep shared Zod output schemas with `packages/schema` and project evidence
+      with its deterministic builders; document why these are inputs to the
+      effective prompt without being reusable behavioral prompt prose.
+- [x] Add a regression test that detects production prompt literals outside
+      the central directory and requires every prompt module to appear in the
+      maintainer guide.
+- [x] Full repository verification: 281 tests (schema 26, conductor 139,
+      UI 95, codex-sim 21), all package typechecks, and production UI build.
 
 ## M11 — Polish and hardening
 

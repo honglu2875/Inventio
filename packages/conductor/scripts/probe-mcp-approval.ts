@@ -14,6 +14,10 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { MemoryService } from "../src/memory/service.js";
 import { CardStore, FileMemoryBackend } from "../src/memory/cardStore.js";
+import {
+  MCP_APPROVAL_PROBE_AGENTS,
+  MCP_APPROVAL_PROBE_LAUNCH,
+} from "../src/prompts/diagnostics.js";
 
 /**
  * Each variant is a different way of asking Codex to let a sandboxed worker
@@ -60,8 +64,7 @@ async function main(): Promise<void> {
     const dir = mkdtempSync(path.join(os.tmpdir(), `probe-${mode.replace(/\W+/g, "-")}-`));
     writeFileSync(
       path.join(dir, "AGENTS.md"),
-      "Call the memory_search tool with query 'probe', then memory_expand on any id it returns, " +
-        "then reply with the exact marker string you found.",
+      MCP_APPROVAL_PROBE_AGENTS,
     );
     const before = recalls.length;
     const res = spawnSync(
@@ -75,7 +78,7 @@ async function main(): Promise<void> {
         "-",
       ],
       {
-        input: "Follow AGENTS.md. Report the marker string.",
+        input: MCP_APPROVAL_PROBE_LAUNCH,
         encoding: "utf8",
         timeout: 120_000,
         env: { ...process.env, INVENTIO_TASK_TOKEN: token },

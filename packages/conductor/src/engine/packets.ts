@@ -1,7 +1,7 @@
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { repairLegacyArtifactControls, type WorkerRole } from "@inventio/schema";
-import { renderAgentsMd, renderAssignmentMd } from "./contracts.js";
+import { renderAgentsMd, renderResearchQuestionMd } from "../prompts/workers.js";
 
 /**
  * Packet composer (DESIGN §7): the jail. Copies only — nothing in the packet
@@ -78,7 +78,7 @@ export function composePacket(spec: PacketSpec): ComposedPacket {
   const renderSpec = { ...spec, hasMemoryIndex: spec.memoryIndexMarkdown !== null };
 
   write("problem.md", spec.problemMarkdown);
-  write("research-question.md", renderAssignmentMd(renderSpec));
+  write("research-question.md", renderResearchQuestionMd(renderSpec));
   if (spec.intakeContextMarkdown != null) write("intake-context.md", spec.intakeContextMarkdown);
   if (spec.capsuleMarkdown !== null) write("research-notes.md", spec.capsuleMarkdown);
   if (spec.claimLedgerMarkdown !== null) write(path.join("references", "relevant-claims.md"), spec.claimLedgerMarkdown);

@@ -75,7 +75,17 @@ import {
   ledgerSummary,
   revisionPacketFiles,
   REVISION_PROMPT,
-} from "./planner.js";
+} from "../prompts/researchManager.js";
+import {
+  curationRetryNote,
+  focusedFollowUpPrompt,
+  freshWorkerReplacementPrompt,
+  nextMoveCallRetryNote,
+  rejectedNextMoveNote,
+  unusableWorkCorrectionPrompt,
+  workerLaunchPrompt,
+  workerRestartPrompt,
+} from "../prompts/operational.js";
 import { serializeCard } from "../memory/cardStore.js";
 import { returnedWorkProblems } from "./taskIntegrity.js";
 import type { MemoryCard, RecallRecord, TaskScope } from "../memory/types.js";
@@ -1020,9 +1030,7 @@ export class ProjectEngine extends EventEmitter {
           violations: [`next-move call ${attempt} did not complete: ${failure}`],
         });
         if (attempt < maxAttempts) {
-          files["retry-note.md"] =
-            `# Automatic retry\n\nThe previous next-move call did not complete (${failure}). ` +
-            "The mathematical record is unchanged. Read it afresh and choose the next move.";
+          files["retry-note.md"] = nextMoveCallRetryNote(failure);
           continue;
         }
         this.raiseBlocking(
@@ -1050,8 +1058,7 @@ export class ProjectEngine extends EventEmitter {
         );
         return;
       }
-      files["violations.md"] =
-        `# Your previous proposal was rejected\n\n${violations.map((v) => `- ${v}`).join("\n")}\n\nPropose a corrected action.`;
+      files["violations.md"] = rejectedNextMoveNote(violations);
     }
     if (!envelope) return;
 
@@ -1264,10 +1271,7 @@ export class ProjectEngine extends EventEmitter {
         {
           bin: this.deps.codexBin,
           cwd: path.join(dir, "packet"),
-          prompt:
-            `Focused mathematical follow-up (answer only what is asked; refer to IDs ${refIds.join(", ") || "n/a"}):\n\n` +
-            questionMarkdown +
-            `\n\nReply with ONLY a JSON object {"answerMarkdown": "..."}.`,
+          prompt: focusedFollowUpPrompt(refIds, questionMarkdown),
           sandbox: "read-only",
           resumeThreadId: task.threadId!,
           eventsArchiveFile: path.join(dir, "codex-events.jsonl"),
@@ -1433,6 +1437,9 @@ export class ProjectEngine extends EventEmitter {
         return acc;
       }
     }, 0);
+    // Packets created by current Inventio use research-question.md. Keep the
+    // assignment.md fallback solely so an in-flight task from an older project
+    // can resume after an upgrade; no current prompt composer writes that name.
     const questionFile = existsSync(path.join(packetDir, "research-question.md"))
       ? "research-question.md"
       : "assignment.md";
@@ -1443,8 +1450,8 @@ export class ProjectEngine extends EventEmitter {
         bin: this.deps.codexBin,
         cwd: packetDir,
         prompt: resuming
-          ? `The program restarted while you were working. Finish the question in ${questionFile} and reply with ONLY the required JSON object.`
-          : `Work on the question in ${questionFile}, following AGENTS.md.`,
+          ? workerRestartPrompt(questionFile)
+          : workerLaunchPrompt(questionFile),
         sandbox: (entry.computation ? "workspace-write" : "read-only") as SandboxMode,
         webSearch: entry.webSearch && this.state.config.allowWebSearch,
         eventsArchiveFile: path.join(taskDir, "codex-events.jsonl"),
@@ -1520,10 +1527,7 @@ export class ProjectEngine extends EventEmitter {
           result = await runWorker({
             ...runOptions,
             resumeThreadId,
-            prompt:
-              "Your previous return did not constitute usable mathematical work: " +
-              usabilityProblems.join("; ") +
-              ". You have everything available for this assignment in the current directory. Proceed now: do the mathematics, state an honest conclusion, and reply with ONLY the required JSON object. Do not ask for permission or more instructions.",
+            prompt: unusableWorkCorrectionPrompt(usabilityProblems),
           });
           usabilityProblems =
             result.status === "completed" && result.output
@@ -1544,8 +1548,7 @@ export class ProjectEngine extends EventEmitter {
         if (needsFreshWorker) {
           const freshOptions: RunCodexOptions = {
             ...runOptions,
-            prompt:
-              `Work on the question in ${questionFile}, following AGENTS.md. Earlier attempts did not produce usable mathematical work, so start independently from the files in this directory. Reply with ONLY the required JSON object; do not ask for permission or more instructions.`,
+            prompt: freshWorkerReplacementPrompt(questionFile),
           };
           delete freshOptions.resumeThreadId;
           result = await runWorker(freshOptions);
@@ -1984,10 +1987,7 @@ export class ProjectEngine extends EventEmitter {
       failure = violations.join("; ");
       this.emitEvent({ type: "decision.rejected", decisionId, violations });
       if (attempt < 2) {
-        files["retry-note.md"] =
-          "# Automatic retry\n\nThe previous assessment was incomplete:\n\n" +
-          violations.map((violation) => `- ${violation}`).join("\n") +
-          "\n\nRead the unchanged round record afresh and return a complete corrected result.";
+        files["retry-note.md"] = curationRetryNote(violations);
       }
     }
 

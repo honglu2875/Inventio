@@ -1,14 +1,14 @@
 import type { WorkerRole } from "@inventio/schema";
-
-/** Shared TeX rule for every model-authored mathematical surface. */
-export const TEX_LAYOUT_GUIDANCE =
-  "Inside an aligned, array, or similar multiline environment, never let " +
-  "\\left and \\right cross an & cell boundary or a \\\\ row boundary. " +
-  "Use fixed-size \\Bigl … \\Bigr delimiters on separate rows, or put the " +
-  "multiline body inside a nested gathered environment within one matching pair.";
+import { TEX_LAYOUT_GUIDANCE } from "./shared.js";
 
 /**
- * Role contracts delivered verbatim inside each packet's AGENTS.md
+ * Complete worker prompt surface. ProjectEngine asks engine/packets.ts to
+ * compose a task directory, and that composer calls renderAgentsMd and
+ * renderResearchQuestionMd below. The resulting AGENTS.md and research-question.md
+ * are the substantive worker instructions; engine.ts sends only a short
+ * launch message telling Codex to read them. See prompts/README.md.
+ *
+ * Role contracts are delivered verbatim inside each packet's AGENTS.md
  * (PROTOCOL.md §3, condensed to be self-contained; workers never see the
  * whole constitution).
  */
@@ -104,6 +104,10 @@ export interface PacketRenderSpec {
   memoryToolsAvailable: boolean;
 }
 
+/**
+ * engine/packets.ts calls this at first dispatch and writes the result to the
+ * task directory as AGENTS.md. Codex auto-discovers it for worker calls.
+ */
 export function renderAgentsMd(spec: PacketRenderSpec, manifest: string[]): string {
   const out: string[] = [];
   out.push(`# Research assignment — ${spec.taskId} (${spec.role})`, "");
@@ -206,7 +210,12 @@ export function renderAgentsMd(spec: PacketRenderSpec, manifest: string[]): stri
   return out.join("\n");
 }
 
-export function renderAssignmentMd(spec: PacketRenderSpec): string {
+/**
+ * engine/packets.ts calls this at first dispatch and writes
+ * research-question.md. The Research Manager's briefMarkdown is inserted
+ * verbatim under the deterministic scope, budget, and reviewer framing.
+ */
+export function renderResearchQuestionMd(spec: PacketRenderSpec): string {
   const out: string[] = [];
   out.push(`# Research question — ${spec.taskId}`, "");
   out.push(`- Role: ${spec.role}`);

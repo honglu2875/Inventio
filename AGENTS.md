@@ -21,6 +21,9 @@ When changing this repository:
 5. Keep mathematical artifacts in ordinary academic language. Internal code
    may use precise engineering terminology, but model prompts and generated
    research notes should speak like mathematicians rather than workflow tools.
+   Keep deliberate model-facing instructions under
+   `packages/conductor/src/prompts/`, and update that directory's `README.md`
+   whenever a model call, prompt layer, or lifecycle condition changes.
 6. Use `packages/codex-sim` for development and tests. Do not spend real model
    quota unless the user explicitly requests a live research run or smoke test.
 7. Preserve unrelated working-tree changes and never commit generated

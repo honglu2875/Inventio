@@ -13,15 +13,16 @@ import { EventLog } from "../src/store/eventLog.js";
 import { createProjectDirs, listProjectSlugs, projectPaths, writeFileAtomic, writeProjectFile, readProjectFile, defaultProjectFile } from "../src/store/projectStore.js";
 import { WorkerPool } from "../src/engine/pool.js";
 import { buildDocket } from "../src/engine/docket.js";
-import { renderAgentsMd, TEX_LAYOUT_GUIDANCE } from "../src/engine/contracts.js";
+import { renderAgentsMd } from "../src/prompts/workers.js";
+import { TEX_LAYOUT_GUIDANCE } from "../src/prompts/shared.js";
 import { composePacket, SealViolationError, type PacketSpec } from "../src/engine/packets.js";
 import {
   curationPacketFiles,
   decisionPacketFiles,
   finalPacketFiles,
   intakePacketFiles,
-} from "../src/engine/planner.js";
-import { RESEARCH_MANAGER_EXAMPLES } from "../src/engine/managerExamples.js";
+} from "../src/prompts/researchManager.js";
+import { RESEARCH_MANAGER_EXAMPLES } from "../src/prompts/managerExamples.js";
 import { validateAction } from "../src/engine/validate.js";
 
 const tmp = () => mkdtempSync(path.join(os.tmpdir(), "collq-core-"));

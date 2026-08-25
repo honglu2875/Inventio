@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { runCodex } from "../src/codex/runner.js";
 import { runStructured } from "../src/codex/structured.js";
+import { workerLaunchPrompt } from "../src/prompts/operational.js";
 
 const SIM_BIN = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -45,7 +46,7 @@ function setup(calls: ScenarioCall[]) {
     baseOpts: {
       bin: SIM_BIN,
       cwd: dir,
-      prompt: "Execute assignment.md in this directory.",
+      prompt: workerLaunchPrompt("research-question.md"),
       sandbox: "read-only" as const,
       eventsArchiveFile: path.join(dir, "archive", "codex-events.jsonl"),
       outputLastMessageFile: path.join(dir, "last-message.json"),

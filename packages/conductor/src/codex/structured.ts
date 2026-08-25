@@ -11,6 +11,10 @@ import {
   type RunCodexResult,
 } from "./runner.js";
 import { parseModelJson } from "./modelJson.js";
+import {
+  PROCESS_FAILURE_RESUME_PROMPT,
+  structuredOutputRepairPrompt,
+} from "../prompts/operational.js";
 
 /**
  * Structured execution with the DESIGN §14 retry policy:
@@ -70,8 +74,7 @@ export async function runStructured<T>(
       attempt = await doRun({
         ...opts,
         resumeThreadId: attempt.threadId,
-        prompt:
-          "Your previous process ended unexpectedly. Finish the assignment now and reply with ONLY the required JSON object.",
+        prompt: PROCESS_FAILURE_RESUME_PROMPT,
       });
     }
   }
@@ -105,10 +108,7 @@ export async function runStructured<T>(
       attempt = await doRun({
         ...opts,
         resumeThreadId: attempt.threadId,
-        prompt:
-          `Your final message did not validate against the required output schema. ` +
-          `Errors:\n${parsed.errors.map((e) => `- ${e}`).join("\n")}\n` +
-          `Reply with ONLY the corrected JSON object, no prose, no code fences.`,
+        prompt: structuredOutputRepairPrompt(parsed.errors),
       });
       if (attempt.status === "completed") {
         parsed = parseOutput(opts, attempt, schema);

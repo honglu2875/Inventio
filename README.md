@@ -21,6 +21,7 @@ condition holds. `UNCERTAIN` is a valid and often correct outcome.
 | `PROTOCOL.md` | The constitution: epistemic invariants, role contracts, acceptance rules. Read this first. |
 | `DESIGN.md` | The engineering spec: architecture, event model, state machine, packets, API. |
 | `packages/ui/UI-SPEC.md` | The binding UI design: views, node chrome, tokens, interactions. |
+| `packages/conductor/src/prompts/README.md` | Prompt architecture: every model-facing instruction, call site, and lifecycle condition. |
 | `PLAN.md` | Milestone tracker and deviation log — the recovery point if work is interrupted. |
 
 ## How it works

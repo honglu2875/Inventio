@@ -41,7 +41,7 @@ export const SIM_BIN = path.resolve(
   "../../../codex-sim/bin/codex-sim.mjs",
 );
 
-/** Prompt discriminators — must match packages/conductor/src/engine/planner.ts. */
+/** Prompt discriminators — must match packages/conductor/src/prompts/researchManager.ts. */
 export const INTAKE_MATCH = "Read the complete raw intake materials";
 export const DECISION_MATCH = "choose one proportionate next step";
 export const CURATION_MATCH = "Assess the completed research round";
