@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "An evidence-first multi-agent research environment for difficult mathematics.",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+ssh://git@github.com/honglu2875/Inventio.git"

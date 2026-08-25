@@ -187,3 +187,7 @@ their own packet when a computation needs scratch space), with no approval
 prompts. Network access is absent by default; a worker gets the native Web
 search tool only when both the project setting and its individual assignment
 permit it. Shell/network escalation remains impossible rather than deniable.
+
+## License
+
+Inventio is available under the [MIT License](LICENSE).
