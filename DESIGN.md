@@ -108,10 +108,10 @@ projects/<slug>/
 ├── events.jsonl           # append-only operational truth (one JSON event per line)
 ├── problem.md             # confirmed normalized statement; immutable after confirmation
 ├── intake/
-│   ├── original-objective.md            # verbatim owner input
-│   ├── original-background.md           # verbatim, when supplied
+│   ├── original-objective.md            # current verbatim owner input before confirmation
+│   ├── original-background.md           # current verbatim background before confirmation
 │   └── sources.json                      # S### catalog, hashes, short descriptions
-├── sources/               # immutable-after-W000 owner uploads
+├── sources/               # owner uploads; retained intake becomes immutable after confirmation
 ├── digest.md              # Conductor-owned rolling digest (regenerated at each curation)
 ├── artifacts/
 │   ├── attempts/A001.md
@@ -157,6 +157,8 @@ Lifecycle & phases
 - `terminal.reached { result: "PROVED"|"DISPROVED"|"UNCERTAIN", finalPath }`
 
 Intake & human channel
+- `intake.rawUpdated { statement, contextMarkdown, by }` (explicit owner
+  revision before W000 is accepted; earlier values remain in the event log)
 - `intake.sourcesUpdated { sources: IntakeSource[] }` (verbatim path, size,
   SHA-256, short abstract, and conclusion-oriented excerpt)
 - `intake.completed { problemMarkdown, ...legacyCompatibilityFields }`
@@ -516,10 +518,12 @@ actions. The process is fresh, but the explicit current note makes its
 intellectual state recurrent and replayable. A project-scoped bearer token
 also grants `memory_search` and `memory_expand`; the Manager can inspect a
 few full older notes on demand without placing the entire archive in every
-prompt. The initial W000 call instead receives the complete owner submission:
+prompt. The initial W000 call, and any owner-requested regeneration before
+confirmation, instead receives the complete current owner submission:
 verbatim objective and background, every project-local upload, a hash-bearing
 source index, and read-only `source_list` / `source_open` tools for bounded
-expansion of long text and PDFs. It is told only to understand the material as
+expansion of long text and PDFs. The submission is held fixed for the duration
+of each call. It is told only to understand the material as
 a mathematician preparing to manage the research, preserve the exact meaning
 of named methods, and write its present view—not to solve, plan a round,
 manufacture a taxonomy, or question the owner. The default Manager model is
@@ -730,10 +734,13 @@ cached by artifact id + seq.
 - **Intake gate**: creation first stores the raw objective, background, and
   uploads without launching a model. Next, the Research Manager drafts
   `W000 · Current mathematical view`. `AWAITING_CONFIRMATION` shows its
-  one-to-four-sentence abstract and full Markdown in direct editors beside a
-  rendered preview. The original S### catalog remains expandable below.
-  Accepting the edit starts discovery; there is no questionnaire or intake
-  chat.
+  one-or-two-sentence abstract and full Markdown in direct editors beside a
+  rendered preview. The S### catalog remains expandable below. The owner may
+  reopen the raw objective, background, and file list, revise them, and ask the
+  Manager to regenerate W000; a raw revision makes the earlier W000 visibly
+  stale and unconfirmable until regeneration succeeds. Accepting the edit
+  starts discovery and locks the retained intake; there is no questionnaire or
+  intake chat.
 
 ### 11.8 Visual language
 
@@ -763,8 +770,9 @@ validated; artifact reads path-confined to the project directory.
 | GET  | `/api/projects/:slug/tasks/:id/packet/*` | packet file viewer |
 | GET  | `/api/projects/:slug/tasks/:id/stream` | SSE codex item tail (archive replay + live) |
 | GET/POST | `/api/projects/:slug/sources[/:name]` | list/open or upload owner intake files |
-| DELETE | `/api/projects/:slug/sources/:name` | remove an upload before it becomes retained intake |
-| POST | `/api/projects/:slug/regenerate-intake` | regenerate W000 from unchanged originals |
+| DELETE | `/api/projects/:slug/sources/:name` | remove an upload; retained intake files are replaceable/removable only before confirmation |
+| POST | `/api/projects/:slug/raw-intake` | save a pre-confirmation `{ statement, contextMarkdown }` revision and refresh its source index |
+| POST | `/api/projects/:slug/regenerate-intake` | regenerate W000 from the current raw submission |
 | POST | `/api/projects/:slug/confirm-problem` | `{ problemMarkdown, managerAbstract, managerNoteMarkdown }` — save edited W000 and begin research |
 | POST | `/api/projects/:slug/start` \| `pause` \| `resume` | lifecycle |
 | POST | `/api/projects/:slug/autonomy` | `{ mode: "auto"\|"gated" }` |

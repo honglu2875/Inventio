@@ -81,6 +81,11 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
       return state;
 
     // ---- intake & human channel -----------------------------------------
+    case "intake.rawUpdated":
+      state.statement = event.statement;
+      state.contextMarkdown = event.contextMarkdown;
+      state.problem.rawUpdatedAtSeq = event.seq;
+      return state;
     case "intake.completed":
       state.problem.normalizedMarkdown = event.problemMarkdown;
       state.problem.contextDigestMarkdown = event.contextDigestMarkdown ?? "";
@@ -88,9 +93,15 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
       state.problem.ambiguities = event.ambiguities;
       state.problem.clarifications = event.clarifications;
       return state;
-    case "intake.sourcesUpdated":
+    case "intake.sourcesUpdated": {
+      const signature = (sources: typeof event.sources): string =>
+        sources.map((source) => `${source.id}\0${source.kind}\0${source.relativePath}\0${source.sha256}`).join("\n");
+      if (signature(state.problem.sources) !== signature(event.sources)) {
+        state.problem.rawUpdatedAtSeq = event.seq;
+      }
       state.problem.sources = event.sources.map((source) => ({ ...source }));
       return state;
+    }
     case "intake.answered":
       for (const a of event.answers) state.problem.answers[a.id] = a.answer;
       return state;

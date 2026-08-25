@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   INTAKE_ABSTRACT_MAX_CHARS,
   type IntakeSource,
@@ -59,18 +59,45 @@ function SourceCatalog({ slug, state }: { slug: string; state: ProjectState }): 
   );
 }
 
-function DraftIntake({ slug, state }: { slug: string; state: ProjectState }): JSX.Element {
+function RawIntakeEditor({
+  slug,
+  state,
+  onBack,
+  onGenerated,
+}: {
+  slug: string;
+  state: ProjectState;
+  onBack?: () => void;
+  onGenerated?: () => void;
+}): JSX.Element {
   const run = useApiAction();
   const guard = useActionGuard(slug);
-  const [starting, setStarting] = useState(false);
+  const [statement, setStatement] = useState(state.statement);
+  const [contextMarkdown, setContextMarkdown] = useState(state.contextMarkdown);
+  const [working, setWorking] = useState(false);
+  const [sourceBusy, setSourceBusy] = useState(false);
+  const [filesChanged, setFilesChanged] = useState(false);
+  const isFirstReading = state.phase === "CREATED";
+  const textChanged = statement !== state.statement || contextMarkdown !== state.contextMarkdown;
+  const valid = statement.trim() !== "";
+  const markFilesChanged = useCallback(() => setFilesChanged(true), []);
 
-  const start = async (): Promise<void> => {
-    if (starting || guard.disabled) return;
-    setStarting(true);
+  const saveAndGenerate = async (): Promise<void> => {
+    if (!valid || working || sourceBusy || guard.disabled) return;
+    setWorking(true);
     try {
-      await run(() => api.start(slug), "Research Manager is reading the submitted materials");
+      const result = await run(
+        async () => {
+          await api.updateRawIntake(slug, statement, contextMarkdown);
+          return isFirstReading ? api.start(slug) : api.regenerateIntake(slug);
+        },
+        isFirstReading
+          ? "Raw intake saved — Research Manager is drafting W000"
+          : "Raw intake saved — W000 regenerated from the revised materials",
+      );
+      if (result !== null) onGenerated?.();
     } finally {
-      setStarting(false);
+      setWorking(false);
     }
   };
 
@@ -79,40 +106,100 @@ function DraftIntake({ slug, state }: { slug: string; state: ProjectState }): JS
       <header className="section-header intake-header">
         <div>
           <span className="eyebrow">Raw intake</span>
-          <h1 id="intake-draft-title">Check the submitted materials</h1>
-          <p>Everything here is stored before the Research Manager reads it. Add or correct files, then generate W000.</p>
+          <h1 id="intake-draft-title">
+            {isFirstReading ? "Check the submitted materials" : "Revise the original materials"}
+          </h1>
+          <p>
+            {isFirstReading
+              ? "Everything here is stored before the Research Manager reads it. Revise the text or files, then generate W000."
+              : "Revise what the Research Manager should treat as the original submission, then generate a fresh W000."}
+          </p>
         </div>
       </header>
       <div className="intake-raw-grid">
         <article className="intake-pane">
-          <h2>Original objective</h2>
-          <pre className="statement-source">{state.statement}</pre>
-          {state.contextMarkdown ? (
-            <>
-              <h2>Background and ideas</h2>
-              <pre className="statement-source">{state.contextMarkdown}</pre>
-            </>
-          ) : null}
+          <label className="field">
+            <span className="field-label">Objective</span>
+            <textarea
+              className="raw-intake-textarea"
+              maxLength={100_000}
+              value={statement}
+              disabled={working}
+              spellCheck={false}
+              onChange={(event) => setStatement(event.target.value)}
+              aria-label="Raw mathematical objective"
+            />
+            {!valid ? <span className="field-error">The objective cannot be empty.</span> : null}
+          </label>
+          <label className="field">
+            <span className="field-label">Background, literature, and existing ideas <em>(optional)</em></span>
+            <textarea
+              className="raw-intake-textarea background"
+              maxLength={300_000}
+              value={contextMarkdown}
+              disabled={working}
+              spellCheck={false}
+              onChange={(event) => setContextMarkdown(event.target.value)}
+              aria-label="Raw background, literature, and existing ideas"
+            />
+          </label>
         </article>
         <article className="intake-pane">
           <h2>Supplementary files</h2>
-          <SourceDropzone slug={slug} />
+          <p className="muted small">
+            Before W000 is accepted, retained files may be replaced under the same name or removed.
+            File changes are saved immediately and recorded in the next source index.
+          </p>
+          <SourceDropzone
+            slug={slug}
+            disabled={working}
+            disabledReason="Wait for W000 generation to finish"
+            onBusyChange={setSourceBusy}
+            onFilesChanged={markFilesChanged}
+          />
         </article>
       </div>
       <footer className="intake-actions">
-        <span className="muted small">No model has read or summarized these materials yet.</span>
-        <button
-          type="button"
-          className="button primary"
-          disabled={starting || guard.disabled}
-          {...(guard.title === undefined ? {} : { title: guard.title })}
-          onClick={() => void start()}
-        >
-          {starting ? "Starting…" : "Generate W000"}
-        </button>
+        <span className="muted small">
+          {sourceBusy
+            ? "Wait for the current file upload to finish."
+            : textChanged || filesChanged
+              ? "The revised materials will replace the current basis for W000."
+              : isFirstReading
+                ? "No model has read or summarized these materials yet."
+                : "Nothing has been changed yet."}
+        </span>
+        <div className="intake-action-buttons">
+          {onBack === undefined ? null : (
+            <button
+              type="button"
+              className="button ghost"
+              disabled={working || sourceBusy}
+              onClick={onBack}
+              title={filesChanged ? "File changes are already saved; regenerate W000 before accepting it" : "Return without saving text edits"}
+            >
+              Back to W000
+            </button>
+          )}
+          <button
+            type="button"
+            className="button primary"
+            disabled={!valid || working || sourceBusy || guard.disabled}
+            {...(guard.title === undefined ? {} : { title: guard.title })}
+            onClick={() => void saveAndGenerate()}
+          >
+            {working
+              ? (isFirstReading ? "Generating…" : "Regenerating…")
+              : (isFirstReading ? "Generate W000" : "Save & regenerate W000")}
+          </button>
+        </div>
       </footer>
     </section>
   );
+}
+
+function DraftIntake(props: { slug: string; state: ProjectState }): JSX.Element {
+  return <RawIntakeEditor {...props} />;
 }
 
 /** One Research Manager draft, directly editable before discovery begins. */
@@ -126,6 +213,7 @@ function W000Review({ slug, state }: { slug: string; state: ProjectState }): JSX
   const [markdown, setMarkdown] = useState(initialMarkdown);
   const [submitting, setSubmitting] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [editingRaw, setEditingRaw] = useState(false);
   const guard = useActionGuard(slug);
   const run = useApiAction();
   const managerModel = state.config.models.researchManager;
@@ -134,6 +222,7 @@ function W000Review({ slug, state }: { slug: string; state: ProjectState }): JSX
   const problemMarkdown = state.problem.normalizedMarkdown ?? state.statement;
   const dirty = abstract.trim() !== initialAbstract.trim() || markdown.trim() !== initialMarkdown.trim();
   const abstractTooLong = abstract.length > INTAKE_ABSTRACT_MAX_CHARS;
+  const rawChangedAfterW000 = (w000?.recordedAtSeq ?? 0) < state.problem.rawUpdatedAtSeq;
 
   useEffect(() => {
     setAbstract(initialAbstract);
@@ -143,7 +232,7 @@ function W000Review({ slug, state }: { slug: string; state: ProjectState }): JSX
   }, [version]);
 
   const confirm = async (): Promise<void> => {
-    if (abstractTooLong || markdown.trim() === "" || submitting || regenerating || guard.disabled) return;
+    if (rawChangedAfterW000 || abstractTooLong || markdown.trim() === "" || submitting || regenerating || guard.disabled) return;
     setSubmitting(true);
     try {
       await run(
@@ -171,6 +260,17 @@ function W000Review({ slug, state }: { slug: string; state: ProjectState }): JSX
       setRegenerating(false);
     }
   };
+
+  if (editingRaw) {
+    return (
+      <RawIntakeEditor
+        slug={slug}
+        state={state}
+        onBack={() => setEditingRaw(false)}
+        onGenerated={() => setEditingRaw(false)}
+      />
+    );
+  }
 
   return (
     <section className="intake-confirm w000-review" aria-labelledby="w000-title">
@@ -236,20 +336,37 @@ function W000Review({ slug, state }: { slug: string; state: ProjectState }): JSX
         <SourceCatalog slug={slug} state={state} />
       </section>
 
+      {rawChangedAfterW000 ? (
+        <div className="banner warn w000-stale-warning">
+          The raw objective, background, or files changed after this W000 was written. Regenerate W000 before beginning research.
+        </div>
+      ) : null}
+
       <footer className="intake-actions">
-        <button
-          type="button"
-          className="button"
-          disabled={submitting || regenerating || guard.disabled}
-          title={dirty ? "Regeneration replaces your unsaved edits" : (guard.title ?? "Read the original materials again")}
-          onClick={() => void regenerate()}
-        >
-          {regenerating ? "Regenerating…" : "Regenerate from originals"}
-        </button>
+        <div className="intake-action-buttons">
+          <button
+            type="button"
+            className="button ghost"
+            disabled={submitting || regenerating || guard.disabled}
+            title={dirty ? "Your local W000 edits remain until you regenerate" : "Revise the objective, background, or files"}
+            onClick={() => setEditingRaw(true)}
+          >
+            Edit raw input
+          </button>
+          <button
+            type="button"
+            className="button"
+            disabled={submitting || regenerating || guard.disabled}
+            title={dirty ? "Regeneration replaces your unsaved edits" : (guard.title ?? "Read the original materials again")}
+            onClick={() => void regenerate()}
+          >
+            {regenerating ? "Regenerating…" : "Regenerate from originals"}
+          </button>
+        </div>
         <button
           type="button"
           className="button primary"
-          disabled={abstractTooLong || markdown.trim() === "" || submitting || regenerating || guard.disabled}
+          disabled={rawChangedAfterW000 || abstractTooLong || markdown.trim() === "" || submitting || regenerating || guard.disabled}
           {...(guard.title === undefined ? {} : { title: guard.title })}
           onClick={() => void confirm()}
         >

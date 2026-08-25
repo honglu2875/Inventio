@@ -125,7 +125,8 @@ describe("reducer", () => {
 
   it("preserves the original intake context and the owner's edited digest and raw memories", () => {
     const state = replay(initialState(), buildCanonicalEvents());
-    expect(state.contextMarkdown).toContain("long literature note");
+    expect(state.statement).toBe("Prove that P, keeping every hypothesis explicit.");
+    expect(state.contextMarkdown).toContain("revised long literature note");
     expect(state.problem.contextDigestMarkdown).toContain("explicitly unverified");
     expect(state.problem.rawMemories).toHaveLength(1);
     expect(state.problem.rawMemories[0]).toMatchObject({
@@ -158,6 +159,47 @@ describe("reducer", () => {
     expect(state.researchManagerNotes).toHaveLength(1);
     expect(state.researchManagerNotes[0]?.markdown).toBe("A corrected current view.");
     expect(state.researchManagerNotes[0]?.recordedAt).toBe("later");
+  });
+
+  it("marks changed raw source bytes stale but not a summary-only catalog update", () => {
+    const state = initialState();
+    applyEvent(state, {
+      seq: 1,
+      ts: "created",
+      type: "project.created",
+      slug: "raw-revision",
+      title: "Raw revision",
+      statement: "Prove P.",
+      config: defaultConfig(),
+    });
+    const source = {
+      id: "S001",
+      kind: "objective" as const,
+      title: "Original objective",
+      relativePath: "intake/original-objective.md",
+      size: 8,
+      sha256: "0".repeat(64),
+      abstract: "Original summary.",
+      excerptMarkdown: "",
+    };
+    applyEvent(state, { seq: 2, ts: "indexed", type: "intake.sourcesUpdated", sources: [source] });
+    expect(state.problem.rawUpdatedAtSeq).toBe(2);
+
+    applyEvent(state, {
+      seq: 3,
+      ts: "summarized",
+      type: "intake.sourcesUpdated",
+      sources: [{ ...source, abstract: "A better catalog summary." }],
+    });
+    expect(state.problem.rawUpdatedAtSeq).toBe(2);
+
+    applyEvent(state, {
+      seq: 4,
+      ts: "revised",
+      type: "intake.sourcesUpdated",
+      sources: [{ ...source, sha256: "1".repeat(64) }],
+    });
+    expect(state.problem.rawUpdatedAtSeq).toBe(4);
   });
 
   it("preserves stopping history when the owner continues research", () => {

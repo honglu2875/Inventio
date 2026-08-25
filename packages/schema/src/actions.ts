@@ -201,7 +201,7 @@ export const IntakeOutput = z.object({
   managerAbstract: CompleteSingleParagraphAbstract.default(""),
   /** The Research Manager's free-form initial mathematical view. */
   managerNoteMarkdown: z.string().max(16_000).default(""),
-  /** Short catalog entries for the immutable raw materials. */
+  /** Short catalog entries for the raw materials fixed for this W000 call. */
   sourceSummaries: z.array(
     z.object({
       sourceId: z.string(),

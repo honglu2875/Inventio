@@ -950,7 +950,7 @@ describe("source uploads", () => {
     });
 
   it("parks creation until uploads finish, then gives retained originals to W000", async () => {
-    const h = harness(1);
+    const h = harness(2);
     const created = await createProject(h.app, {
       title: "Deferred intake",
       statement: "Understand the DNC localization argument.",
@@ -979,9 +979,101 @@ describe("source uploads", () => {
     const opened = await h.app.inject({ method: "GET", url: `${uploadUrl(slug)}/dnc-notes.md` });
     expect(opened.statusCode).toBe(200);
     expect(opened.body).toBe("# DNC master space\n");
-    expect((await upload(h, slug, "dnc-notes.md", "replacement")).statusCode).toBe(409);
+    // W000 is still a preview: explicit raw-input editing may replace its file.
+    expect((await upload(h, slug, "dnc-notes.md", "replacement")).statusCode).toBe(201);
+    expect(engine.state.problem.sources.find((source) => source.title === "dnc-notes.md")?.excerptMarkdown).toBe("");
+    expect((await h.app.inject({
+      method: "POST",
+      url: `/api/projects/${slug}/regenerate-intake`,
+    })).statusCode).toBe(200);
+
+    const confirmed = await h.app.inject({
+      method: "POST",
+      url: `/api/projects/${slug}/confirm-problem`,
+      payload: { problemMarkdown: "# Confirmed\n\nUnderstand DNC localization." },
+    });
+    expect(confirmed.statusCode).toBe(200);
+    expect((await upload(h, slug, "dnc-notes.md", "too late")).statusCode).toBe(409);
     expect((await h.app.inject({ method: "DELETE", url: `${uploadUrl(slug)}/dnc-notes.md` })).statusCode).toBe(409);
+    expect((await h.app.inject({
+      method: "POST",
+      url: `/api/projects/${slug}/raw-intake`,
+      payload: { statement: "A late rewrite.", contextMarkdown: "" },
+    })).statusCode).toBe(409);
   }, 20_000);
+
+  it("revises raw text and retained files, then regenerates W000 from exactly those materials", async () => {
+    const h = harness(2);
+    const created = await createProject(h.app, {
+      title: "Revisable intake",
+      statement: "Prove the first formulation.",
+      contextMarkdown: "An obsolete approach.",
+      start: false,
+    });
+    const slug = created.json["slug"] as string;
+    const engine = h.manager.get(slug)!;
+    expect((await upload(h, slug, "notes.md", "old file")).statusCode).toBe(201);
+    expect((await h.app.inject({ method: "POST", url: `/api/projects/${slug}/start` })).statusCode).toBe(200);
+    await waitFor(() => engine.state.phase === "AWAITING_CONFIRMATION");
+
+    const firstW000Seq = engine.state.researchManagerNotes.find((note) => note.waveId === "W000")!.recordedAtSeq;
+    const firstUploadHash = engine.state.problem.sources.find((source) => source.title === "notes.md")!.sha256;
+    const revised = await h.app.inject({
+      method: "POST",
+      url: `/api/projects/${slug}/raw-intake`,
+      payload: {
+        statement: "Prove the corrected formulation with hypothesis H.",
+        contextMarkdown: "Use the revised localization idea and do not use degeneration.",
+      },
+    });
+    expect(revised.statusCode).toBe(200);
+    expect(engine.state.statement).toContain("corrected formulation");
+    expect(engine.state.contextMarkdown).toContain("do not use degeneration");
+
+    expect((await upload(h, slug, "notes.md", "corrected file")).statusCode).toBe(201);
+    expect((await upload(h, slug, "supplement.tex", "new source")).statusCode).toBe(201);
+    const revisedUpload = engine.state.problem.sources.find((source) => source.title === "notes.md")!;
+    expect(revisedUpload.sha256).not.toBe(firstUploadHash);
+    expect(revisedUpload.abstract).toBe("Owner-supplied document: notes.md.");
+    expect(revisedUpload.excerptMarkdown).toBe("");
+    expect(engine.state.problem.rawUpdatedAtSeq).toBeGreaterThan(firstW000Seq);
+
+    const staleConfirmation = await h.app.inject({
+      method: "POST",
+      url: `/api/projects/${slug}/confirm-problem`,
+      payload: { problemMarkdown: "# Stale\n\nThis must not begin research." },
+    });
+    expect(staleConfirmation.statusCode).toBe(409);
+    expect((staleConfirmation.json() as { detail: string }).detail).toContain("outdated W000");
+
+    const regenerated = await h.app.inject({
+      method: "POST",
+      url: `/api/projects/${slug}/regenerate-intake`,
+    });
+    expect(regenerated.statusCode).toBe(200);
+    const currentW000 = engine.state.researchManagerNotes.find((note) => note.waveId === "W000")!;
+    expect(currentW000.recordedAtSeq).toBeGreaterThan(engine.state.problem.rawUpdatedAtSeq);
+    expect(readFileSync(
+      path.join(h.root, slug, "decisions", "DEC002", "packet", "raw-materials", "S001-Original-objective"),
+      "utf8",
+    )).toBe("Prove the corrected formulation with hypothesis H.");
+    expect(readFileSync(
+      path.join(h.root, slug, "decisions", "DEC002", "packet", "raw-materials", "S003-notes.md"),
+      "utf8",
+    )).toBe("corrected file");
+    expect(readFileSync(
+      path.join(h.root, slug, "decisions", "DEC002", "packet", "raw-materials", "S004-supplement.tex"),
+      "utf8",
+    )).toBe("new source");
+    expect(engine.events.some((event) => event.type === "intake.rawUpdated")).toBe(true);
+
+    const empty = await h.app.inject({
+      method: "POST",
+      url: `/api/projects/${slug}/raw-intake`,
+      payload: { statement: "   ", contextMarkdown: "" },
+    });
+    expect(empty.statusCode).toBe(400);
+  }, 25_000);
 
   it("round-trips upload, list and delete", async () => {
     const h = harness();

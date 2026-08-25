@@ -678,6 +678,53 @@ export class ProjectEngine extends EventEmitter {
 
   // ---------------------------------------------------------------- intake
 
+  /** Raw intake may change only before the owner accepts W000. */
+  canReviseRawIntake(): boolean {
+    return (
+      !this.intakeRefreshInFlight &&
+      this.state.problem.confirmedMarkdown === null &&
+      (this.state.phase === "CREATED" || this.state.phase === "AWAITING_CONFIRMATION")
+    );
+  }
+
+  /** Used by the upload boundary to prevent source changes during a model read. */
+  isRefreshingIntake(): boolean {
+    return this.intakeRefreshInFlight || this.state.phase === "INTAKE";
+  }
+
+  /**
+   * Save an explicit owner revision and refresh the source index without
+   * discarding the current W000. The following regeneration replaces W000 only
+   * if the Research Manager returns a valid result, so a failed call loses no
+   * human or model work. Calling this with unchanged text is still meaningful:
+   * it incorporates upload additions, replacements, and removals into the
+   * indexed raw materials.
+   */
+  updateRawIntake(statement: string, contextMarkdown: string): void {
+    if (!this.canReviseRawIntake()) {
+      throw new Error(`cannot revise raw intake in phase ${this.state.phase}`);
+    }
+    if (statement.trim() === "") throw new Error("the raw objective cannot be empty");
+    if (statement !== this.state.statement || contextMarkdown !== this.state.contextMarkdown) {
+      this.emitEvent({
+        type: "intake.rawUpdated",
+        statement,
+        contextMarkdown,
+        by: "human",
+      });
+    }
+    this.refreshRawIntakeSources();
+  }
+
+  /** Re-index file changes made through the upload API before W000 is accepted. */
+  refreshRawIntakeSources(): void {
+    if (!this.canReviseRawIntake()) {
+      throw new Error(`cannot revise raw intake in phase ${this.state.phase}`);
+    }
+    const sources = indexIntakeSources(this.paths, this.state.statement, this.state.contextMarkdown);
+    this.emitEvent({ type: "intake.sourcesUpdated", sources });
+  }
+
   private async generateIntake(): Promise<{ ok: boolean; error: string | null }> {
     const indexedSources = indexIntakeSources(
       this.paths,
@@ -835,6 +882,13 @@ export class ProjectEngine extends EventEmitter {
     }
     if (this.intakeRefreshInFlight) {
       throw new Error("cannot confirm while W000 is being regenerated");
+    }
+    const currentW000 = this.state.researchManagerNotes.find((entry) => entry.waveId === "W000");
+    if (
+      this.state.problem.rawUpdatedAtSeq > 0 &&
+      (!currentW000 || currentW000.recordedAtSeq < this.state.problem.rawUpdatedAtSeq)
+    ) {
+      throw new Error("cannot confirm an outdated W000; regenerate it from the revised raw intake first");
     }
     const confirmedDigest = contextDigestMarkdown ?? this.state.problem.contextDigestMarkdown;
     const confirmedMemories = rawMemories ?? this.state.problem.rawMemories;

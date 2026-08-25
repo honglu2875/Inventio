@@ -100,7 +100,7 @@ async function runToConfirmation(h: Harness): Promise<void> {
 // ---------------------------------------------------------------------------
 
 describe("ProjectEngine end-to-end (codex-sim)", () => {
-  it("records W000 over immutable raw intake and accepts the owner's direct edit", async () => {
+  it("records W000 over the retained raw intake and accepts the owner's direct edit", async () => {
     const generated = {
       ...intakeOutput("Show that the widget is round."),
       managerAbstract: "The goal is to prove roundness of the stated widget.",

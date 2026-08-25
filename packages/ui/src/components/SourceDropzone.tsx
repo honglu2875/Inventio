@@ -41,12 +41,23 @@ export default function SourceDropzone({
   slug,
   staged,
   onStagedChange,
+  disabled = false,
+  disabledReason,
+  onBusyChange,
+  onFilesChanged,
 }: {
   /** Project to upload into, or null to stage files for a later upload. */
   slug: string | null;
   /** Staged mode: the files held so far (owned by the caller). */
   staged?: File[];
   onStagedChange?: (files: File[]) => void;
+  /** Temporarily prevent changes while the parent is saving or regenerating. */
+  disabled?: boolean;
+  disabledReason?: string;
+  /** Reports live uploads so a parent cannot start W000 against partial files. */
+  onBusyChange?: (busy: boolean) => void;
+  /** Called after a staged-list edit or a durable live upload/delete. */
+  onFilesChanged?: () => void;
 }): JSX.Element {
   const guard = useActionGuard(slug ?? "");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -58,6 +69,18 @@ export default function SourceDropzone({
 
   const stagedFiles = staged ?? [];
   const live = slug !== null;
+  const interactionDisabled = guard.disabled || disabled;
+  const interactionTitle =
+    guard.title ?? (disabled ? disabledReason ?? "Wait for the current action to finish" : undefined);
+  const uploadBusy = progress.some((item) => item.status === "uploading");
+
+  useEffect(() => {
+    onBusyChange?.(uploadBusy);
+  }, [uploadBusy, onBusyChange]);
+
+  useEffect(() => {
+    return () => onBusyChange?.(false);
+  }, [onBusyChange]);
 
   const refresh = useCallback(() => {
     if (slug === null) return;
@@ -76,7 +99,7 @@ export default function SourceDropzone({
 
   const accept = useCallback(
     (incoming: FileList | null) => {
-      if (incoming === null || incoming.length === 0 || guard.disabled) return;
+      if (incoming === null || incoming.length === 0 || interactionDisabled) return;
       const list = [...incoming];
 
       if (slug === null) {
@@ -93,6 +116,7 @@ export default function SourceDropzone({
           const byName = new Map(stagedFiles.map((f) => [f.name, f]));
           for (const f of kept) byName.set(f.name, f);
           onStagedChange?.([...byName.values()]);
+          onFilesChanged?.();
         }
         return;
       }
@@ -108,6 +132,7 @@ export default function SourceDropzone({
           try {
             await api.uploadSource(slug, file);
             setProgress((prev) => prev.filter((p) => p.name !== file.name));
+            onFilesChanged?.();
           } catch (err) {
             const detail = errorMessage(err);
             setProgress((prev) =>
@@ -118,18 +143,22 @@ export default function SourceDropzone({
         refresh();
       })();
     },
-    [guard.disabled, slug, stagedFiles, onStagedChange, refresh],
+    [interactionDisabled, slug, stagedFiles, onStagedChange, onFilesChanged, refresh],
   );
 
   const remove = (name: string): void => {
-    if (guard.disabled) return;
+    if (interactionDisabled) return;
     if (slug === null) {
       onStagedChange?.(stagedFiles.filter((f) => f.name !== name));
+      onFilesChanged?.();
       return;
     }
     void api
       .deleteSource(slug, name)
-      .then(() => refresh())
+      .then(() => {
+        onFilesChanged?.();
+        refresh();
+      })
       .catch((err: unknown) => setListError(errorMessage(err)));
   };
 
@@ -142,10 +171,10 @@ export default function SourceDropzone({
   return (
     <div className="dropzone-wrap">
       <div
-        className={`dropzone${dragging ? " dragging" : ""}${guard.disabled ? " disabled" : ""}`}
+        className={`dropzone${dragging ? " dragging" : ""}${interactionDisabled ? " disabled" : ""}`}
         onDragOver={(e) => {
           e.preventDefault();
-          if (!guard.disabled) setDragging(true);
+          if (!interactionDisabled) setDragging(true);
         }}
         onDragLeave={() => setDragging(false)}
         onDrop={(e) => {
@@ -153,7 +182,7 @@ export default function SourceDropzone({
           setDragging(false);
           accept(e.dataTransfer.files);
         }}
-        {...(guard.title === undefined ? {} : { title: guard.title })}
+        {...(interactionTitle === undefined ? {} : { title: interactionTitle })}
       >
         <input
           ref={inputRef}
@@ -161,7 +190,7 @@ export default function SourceDropzone({
           className="visually-hidden"
           type="file"
           multiple
-          disabled={guard.disabled}
+          disabled={interactionDisabled}
           onChange={(e) => {
             accept(e.target.files);
             e.target.value = ""; // re-picking the same file must fire again
@@ -227,8 +256,8 @@ export default function SourceDropzone({
                 type="button"
                 className="icon-button"
                 aria-label={`remove ${row.name}`}
-                disabled={guard.disabled}
-                {...(guard.title === undefined ? {} : { title: guard.title })}
+                disabled={interactionDisabled}
+                {...(interactionTitle === undefined ? {} : { title: interactionTitle })}
                 onClick={() => remove(row.name)}
               >
                 ✕

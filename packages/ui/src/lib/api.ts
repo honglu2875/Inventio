@@ -205,6 +205,12 @@ export const api = {
     request("POST", "/projects", body),
   cloneIntake: (slug: string, title: string): Promise<{ slug: string; phase: string }> =>
     request("POST", `/projects/${enc(slug)}/clone-intake`, { title }),
+  updateRawIntake: (
+    slug: string,
+    statement: string,
+    contextMarkdown: string,
+  ): Promise<{ ok: true; phase: string }> =>
+    request("POST", `/projects/${enc(slug)}/raw-intake`, { statement, contextMarkdown }),
   confirmProblem: (
     slug: string,
     problemMarkdown: string,

@@ -14,8 +14,8 @@ Rules for whoever (human or agent) picks this up:
 - Record every deliberate divergence from DESIGN.md in the deviation log
   at the bottom, with a reason.
 
-**Status: M0–M10 complete; M12 behavioral tuning, M13 selective rebase, M14 working-library curation, M15 single-controller Research Manager, M16 per-project model settings, M17 verbatim intake/editable W000, M18 intake-summary discipline/project Web search, and M19 central prompt architecture are green. The Research Manager now carries a recurrent mathematical view between rounds, owns research judgment and library organization, can inspect the working library and original intake sources on demand, may direct up to eight research workers per round, and uses separately budgeted rigorous synthesis. 281 tests pass (schema 26, conductor 139, UI 95, codex-sim 21), all three TypeScript packages typecheck, and the production UI builds. An isolated migration audit of every computation present in the active genus-2 project at the final snapshot repaired 32/32 baselines: every command exited 0 and every pristine rerun matched exactly. The revised lifecycle also established one substantive scoped theorem after two independent PASS reviews, while retiring 66 unsupported leads and preserving four unresolved background leads. The standalone repository has been released; remaining work is owner review of the four explicitly marked draft voice examples and optional M11 polish.**
-Last updated: 2026-08-25 by Codex (central prompt architecture).
+**Status: M0–M10 complete; M12 behavioral tuning, M13 selective rebase, M14 working-library curation, M15 single-controller Research Manager, M16 per-project model settings, M17 verbatim intake/editable W000, M18 intake-summary discipline/project Web search, M19 central prompt architecture, and M20 revisable raw intake are green. The Research Manager now carries a recurrent mathematical view between rounds, owns research judgment and library organization, can inspect the working library and original intake sources on demand, may direct up to eight research workers per round, and uses separately budgeted rigorous synthesis. 285 tests pass (schema 27, conductor 140, UI 97, codex-sim 21), all three TypeScript packages typecheck, and the production UI builds. An isolated migration audit of every computation present in the active genus-2 project at the final snapshot repaired 32/32 baselines: every command exited 0 and every pristine rerun matched exactly. The revised lifecycle also established one substantive scoped theorem after two independent PASS reviews, while retiring 66 unsupported leads and preserving four unresolved background leads. The standalone repository has been released; remaining work is owner review of the four explicitly marked draft voice examples and optional M11 polish.**
+Last updated: 2026-08-25 by Codex (revisable raw intake and W000 regeneration).
 
 Quota note: work has been interrupted twice by Opus subagent quota limits. The
 tracker is the recovery point — check the milestone boxes, then
@@ -651,6 +651,23 @@ follow-up, and stopping.
 - [x] Full repository verification: 281 tests (schema 26, conductor 139,
       UI 95, codex-sim 21), all package typechecks, and production UI build.
 
+## M20 — Revisable raw intake before research (2026-08-25)
+
+- [x] Let the owner return from W000 to editable objective and background
+      fields plus the supplementary-file list, then save and regenerate W000
+      from the revised submission.
+- [x] Record text revisions as `intake.rawUpdated` events and re-index file
+      changes immediately. Changed bytes keep their conceptual S### reference
+      while stale abstracts and excerpts are cleared before regeneration.
+- [x] Mark W000 stale whenever the raw material changes after it was written;
+      prevent confirmation until a later successful W000 call. A failed call
+      preserves both the revised raw submission and the earlier W000 for retry.
+- [x] Permit explicit replacement or removal of retained files only before
+      confirmation, forbid source mutation during a W000 read, and restore the
+      immutable retained-intake boundary when research begins.
+- [x] Full repository verification: 285 tests (schema 27, conductor 140,
+      UI 97, codex-sim 21), all package typechecks, and production UI build.
+
 ## M11 — Polish and hardening
 
 - [ ] Empty/error states, toasts, loading skeletons throughout UI
@@ -699,6 +716,10 @@ follow-up, and stopping.
   boundary before schema validation. This deliberately changes the old
   assumption that any syntactically legal JSON string is safe: legal escapes
   such as `\f` can silently alter mathematical content.
+- 2026-08-25 M20: raw intake is no longer immutable immediately after the
+  first W000 reading. Before confirmation, explicit owner revisions are
+  event-sourced and require a fresh W000; confirmation remains the hard
+  immutability boundary for retained source material.
 - 2026-08-24 M13 (found by the real milestone run): adversarial questions for a
   referee are now stored as `reviewQuestions`, separate from admitted
   `obligations`. Obligations continue to block acceptance mechanically, while

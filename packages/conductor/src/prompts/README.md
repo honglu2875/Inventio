@@ -52,8 +52,8 @@ allowed, writes `output-schema.json`, and invokes `codex/structured.ts`.
 
 ### W000 initial reading
 
-- **When:** a new project starts, or the owner explicitly regenerates W000
-  before confirming the problem.
+- **When:** a new project starts, or the owner revises the raw objective,
+  background, or files and explicitly regenerates W000 before confirmation.
 - **Short prompt:** `intakePrompt(false)` in `researchManager.ts`. W000 is
   intentionally offline; the boolean helper records the policy explicitly even
   though the production caller currently always passes `false`.
@@ -65,7 +65,8 @@ allowed, writes `output-schema.json`, and invokes `codex/structured.ts`.
 - **Output:** `IntakeOutput` from `@inventio/schema`, principally the editable
   W000 abstract/current view and one short description per original source.
 - **Isolation:** `isolatedTask: true`; no workers exist and delegation is
-  disabled. Source tools may open bounded ranges of the immutable submission.
+  disabled. Source tools may open bounded ranges of the current submission,
+  which the Conductor holds fixed for the duration of the call.
 
 ### Legacy clarification revision
 

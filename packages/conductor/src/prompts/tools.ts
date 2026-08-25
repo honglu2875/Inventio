@@ -64,7 +64,7 @@ export const MODEL_TOOL_DEFINITIONS: Tool[] = [
   {
     name: "source_list",
     description:
-      "List the owner's immutable intake materials by stable source ID, title, abstract, and short excerpt. " +
+      "List the owner's retained intake materials by stable source ID, title, abstract, and short excerpt. " +
       "This catalog is available to the Research Manager; use source_open to inspect original text on demand.",
     inputSchema: {
       type: "object",

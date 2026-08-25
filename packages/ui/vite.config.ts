@@ -25,6 +25,6 @@ export default defineConfig({
   optimizeDeps: { exclude: ["@inventio/schema"] },
   test: {
     environment: "node",
-    include: ["test/**/*.test.ts"],
+    include: ["test/**/*.test.{ts,tsx}"],
   },
 });

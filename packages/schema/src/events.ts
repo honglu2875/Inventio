@@ -201,6 +201,7 @@ export const EventSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("webSearch.changed"), enabled: z.boolean(), by: Actor }),
 
   // Intake & human channel
+  z.object({ ...base, type: z.literal("intake.rawUpdated"), statement: z.string(), contextMarkdown: z.string(), by: Actor }),
   z.object({ ...base, type: z.literal("intake.completed"), problemMarkdown: z.string(), contextDigestMarkdown: z.string().optional(), rawMemories: z.array(IntakeMemory).optional(), ambiguities: z.array(Ambiguity), clarifications: z.array(Clarification).default([]) }),
   z.object({ ...base, type: z.literal("intake.sourcesUpdated"), sources: z.array(IntakeSource) }),
   z.object({ ...base, type: z.literal("intake.answered"), answers: z.array(ClarificationAnswer) }),

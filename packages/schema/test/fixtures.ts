@@ -32,6 +32,11 @@ export function buildCanonicalEvents(): Event[] {
     contextMarkdown: "The owner supplied a long literature note and a tentative induction idea.",
     config: defaultConfig(),
   });
+  ev("intake.rawUpdated", {
+    statement: "Prove that P, keeping every hypothesis explicit.",
+    contextMarkdown: "The owner supplied a revised long literature note and a tentative induction idea.",
+    by: "human",
+  });
   ev("phase.changed", { from: "CREATED", to: "INTAKE", reason: "start" });
   ev("intake.completed", {
     problemMarkdown: "# Problem\nProve that P.",

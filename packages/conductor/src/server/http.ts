@@ -60,6 +60,10 @@ const CreateProjectBody = z.object({
 const CloneIntakeBody = z.object({
   title: z.string().min(1).max(300),
 });
+const RawIntakeBody = z.object({
+  statement: z.string().min(1).max(100_000).refine((value) => value.trim() !== "", "cannot be blank"),
+  contextMarkdown: z.string().max(300_000),
+});
 const ConfirmProblemBody = z.object({
   problemMarkdown: z.string().min(1).max(200_000),
   contextDigestMarkdown: z.string().max(6_000).optional(),
@@ -490,6 +494,17 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
   );
 
   // --------------------------------------------------------------- lifecycle
+
+  app.post<{ Params: { slug: string } }>(
+    "/api/projects/:slug/raw-intake",
+    async (request, reply) =>
+      run(reply, () => {
+        const engine = engineOf(request.params.slug);
+        const body = parseBody(RawIntakeBody, request.body);
+        engine.updateRawIntake(body.statement, body.contextMarkdown);
+        return { ok: true, phase: engine.state.phase };
+      }),
+  );
 
   app.post<{ Params: { slug: string } }>(
     "/api/projects/:slug/confirm-problem",

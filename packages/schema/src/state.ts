@@ -240,6 +240,8 @@ export interface ProjectState {
     rawMemories: IntakeMemory[];
     /** Verbatim intake items with compact catalog descriptions. */
     sources: IntakeSource[];
+    /** Latest event that changed the raw submission's text, membership, or bytes. */
+    rawUpdatedAtSeq: number;
     ambiguities: Ambiguity[];
     /** open questions the owner can answer before confirming */
     clarifications: Clarification[];
@@ -296,6 +298,7 @@ export function initialState(): ProjectState {
       contextDigestMarkdown: "",
       rawMemories: [],
       sources: [],
+      rawUpdatedAtSeq: 0,
       ambiguities: [],
       clarifications: [],
       answers: {},

@@ -48,9 +48,10 @@ export function writeIntakeSources(paths: Pick<ProjectPaths, "intakeSourcesFile"
 }
 
 /**
- * Materialize the owner's verbatim text and index every project-local upload.
- * Existing IDs and descriptions survive regeneration; newly added files are
- * appended instead of renumbering earlier references.
+ * Materialize the owner's current verbatim text and index every project-local
+ * upload. Existing IDs and descriptions survive regeneration only while the
+ * underlying bytes are unchanged. An explicit pre-confirmation revision keeps
+ * the conceptual source ID but clears its now-stale model summary.
  */
 export function indexIntakeSources(
   paths: ProjectPaths,
@@ -61,7 +62,9 @@ export function indexIntakeSources(
   const objectivePath = path.join(paths.intakeDir, "original-objective.md");
   const backgroundPath = path.join(paths.intakeDir, "original-background.md");
   writeFileAtomic(objectivePath, statement);
-  if (contextMarkdown !== "") writeFileAtomic(backgroundPath, contextMarkdown);
+  // Write the empty value too: removing the background must not leave stale
+  // text at the path used by an earlier W000 decision packet.
+  writeFileAtomic(backgroundPath, contextMarkdown);
 
   const old = readIntakeSources(paths);
   const byKey = new Map(old.map((source) => [relativeKey(source.kind, source.relativePath), source]));
@@ -76,21 +79,23 @@ export function indexIntakeSources(
     const data = readFileSync(absolutePath);
     const previous = byKey.get(relativeKey(kind, relativePath));
     const id = previous?.id ?? `S${String(next++).padStart(3, "0")}`;
+    const sha256 = hash(data);
+    const preserved = previous?.sha256 === sha256 ? previous : undefined;
     return {
       id,
       kind,
       title,
       relativePath,
       size: data.length,
-      sha256: hash(data),
+      sha256,
       abstract:
-        previous?.abstract ??
+        preserved?.abstract ??
         (kind === "objective"
           ? "The owner's verbatim mathematical objective."
           : kind === "background"
             ? "The owner's verbatim background, literature notes, and proposed ideas."
             : `Owner-supplied document: ${title}.`),
-      excerptMarkdown: previous?.excerptMarkdown ?? "",
+      excerptMarkdown: preserved?.excerptMarkdown ?? "",
     };
   };
 

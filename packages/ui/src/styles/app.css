@@ -1875,6 +1875,22 @@ body.resizing {
   max-height: 36vh;
 }
 
+.raw-intake-textarea {
+  width: 100%;
+  min-height: 220px;
+  resize: vertical;
+  padding: 12px;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font: 12px/1.58 var(--font-mono);
+}
+
+.raw-intake-textarea.background {
+  min-height: 300px;
+}
+
 .w000-editor textarea {
   width: 100%;
   resize: vertical;
@@ -1933,6 +1949,10 @@ body.resizing {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--panel);
+}
+
+.w000-stale-warning {
+  margin-top: 16px;
 }
 
 .intake-source-catalog {

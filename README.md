@@ -44,12 +44,12 @@ browser ── REST + SSE ──> conductor (Node) ── codex exec --json ─�
   library, and may open older notes through read-only tools. The Conductor
   validates and executes its structured choices; it is not another layer of
   mathematical management.
-- **Intake preserves the originals.** Your objective, long background notes,
+- **Intake preserves the submission.** Your objective, long background notes,
   and uploaded documents are stored before any model runs. The Research
-  Manager reads them once to draft `W000 · Current mathematical view`; you edit
-  that view directly and accept it before research begins. The original files,
-  hashes, abstracts, and excerpts remain available in Library throughout the
-  project.
+  Manager drafts `W000 · Current mathematical view`; before accepting it, you
+  may return to the raw input, revise text or files, and regenerate W000. The
+  accepted files, hashes, abstracts, and excerpts remain available in Library
+  throughout the project, while the event log retains the revision history.
 - **Workers are isolated by construction.** Each task runs in its own directory
   containing only what it was granted. A peer's attempt isn't hidden from a
   reviewer — it physically isn't there. Budgets are enforced by killing
@@ -79,7 +79,7 @@ npm run dev                       # app at http://127.0.0.1:4700
 ```
 
 Open <http://127.0.0.1:4700>, create a problem, optionally add long notes and
-files, edit the W000 preview, and begin research. For UI development with hot reload, run
+files, revise or regenerate the W000 preview as needed, and begin research. For UI development with hot reload, run
 `npm run dev:ui` in a second terminal (Vite proxies `/api` to 4700).
 
 ### Custom port and Tailscale

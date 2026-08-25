@@ -308,11 +308,18 @@ export class EngineManager {
   /** Store one uploaded file and make sure the `uploads` mount exists. */
   uploadSource(slug: string, filename: string, data: Buffer): UploadedSource & { mount: string } {
     const engine = this.require(slug);
+    if (engine.isRefreshingIntake()) {
+      throw new ManagerError("source files cannot change while the Research Manager is reading the intake", 409);
+    }
     const safeName = sanitizeUploadName(filename);
     const retained = engine.state.problem.sources.some(
       (source) => source.kind === "upload" && source.relativePath === path.posix.join("sources", safeName),
     );
-    if (retained && existsSync(path.join(sourcesDir(engine.paths.dir), safeName))) {
+    if (
+      retained &&
+      existsSync(path.join(sourcesDir(engine.paths.dir), safeName)) &&
+      !engine.canReviseRawIntake()
+    ) {
       throw new ManagerError(
         `${safeName} is part of the retained intake and cannot be replaced; upload a new version under a different name`,
         409,
@@ -320,6 +327,7 @@ export class EngineManager {
     }
     const stored = writeUpload(engine.paths.dir, filename, data);
     const mount = this.syncUploadsMount(engine);
+    if (engine.canReviseRawIntake()) engine.refreshRawIntakeSources();
     return { ...stored, mount: mount.name };
   }
 
@@ -336,17 +344,21 @@ export class EngineManager {
 
   deleteSource(slug: string, name: string): void {
     const engine = this.require(slug);
+    if (engine.isRefreshingIntake()) {
+      throw new ManagerError("source files cannot change while the Research Manager is reading the intake", 409);
+    }
     const safeName = sanitizeUploadName(name);
     const retained = engine.state.problem.sources.some(
       (source) => source.kind === "upload" && source.relativePath === path.posix.join("sources", safeName),
     );
-    if (retained) {
+    if (retained && !engine.canReviseRawIntake()) {
       throw new ManagerError(
         `${safeName} is part of the retained intake and cannot be deleted`,
         409,
       );
     }
     deleteUpload(engine.paths.dir, safeName);
+    if (engine.canReviseRawIntake()) engine.refreshRawIntakeSources();
   }
 
   get(slug: string): ProjectEngine | undefined {

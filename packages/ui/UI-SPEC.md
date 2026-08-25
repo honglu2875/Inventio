@@ -356,14 +356,20 @@ background, and editable file dropzone. “Generate W000” starts the one Manag
 reading.
 
 While AWAITING_CONFIRMATION, a full-width panel replaces the graph. It shows
-`W000 · Current mathematical view` with a directly editable abstract (one to
-four sentences) and Markdown body, alongside a live rendered preview. Beneath
+`W000 · Current mathematical view` with a directly editable abstract (one or
+two sentences) and Markdown body, alongside a live rendered preview. Beneath
 it, the S### catalog keeps each original source expandable: a short abstract,
 conclusion-oriented excerpt, hash, and either verbatim text or a link to the
-original uploaded bytes. “Regenerate from originals” replaces the draft only
-after a new successful Manager reading; a failed call preserves the current
-draft. “Accept W000 & begin research” saves any direct edits and enters
-DISCOVERY. There is no generated questionnaire, taxonomy, or chat surface.
+original uploaded bytes. “Edit raw input” returns to editable objective,
+background, and supplementary files. Saving those changes regenerates W000;
+until that succeeds, the older W000 is visibly stale and cannot be accepted.
+Retained uploads may be replaced or removed in this pre-confirmation view, but
+become immutable once research begins. “Regenerate from originals” reruns the
+Manager without changing the raw input. Either regeneration path replaces the
+draft only after a successful Manager reading; a failed call preserves both
+the revised raw submission and the current W000 for retry. “Accept W000 & begin
+research” saves any direct edits and enters DISCOVERY. There is no generated
+questionnaire, taxonomy, or chat surface.
 
 ## 10. Library
 
