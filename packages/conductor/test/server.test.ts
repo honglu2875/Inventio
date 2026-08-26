@@ -568,8 +568,8 @@ describe("steering routes", () => {
     expect(saved.json()).toMatchObject({ ok: true, models });
     expect(h.manager.get(slug)!.state.config.models.solver).toEqual(models.solver);
     expect(h.manager.get(slug)!.events.at(-1)).toMatchObject({
-      type: "models.changed",
-      models,
+      type: "project.settingsChanged",
+      settings: { models, autonomy: "auto", allowWebSearch: false },
       by: "human",
     });
 
@@ -608,8 +608,8 @@ describe("steering routes", () => {
     expect(saved.statusCode).toBe(200);
     expect(saved.json()).toEqual({ ok: true, enabled: true });
     expect(h.manager.get(slug)!.events.at(-1)).toMatchObject({
-      type: "webSearch.changed",
-      enabled: true,
+      type: "project.settingsChanged",
+      settings: { autonomy: "auto", allowWebSearch: true },
       by: "human",
     });
 
@@ -632,6 +632,71 @@ describe("steering routes", () => {
     await h.manager.shutdown();
     h.manager.openAll();
     expect(h.manager.get(slug)!.state.config.allowWebSearch).toBe(true);
+  });
+
+  it("retrieves and atomically updates the effective project settings", async () => {
+    const h = harness();
+    const created = await createProject(h.app, {
+      title: "Initially searchable project",
+      slug: "initially-searchable",
+      statement: "Prove P.",
+      config: { allowWebSearch: true, autonomy: "gated" },
+      start: false,
+    });
+    expect(created.status).toBe(201);
+
+    const initial = await h.app.inject({
+      method: "GET",
+      url: "/api/projects/initially-searchable/settings",
+    });
+    expect(initial.statusCode).toBe(200);
+    const initialSettings = (initial.json() as { settings: Record<string, unknown> }).settings;
+    expect(initialSettings).toMatchObject({ allowWebSearch: true, autonomy: "gated" });
+
+    const models = (initialSettings["models"] ?? {}) as Record<string, unknown>;
+    const changed = await h.app.inject({
+      method: "POST",
+      url: "/api/projects/initially-searchable/settings",
+      payload: {
+        ...initialSettings,
+        models,
+        allowWebSearch: false,
+        autonomy: "auto",
+        totalTokens: 55_000_000,
+        maxWaves: 32,
+      },
+    });
+    expect(changed.statusCode).toBe(200);
+    expect(changed.json()).toMatchObject({
+      ok: true,
+      settings: {
+        allowWebSearch: false,
+        autonomy: "auto",
+        totalTokens: 55_000_000,
+        maxWaves: 32,
+        models,
+      },
+    });
+    expect(h.manager.get("initially-searchable")!.events.at(-1)).toMatchObject({
+      type: "project.settingsChanged",
+      settings: {
+        allowWebSearch: false,
+        autonomy: "auto",
+        totalTokens: 55_000_000,
+        maxWaves: 32,
+        models,
+      },
+    });
+
+    await h.manager.shutdown();
+    h.manager.openAll();
+    expect(h.manager.get("initially-searchable")!.getProjectSettings()).toMatchObject({
+      allowWebSearch: false,
+      autonomy: "auto",
+      totalTokens: 55_000_000,
+      maxWaves: 32,
+      models,
+    });
   });
 
   it("validates continue-research requests and rejects them before a stopping report", async () => {

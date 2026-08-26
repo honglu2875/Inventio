@@ -169,15 +169,23 @@ The system runs to a terminal state on its own. You can always:
   issue against a candidate, quarantine a memory card. Every intervention is
   recorded with human provenance and shown to later agents as exactly what it
   is: a domain expert's recorded judgment.
-- **change model settings** — the project Settings tab controls the model and
-  reasoning effort for Research Manager, Solver, Explorer, Reviewer, and
-  Synthesizer. W000 uses the Research Manager setting. A save affects future
-  process launches; a worker already in flight continues with the settings it
-  started with.
-- **allow or deny Web search** — the project Settings tab controls whether the
+- **change project settings** — one saved form controls the token ceiling,
+  maximum research rounds, autonomy, Web-search permission, and the
+  model/reasoning effort for Research Manager, Solver, Explorer, Reviewer, and
+  Synthesizer. It shows the effective values stored with that project,
+  including choices made at creation. W000 uses the Research Manager setting.
+  A save affects future process launches; a worker already in flight continues
+  with the settings it started with.
+- **allow or deny Web search** — the same Settings form controls whether the
   Research Manager may grant native Web search to individual future worker
   assignments. Turning it off also removes search from queued work; an
   already-running worker is unchanged. W000 remains offline.
+- **continue from a stopping report** — the earlier report remains immutable.
+  Before any new assignment is chosen, Inventio combines the preceding
+  Research Manager view, that report, and your complete continuation direction
+  into a numbered revision such as `W020.2`. You may instead mark your text as
+  the complete revised view and record it directly. The full direction remains
+  available to later decisions throughout the continued run.
 
 ## Safety notes
 

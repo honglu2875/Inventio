@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import type { SourceMount } from "@inventio/schema";
+import { defaultConfig, type SourceMount } from "@inventio/schema";
 import SourceDropzone from "../components/SourceDropzone";
 import Toasts from "../components/Toasts";
 import { api, errorMessage, type ProjectSummary } from "../lib/api";
@@ -13,6 +13,7 @@ import { useStore } from "../store/store";
 /** ProjectsPage (UI-SPEC §11): the L0 list, the runtime strip, project creation. */
 
 const POLL_MS = 5000;
+const NEW_PROJECT_DEFAULTS = defaultConfig();
 
 function MiniPhases({ project }: { project: ProjectSummary }): JSX.Element {
   const current = project.phase === "AWAITING_CONFIRMATION" ? "INTAKE" : project.phase;
@@ -115,10 +116,10 @@ function NewProjectDialog({ onClose }: { onClose: () => void }): JSX.Element {
   const [statement, setStatement] = useState("");
   const [contextMarkdown, setContextMarkdown] = useState("");
   const [advanced, setAdvanced] = useState(false);
-  const [totalTokens, setTotalTokens] = useState("40000000");
-  const [autonomy, setAutonomy] = useState<"auto" | "gated">("auto");
-  const [maxWaves, setMaxWaves] = useState("20");
-  const [allowWebSearch, setAllowWebSearch] = useState(false);
+  const [totalTokens, setTotalTokens] = useState(String(NEW_PROJECT_DEFAULTS.budget.totalTokens));
+  const [autonomy, setAutonomy] = useState<"auto" | "gated">(NEW_PROJECT_DEFAULTS.autonomy);
+  const [maxWaves, setMaxWaves] = useState(String(NEW_PROJECT_DEFAULTS.limits.maxWaves));
+  const [allowWebSearch, setAllowWebSearch] = useState(NEW_PROJECT_DEFAULTS.allowWebSearch);
   const [mounts, setMounts] = useState<MountRow[]>([{ name: "", path: "" }]);
   // Files cannot be stored before the project exists, so they are staged here
   // and uploaded the moment creation succeeds — before we navigate away.

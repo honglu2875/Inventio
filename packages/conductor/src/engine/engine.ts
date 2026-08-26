@@ -5,14 +5,20 @@ import {
   ActiveModelSettings,
   ActionEnvelope,
   CrossExamAnswer,
+  ContinuationRevisionOutput,
   CurationOutput,
   FinalOutput,
   IntakeOutput,
   IntakeRevision,
+  ProjectSettings,
   applyEvent,
   candidateId as makeCandidateId,
   initialState,
   makeId,
+  nextContinuationRevisionId,
+  pendingIntakeDecision,
+  pendingContinuationRevision,
+  projectSettingsFromConfig,
   validateActionEnvelope,
   workerOutputSchema,
   type CardStatus,
@@ -63,11 +69,13 @@ import {
   reproduceComputation,
 } from "./computations.js";
 import {
+  CONTINUATION_REVISION_PROMPT,
   CURATION_PROMPT,
   DECISION_PROMPT,
   FINAL_PROMPT,
   intakePrompt,
   curationPacketFiles,
+  continuationRevisionPacketFiles,
   decisionPacketFiles,
   finalPacketFiles,
   intakePacketFiles,
@@ -368,6 +376,7 @@ export class ProjectEngine extends EventEmitter {
   private taskOutputs = new Map<string, AnyWorkerOutput>();
   private lastProgressAt = new Map<string, number>();
   private intakeRefreshInFlight = false;
+  private interruptedIntakeChecked = false;
   private legacyComputationsChecked = false;
 
   private constructor(slug: string, deps: EngineDeps, log: EventLog, state: ProjectState) {
@@ -512,6 +521,19 @@ export class ProjectEngine extends EventEmitter {
   }
 
   private async loop(): Promise<void> {
+    if (!this.interruptedIntakeChecked) {
+      this.interruptedIntakeChecked = true;
+      const interrupted = pendingIntakeDecision(this.state);
+      if (interrupted && !this.intakeRefreshInFlight) {
+        this.emitEvent({
+          type: "decision.rejected",
+          decisionId: interrupted.id,
+          violations: [
+            "The W000 reading was interrupted when the server stopped; the previous W000 was preserved and can be regenerated again.",
+          ],
+        });
+      }
+    }
     if (!this.legacyComputationsChecked) {
       this.legacyComputationsChecked = true;
       this.repairLegacyComputationBaselines();
@@ -534,6 +556,10 @@ export class ProjectEngine extends EventEmitter {
           continue;
         }
         await this.wake();
+        continue;
+      }
+      if (pendingContinuationRevision(this.state)) {
+        await this.prepareContinuationRevision();
         continue;
       }
       const pendingCuration = this.pendingCurationWaveId();
@@ -660,6 +686,82 @@ export class ProjectEngine extends EventEmitter {
     };
   }
 
+  private fallbackContinuationRevision(): string {
+    const continuation = this.state.continuations.at(-1);
+    const previous = this.state.researchManagerNotes.at(-1)?.markdown.trim();
+    return [
+      "## Current mathematical view",
+      "",
+      "The previous stopping report remains an honest account of what had been established and what had failed. Renewed work is governed by the owner's direction below; any categorical recommendation in the preceding view is retained only where it is compatible with this broader instruction.",
+      "",
+      "## Direction for renewed research",
+      "",
+      continuation?.note.trim() ?? "Continue from the preceding report with a materially revised direction.",
+      ...(previous ? ["", "## Earlier view retained for mathematical context", "", previous] : []),
+    ].join("\n");
+  }
+
+  /** Revise recurrent context once, before the first decision of a resumed run. */
+  private async prepareContinuationRevision(): Promise<void> {
+    const continuation = pendingContinuationRevision(this.state);
+    if (!continuation) return;
+
+    const revisionId = nextContinuationRevisionId(this.state);
+    const decisionId = this.allocId("decision");
+    const previousWaveId = this.state.waveOrder.at(-1) ?? null;
+    this.emitEvent({
+      type: "decision.requested",
+      decisionId,
+      kind: "continuation_revision",
+      waveId: previousWaveId,
+    });
+
+    const reportFile = path.join(this.paths.dir, continuation.previousFinalPath);
+    const previousReport = existsSync(reportFile)
+      ? readFileSync(reportFile, "utf8")
+      : `The saved stopping report was expected at ${continuation.previousFinalPath}, but its text is unavailable.`;
+    const previousView = this.state.researchManagerNotes.at(-1)?.markdown ?? null;
+    const files = continuationRevisionPacketFiles(
+      this.state,
+      revisionId,
+      previousView,
+      previousReport,
+    );
+    const call = await this.runResearchManagerCall(
+      decisionId,
+      files,
+      CONTINUATION_REVISION_PROMPT,
+      ContinuationRevisionOutput,
+    );
+    if (this.stopped) return;
+
+    this.emitEvent({
+      type: "decision.proposed",
+      decisionId,
+      action: call.output,
+      usage: call.usage,
+    });
+    if (call.output) {
+      this.emitEvent({ type: "decision.accepted", decisionId, action: call.output });
+      this.recordResearchManagerNote(
+        revisionId,
+        call.output.managerNoteMarkdown,
+        "research_manager",
+        call.output.managerAbstract,
+      );
+      return;
+    }
+
+    const failure = call.error ?? call.status;
+    this.emitEvent({ type: "decision.rejected", decisionId, violations: [failure] });
+    this.recordResearchManagerNote(
+      revisionId,
+      this.fallbackContinuationRevision(),
+      "fallback",
+      "Research resumes under the owner's new direction; the preceding view is retained only where compatible.",
+    );
+  }
+
   private raiseBlocking(
     text: string,
     context: string,
@@ -682,6 +784,7 @@ export class ProjectEngine extends EventEmitter {
   canReviseRawIntake(): boolean {
     return (
       !this.intakeRefreshInFlight &&
+      pendingIntakeDecision(this.state) === null &&
       this.state.problem.confirmedMarkdown === null &&
       (this.state.phase === "CREATED" || this.state.phase === "AWAITING_CONFIRMATION")
     );
@@ -689,7 +792,11 @@ export class ProjectEngine extends EventEmitter {
 
   /** Used by the upload boundary to prevent source changes during a model read. */
   isRefreshingIntake(): boolean {
-    return this.intakeRefreshInFlight || this.state.phase === "INTAKE";
+    return (
+      this.intakeRefreshInFlight ||
+      pendingIntakeDecision(this.state) !== null ||
+      this.state.phase === "INTAKE"
+    );
   }
 
   /**
@@ -880,8 +987,8 @@ export class ProjectEngine extends EventEmitter {
     if (this.state.phase !== "AWAITING_CONFIRMATION") {
       throw new Error(`cannot confirm problem in phase ${this.state.phase}`);
     }
-    if (this.intakeRefreshInFlight) {
-      throw new Error("cannot confirm while W000 is being regenerated");
+    if (this.intakeRefreshInFlight || pendingIntakeDecision(this.state)) {
+      throw new Error("W000 is still being regenerated; wait for the Research Manager reading to finish");
     }
     const currentW000 = this.state.researchManagerNotes.find((entry) => entry.waveId === "W000");
     if (
@@ -1004,13 +1111,30 @@ export class ProjectEngine extends EventEmitter {
     if (this.state.phase !== "AWAITING_CONFIRMATION") {
       throw new Error(`cannot regenerate intake in phase ${this.state.phase}`);
     }
-    if (this.intakeRefreshInFlight) throw new Error("intake regeneration is already running");
+    if (this.intakeRefreshInFlight || pendingIntakeDecision(this.state)) {
+      throw new Error("W000 regeneration is already running");
+    }
     this.intakeRefreshInFlight = true;
     try {
       const result = await this.generateIntake();
       if (!result.ok) {
         throw new Error(`intake regeneration failed; the current summary was preserved: ${result.error}`);
       }
+    } catch (error) {
+      // `runStructured` normally returns a failed result, but filesystem or
+      // process-boundary failures may throw. Do not leave every client showing
+      // an intake request as permanently active until the next server restart.
+      const pending = pendingIntakeDecision(this.state);
+      if (pending && !this.stopped) {
+        this.emitEvent({
+          type: "decision.rejected",
+          decisionId: pending.id,
+          violations: [
+            `W000 regeneration ended before a new reading was ready: ${error instanceof Error ? error.message : String(error)}`,
+          ],
+        });
+      }
+      throw error;
     } finally {
       this.intakeRefreshInFlight = false;
     }
@@ -1116,7 +1240,7 @@ export class ProjectEngine extends EventEmitter {
     }
     if (!envelope) return;
 
-    if (this.state.autonomy === "gated") {
+    if (this.state.config.autonomy === "gated") {
       this.emitEvent({ type: "gate.opened", decisionId });
       await this.until(() => this.state.decisions[decisionId]!.status !== "gated");
       if (this.stopped) return;
@@ -2380,6 +2504,7 @@ export class ProjectEngine extends EventEmitter {
     addTokens: number,
     addWaves: number,
     by = "human",
+    humanRevisionMarkdown?: string,
   ): void {
     const terminal = this.state.terminal;
     if (!terminal) throw new Error("project is not currently at a stopping report");
@@ -2389,6 +2514,14 @@ export class ProjectEngine extends EventEmitter {
     }
     if (!Number.isSafeInteger(addWaves) || addWaves < 0) {
       throw new Error("addWaves must be a non-negative safe integer");
+    }
+    if (humanRevisionMarkdown !== undefined) {
+      if (humanRevisionMarkdown.trim() === "") {
+        throw new Error("a human-written continuation view cannot be blank");
+      }
+      if (humanRevisionMarkdown.length > 16_000) {
+        throw new Error("a human-written continuation view cannot exceed 16,000 characters");
+      }
     }
     this.emitEvent({
       type: "project.continued",
@@ -2400,15 +2533,13 @@ export class ProjectEngine extends EventEmitter {
       by,
     });
     this.phaseTo("DISCOVERY", "owner continued research after a stopping report");
-    const directiveId = this.allocId("directive");
-    this.emitEvent({
-      type: "directive.submitted",
-      id: directiveId,
-      text:
-        "Continue beyond the previous stopping report. Treat that report as a checkpoint, not a reason to repeat old work. " +
-        `Owner's requested focus: ${note.trim()}`,
-      urgent: false,
-    });
+    if (humanRevisionMarkdown !== undefined) {
+      this.recordResearchManagerNote(
+        nextContinuationRevisionId(this.state),
+        humanRevisionMarkdown,
+        "human_edited",
+      );
+    }
     this.start();
   }
 
@@ -2421,17 +2552,29 @@ export class ProjectEngine extends EventEmitter {
   }
 
   setAutonomy(mode: "auto" | "gated", by = "human"): void {
-    if (this.state.autonomy !== mode) this.emitEvent({ type: "autonomy.changed", mode, by });
+    this.setProjectSettings({ ...this.getProjectSettings(), autonomy: mode }, by);
   }
 
   setWebSearch(enabled: boolean, by = "human"): void {
-    if (this.state.config.allowWebSearch !== enabled) {
-      this.emitEvent({ type: "webSearch.changed", enabled, by });
-    }
+    this.setProjectSettings({ ...this.getProjectSettings(), allowWebSearch: enabled }, by);
   }
 
   setModelSettings(settings: ActiveModelSettings, by = "human"): void {
-    const parsed = ActiveModelSettings.parse(settings);
+    this.setProjectSettings({ ...this.getProjectSettings(), models: settings }, by);
+  }
+
+  /** The one effective, user-editable project-settings projection. */
+  getProjectSettings(): ProjectSettings {
+    return projectSettingsFromConfig(this.state.config);
+  }
+
+  /**
+   * Atomically replace the effective project settings. Old specialized event
+   * types remain replayable, but every new UI/API update comes through this
+   * single event so model choice, autonomy, and search permission cannot drift.
+   */
+  setProjectSettings(settings: ProjectSettings, by = "human"): void {
+    const parsed = ProjectSettings.parse(settings);
     const clean = (choice: ModelChoice): ModelChoice => {
       const model = choice.model?.trim() || null;
       if (model !== null && (model.length > 200 || /\s/.test(model))) {
@@ -2440,19 +2583,50 @@ export class ProjectEngine extends EventEmitter {
       return { model, effort: choice.effort };
     };
     const models: ActiveModelSettings = {
-      researchManager: clean(parsed.researchManager),
-      solver: clean(parsed.solver),
-      explorer: clean(parsed.explorer),
-      reviewer: clean(parsed.reviewer),
-      synthesizer: clean(parsed.synthesizer),
+      researchManager: clean(parsed.models.researchManager),
+      solver: clean(parsed.models.solver),
+      explorer: clean(parsed.models.explorer),
+      reviewer: clean(parsed.models.reviewer),
+      synthesizer: clean(parsed.models.synthesizer),
     };
-    const current = this.state.config.models;
-    const unchanged = (Object.keys(models) as (keyof ActiveModelSettings)[]).every(
+    const next: ProjectSettings = {
+      models,
+      autonomy: parsed.autonomy,
+      allowWebSearch: parsed.allowWebSearch,
+      totalTokens: parsed.totalTokens,
+      maxWaves: parsed.maxWaves,
+    };
+    const current = this.getProjectSettings();
+    const spent = this.state.budget.spentTokens + this.state.budget.plannerSpentTokens;
+    if (next.totalTokens < spent) {
+      throw new Error(`token ceiling cannot be below the ${spent} tokens already spent`);
+    }
+    if (next.maxWaves < this.state.waveOrder.length) {
+      throw new Error(
+        `maximum research rounds cannot be below the ${this.state.waveOrder.length} already used`,
+      );
+    }
+    if (
+      this.openWaveId() !== null &&
+      (next.totalTokens < current.totalTokens || next.maxWaves < current.maxWaves)
+    ) {
+      throw new Error("resource ceilings cannot be lowered while a research round is open");
+    }
+    const modelsUnchanged = (Object.keys(models) as (keyof ActiveModelSettings)[]).every(
       (role) =>
-        current[role].model === models[role].model &&
-        current[role].effort === models[role].effort,
+        current.models[role].model === models[role].model &&
+        current.models[role].effort === models[role].effort,
     );
-    if (!unchanged) this.emitEvent({ type: "models.changed", models, by });
+    if (
+      modelsUnchanged &&
+      current.autonomy === next.autonomy &&
+      current.allowWebSearch === next.allowWebSearch &&
+      current.totalTokens === next.totalTokens &&
+      current.maxWaves === next.maxWaves
+    ) {
+      return;
+    }
+    this.emitEvent({ type: "project.settingsChanged", settings: next, by });
   }
 
   submitDirective(text: string, urgent: boolean): string {

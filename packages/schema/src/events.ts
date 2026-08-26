@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ActiveModelSettings, ProjectConfig, WorkerRole } from "./config.js";
+import { ActiveModelSettings, ProjectConfig, ProjectSettings, WorkerRole } from "./config.js";
 
 /**
  * Event taxonomy (DESIGN.md §5). Every state change in a project is exactly
@@ -156,7 +156,13 @@ export const IntakeSource = z.object({
 });
 export type IntakeSource = z.infer<typeof IntakeSource>;
 
-export const DecisionKind = z.enum(["next_move", "intake", "curation", "final"]);
+export const DecisionKind = z.enum([
+  "next_move",
+  "intake",
+  "continuation_revision",
+  "curation",
+  "final",
+]);
 export type DecisionKind = z.infer<typeof DecisionKind>;
 
 export const Actor = z.string(); // "conductor" | "planner" | "human" | task id
@@ -199,6 +205,7 @@ export const EventSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("autonomy.changed"), mode: z.enum(["auto", "gated"]), by: Actor }),
   z.object({ ...base, type: z.literal("models.changed"), models: ActiveModelSettings, by: Actor }),
   z.object({ ...base, type: z.literal("webSearch.changed"), enabled: z.boolean(), by: Actor }),
+  z.object({ ...base, type: z.literal("project.settingsChanged"), settings: ProjectSettings, by: Actor }),
 
   // Intake & human channel
   z.object({ ...base, type: z.literal("intake.rawUpdated"), statement: z.string(), contextMarkdown: z.string(), by: Actor }),

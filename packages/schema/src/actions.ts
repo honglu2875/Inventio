@@ -236,6 +236,18 @@ export const IntakeOutput = z.object({
 export type IntakeOutput = z.infer<typeof IntakeOutput>;
 
 /**
+ * A revised recurrent mathematical view prepared when the owner continues
+ * from a stopping report. This is deliberately much smaller than a next-move
+ * response: it changes the Manager's understanding before any work is sent.
+ */
+export const ContinuationRevisionOutput = z.object({
+  managerNoteMarkdown: z.string().min(1).max(16_000),
+  /** One or two complete sentences used only for navigation in the UI. */
+  managerAbstract: z.string().min(1).max(320),
+});
+export type ContinuationRevisionOutput = z.infer<typeof ContinuationRevisionOutput>;
+
+/**
  * A short working-library card written by the curator, not a new proof.
  * Sources make the condensation reversible; the conductor derives the
  * persisted provenance and keeps every superseded source in the event log.

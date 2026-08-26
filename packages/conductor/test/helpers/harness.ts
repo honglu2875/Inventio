@@ -7,6 +7,7 @@ import {
   defaultConfig,
   initialState,
   type ActionEnvelope,
+  type ContinuationRevisionOutput,
   type CurationOutput,
   type Event,
   type FinalOutput,
@@ -43,6 +44,7 @@ export const SIM_BIN = path.resolve(
 
 /** Prompt discriminators — must match packages/conductor/src/prompts/researchManager.ts. */
 export const INTAKE_MATCH = "Read the complete raw intake materials";
+export const CONTINUATION_REVISION_MATCH = "Revise your current mathematical view";
 export const DECISION_MATCH = "choose one proportionate next step";
 export const CURATION_MATCH = "Assess the completed research round";
 export const FINAL_MATCH = "Compose the final report";
@@ -211,6 +213,18 @@ export function intakeOutput(problemMarkdown = "# Problem\n\nShow that the widge
     ambiguities: [],
     clarifications: [],
     notes: "",
+  };
+}
+
+export function continuationRevisionOutput(
+  over: Partial<ContinuationRevisionOutput> = {},
+): ContinuationRevisionOutput {
+  return {
+    managerAbstract:
+      "The renewed project broadens the earlier local approach while retaining its established conclusions.",
+    managerNoteMarkdown:
+      "## Current mathematical view\n\nThe earlier local reduction remains useful, but it is no longer the sole direction. The owner's continuation asks that genuinely different approaches remain active in the coming rounds.",
+    ...over,
   };
 }
 

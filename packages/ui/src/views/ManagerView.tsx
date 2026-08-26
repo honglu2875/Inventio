@@ -1,4 +1,8 @@
 import Markdown from "../components/Markdown";
+import {
+  nextContinuationRevisionId,
+  pendingContinuationRevision,
+} from "@inventio/schema";
 import { useProjectSlug } from "../components/ProjectContext";
 import { useProjectState } from "../store/hooks";
 
@@ -22,6 +26,8 @@ export default function ManagerView(): JSX.Element {
   const notes = state.researchManagerNotes ?? [];
   const latest = notes.at(-1);
   const previous = notes.slice(0, -1).reverse();
+  const pendingRevision = pendingContinuationRevision(state);
+  const pendingRevisionId = pendingRevision ? nextContinuationRevisionId(state) : null;
 
   return (
     <div className="manager-view">
@@ -30,12 +36,22 @@ export default function ManagerView(): JSX.Element {
           <span className="eyebrow">Research Manager</span>
           <h1>Current mathematical view</h1>
         </div>
-        {latest ? (
+        {pendingRevisionId ? (
+          <span className="manager-note-meta mono">{pendingRevisionId} · revising</span>
+        ) : latest ? (
           <span className="manager-note-meta mono">
             {latest.waveId} · {formatRecordedAt(latest.recordedAt)}
           </span>
         ) : null}
       </header>
+
+      {pendingRevisionId ? (
+        <div className="manager-revision-pending" role="status">
+          <strong>{pendingRevisionId}</strong> is being prepared from the preceding mathematical
+          view, the stopping report, and the complete continuation direction. No new research
+          round is planned until this revision is recorded.
+        </div>
+      ) : null}
 
       {latest ? (
         <article className={"manager-note latest" + (latest.source === "fallback" ? " fallback" : "")}>

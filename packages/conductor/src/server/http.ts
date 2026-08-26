@@ -82,6 +82,13 @@ const ModelSettingsBody = z.object({
   reviewer: SettingsModelChoice,
   synthesizer: SettingsModelChoice,
 });
+const ProjectSettingsBody = z.object({
+  models: ModelSettingsBody,
+  autonomy: z.enum(["auto", "gated"]),
+  allowWebSearch: z.boolean(),
+  totalTokens: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  maxWaves: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+});
 const DirectiveBody = z.object({
   text: z.string().min(1).max(10_000),
   urgent: z.boolean().optional(),
@@ -97,6 +104,7 @@ const ContinueBody = z.object({
   note: z.string().min(1).max(10_000),
   addTokens: z.number().int().min(0).max(100_000_000).default(0),
   addWaves: z.number().int().min(0).max(100).default(0),
+  humanRevisionMarkdown: z.string().min(1).max(16_000).optional(),
 });
 const ClaimStatusBody = z.object({
   to: z.enum(["VERIFIED", "REFUTED"]),
@@ -561,7 +569,13 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
     run(reply, () => {
       const engine = engineOf(request.params.slug);
       const body = parseBody(ContinueBody, request.body);
-      engine.continueResearch(body.note, body.addTokens, body.addWaves);
+      engine.continueResearch(
+        body.note,
+        body.addTokens,
+        body.addWaves,
+        "human",
+        body.humanRevisionMarkdown,
+      );
       return {
         ok: true,
         phase: engine.state.phase,
@@ -576,7 +590,20 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
       const engine = engineOf(request.params.slug);
       const body = parseBody(AutonomyBody, request.body);
       engine.setAutonomy(body.mode);
-      return { ok: true, autonomy: engine.state.autonomy };
+      return { ok: true, autonomy: engine.state.config.autonomy };
+    }),
+  );
+
+  app.get<{ Params: { slug: string } }>("/api/projects/:slug/settings", async (request, reply) =>
+    run(reply, () => ({ settings: engineOf(request.params.slug).getProjectSettings() })),
+  );
+
+  app.post<{ Params: { slug: string } }>("/api/projects/:slug/settings", async (request, reply) =>
+    run(reply, () => {
+      const engine = engineOf(request.params.slug);
+      const body = parseBody(ProjectSettingsBody, request.body);
+      engine.setProjectSettings(body);
+      return { ok: true, settings: engine.getProjectSettings() };
     }),
   );
 

@@ -252,15 +252,15 @@ export default function TopStrip({ slug, state }: { slug: string; state: Project
             ) : null}
             <button
               type="button"
-              className={`toggle${state.autonomy === "gated" ? " on" : ""}`}
+              className={`toggle${state.config.autonomy === "gated" ? " on" : ""}`}
               disabled={guard.disabled}
               {...(guard.title === undefined ? {} : { title: guard.title })}
               onClick={() => {
-                const mode = state.autonomy === "auto" ? "gated" : "auto";
+                const mode = state.config.autonomy === "auto" ? "gated" : "auto";
                 void run(() => api.setAutonomy(slug, mode));
               }}
             >
-              {state.autonomy === "auto" ? "Auto" : "Gated"}
+              {state.config.autonomy === "auto" ? "Auto" : "Gated"}
             </button>
             {state.terminal ? (
               <button

@@ -148,13 +148,15 @@ Every state change is one typed event:
 Lifecycle & phases
 - `project.created { title, statement, config }`
 - `project.paused { by }` / `project.resumed { by }`
-- `autonomy.changed { mode, by }`
-- `models.changed { models, by }` (the five user-selectable roles; legacy
-  `intake` and `planner` choices remain in stored config)
-- `webSearch.changed { enabled, by }` (project permission for future worker
-  assignments; the Research Manager still grants search task by task)
+- `project.settingsChanged { settings, by }` (one atomic effective value for
+  token/round ceilings, autonomy, Web-search permission, and the five
+  user-selectable model roles)
+- `autonomy.changed`, `models.changed`, and `webSearch.changed` remain in the
+  schema only so older project logs replay; new updates use the unified event
 - `phase.changed { from, to, reason }`
 - `terminal.reached { result: "PROVED"|"DISPROVED"|"UNCERTAIN", finalPath }`
+- `project.continued { previousResult, previousFinalPath, note, addTokens,
+  addWaves, by }` (the note is retained verbatim for the entire resumed period)
 
 Intake & human channel
 - `intake.rawUpdated { statement, contextMarkdown, by }` (explicit owner
@@ -162,7 +164,9 @@ Intake & human channel
 - `intake.sourcesUpdated { sources: IntakeSource[] }` (verbatim path, size,
   SHA-256, short abstract, and conclusion-oriented excerpt)
 - `intake.completed { problemMarkdown, ...legacyCompatibilityFields }`
-- `manager.noteRecorded { waveId: "W000", abstract, markdown, source }`
+- `manager.noteRecorded { waveId, abstract, markdown, source }` (`W000` is the
+  intake view; `W020.2`, `.3`, … are post-report revisions at the W020
+  checkpoint)
 - `problem.confirmed { problemMarkdown }` (human accepts the directly edited
   W000 and begins research)
 - `directive.submitted { id, text, urgent }` / `directive.consumed { id, decisionId }`
@@ -238,22 +242,44 @@ plus orthogonal flags: `paused`, `blocked` (a blocking Question is open),
 `gated` (a decision awaits human resolution). The engine's main loop:
 
 1. If paused / blocked / gated / terminal → idle (event-driven wake).
-2. If a wave is open → supervise tasks (dispatch queued tasks as pool
+2. If the owner has just continued from a stopping report → prepare the
+   numbered revised mathematical view before any new research decision.
+3. If a wave is open → supervise tasks (dispatch queued tasks as pool
    slots free, meter budgets, collect outputs). When all tasks are
    terminal → build a factual round summary → ask the Research Manager to
    assess the round and rewrite its current note → close wave.
-3. If no wave is open → decision point: build decision packet → call
+4. If no wave is open → decision point: build decision packet → call
    Research Manager → validate → execute accepted action.
-4. After every `review.recorded` or `issue.resolved` or `claim.status` →
+5. After every `review.recorded` or `issue.resolved` or `claim.status` →
    evaluate the acceptance predicate on the reviewed candidate; on pass →
    Final composition → `terminal.reached`.
+
+#### Continuing from a stopping report
+
+Continue Research does not dispatch work directly. The saved report remains
+immutable, resource extensions are applied, and the Research Manager receives
+the preceding recurrent view, the full report, and the owner's verbatim
+direction in one bounded revision call. The result is recorded at the last
+completed round's checkpoint: for example, W020 is followed by W020.2; another
+continuation without a new round becomes W020.3. This is a revised mathematical
+view, not a research round and not an executable plan.
+
+By default the configured Research Manager writes the revision. The owner may
+instead supply the complete revised view directly, in which case it is recorded
+as `human_edited` without a model call. Only after the revision exists may the
+ordinary next-move call choose W021. The owner's original direction is also
+supplied verbatim as `continuation-direction.md` to every next-move,
+completed-round assessment, and final-composition call until the next stopping
+report. Thus new mathematics can change the Manager's judgment, but a
+multi-part continuation request cannot disappear after one decision.
 
 ### 6.2 Decision points and validation
 
 The decision input (assembled fresh each call, bounded size) contains the
 confirmed problem, the Research Manager's current note, short active-library
 abstracts, the latest round's findings and assessment, claim and candidate
-status, resource accounting, owner guidance, and the legal action description.
+status, resource accounting, owner guidance, the full active continuation
+direction when present, and the legal action description.
 The Manager may search and expand older library notes through read-only tools
 when the short active surface is insufficient.
 
@@ -528,6 +554,10 @@ a mathematician preparing to manage the research, preserve the exact meaning
 of named methods, and write its present view—not to solve, plan a round,
 manufacture a taxonomy, or question the owner. The default Manager model is
 `gpt-5.6-sol` at `max` effort, and that same project setting governs W000.
+An owner-supplied tone contrast softly establishes a preference for substantive
+mathematical engagement over administrative distance from the submission. It
+is an example of taste, not a template or required sequence. W000 remains an
+editable mathematical view rather than a report of the reading process.
 
 The Manager receives a separate voice-example file. Four owner-written
 examples are canonical; inferred examples are visibly marked
@@ -718,9 +748,10 @@ cached by artifact id + seq.
   action as an approve/edit/reject card (the edit form is schema-driven
   from the action envelope).
 - **Pause/Resume**, project-level.
-- **Model settings**: editable model ID and reasoning effort for Research
-  Manager, Solver, Explorer, Reviewer, and Synthesizer. W000 uses the Research
-  Manager choice. A blank model
+- **Project settings**: one saved form reads the effective event-sourced value
+  and edits the token ceiling, maximum research rounds, autonomy, Web-search
+  permission, model ID, and reasoning effort for Research Manager, Solver,
+  Explorer, Reviewer, and Synthesizer. W000 uses the Research Manager choice. A blank model
   uses the Codex CLI account default. Changes apply to processes launched after
   the settings event, including queued assignments that have not started;
   already-running processes retain their launch configuration.
@@ -738,9 +769,12 @@ cached by artifact id + seq.
   rendered preview. The S### catalog remains expandable below. The owner may
   reopen the raw objective, background, and file list, revise them, and ask the
   Manager to regenerate W000; a raw revision makes the earlier W000 visibly
-  stale and unconfirmable until regeneration succeeds. Accepting the edit
-  starts discovery and locks the retained intake; there is no questionnaire or
-  intake chat.
+  stale and unconfirmable until regeneration succeeds. While that reading is
+  active, its shared decision state keeps every client locked even after tab
+  changes or reloads. A server restart closes an interrupted reading and
+  preserves the preceding W000 for another attempt. Accepting the edit starts
+  discovery and locks the retained intake; there is no questionnaire or intake
+  chat.
 
 ### 11.8 Visual language
 
@@ -778,6 +812,7 @@ validated; artifact reads path-confined to the project directory.
 | POST | `/api/projects/:slug/autonomy` | `{ mode: "auto"\|"gated" }` |
 | POST | `/api/projects/:slug/web-search` | `{ enabled }`; permit or deny Web search for future worker launches |
 | POST | `/api/projects/:slug/models` | complete active-role model map; affects future process launches |
+| GET/POST | `/api/projects/:slug/settings` | retrieve or atomically replace effective resource ceilings, autonomy, Web-search, and active-role model settings |
 | POST | `/api/projects/:slug/directives` | `{ text, urgent }` |
 | POST | `/api/projects/:slug/questions/:id/answer` \| `dismiss` | `{ answer? }` |
 | POST | `/api/projects/:slug/gates/:decisionId` | `{ resolution: "approve"\|"edit"\|"reject", action?, note? }` |
@@ -816,9 +851,13 @@ is ever forwarded.
 }
 ```
 
-`project.json` supplies the creation-time configuration. Later model and Web
-search changes are written as `models.changed` and `webSearch.changed` events,
-so replay, cloning, and the live UI see the same effective settings. Turning
+`project.json` supplies the creation-time configuration. The effective mutable
+projection is then owned by the event log: all new resource-ceiling, autonomy,
+model, and Web-search changes are written together as
+`project.settingsChanged`. The older
+specialized events remain replay-only compatibility. The snapshot, Settings
+view, worker launcher, Research Manager context, and fresh-start clone all read
+this same reduced configuration. Turning
 Web search off also removes it from planned assignments that have not launched;
 an already-running worker keeps its launch configuration. W000 remains an
 offline reading of owner-supplied materials. The old `planner` and `intake` fields remain

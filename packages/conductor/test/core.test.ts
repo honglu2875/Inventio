@@ -22,7 +22,10 @@ import {
   finalPacketFiles,
   intakePacketFiles,
 } from "../src/prompts/researchManager.js";
-import { RESEARCH_MANAGER_EXAMPLES } from "../src/prompts/managerExamples.js";
+import {
+  RESEARCH_MANAGER_EXAMPLES,
+  W000_VOICE_EXAMPLE,
+} from "../src/prompts/managerExamples.js";
 import { validateAction } from "../src/engine/validate.js";
 
 const tmp = () => mkdtempSync(path.join(os.tmpdir(), "collq-core-"));
@@ -333,6 +336,22 @@ describe("academic model-facing language", () => {
     expect(RESEARCH_MANAGER_EXAMPLES).toContain(String.raw`$\mathbb P^1\times\mathbb P^5$`);
     expect(RESEARCH_MANAGER_EXAMPLES).not.toMatch(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/);
  });
+
+  it("gives W000 an owner voice contrast without turning it into a checklist", () => {
+    const intake = intakePacketFiles("Prove the genus-two conjecture.", "");
+    const contract = intake["AGENTS.md"]!;
+    const example = intake["w000-voice-example.md"]!;
+    const preferred = example.split("## Prefer")[1]!;
+
+    expect(example).toBe(W000_VOICE_EXAMPLE);
+    expect(contract).toContain("not a procedure, checklist, or required");
+    expect(contract).toContain("use your own mathematical judgment");
+    expect(contract).not.toMatch(/conditional consequences|relevant mechanism|say (?:so|that) once/i);
+    expect(example).toContain("## Avoid");
+    expect(preferred).toMatch(/genus-one\s+Virasoro relations/);
+    expect(preferred).toContain("interesting but unverified claim");
+    expect(preferred).not.toMatch(/\b(packet|owner reports|I regard)\b/i);
+  });
 
   it("distinguishes write-up, library-note, and claim IDs in next-step guidance", () => {
     const state = readyState();

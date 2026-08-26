@@ -32,7 +32,7 @@ curl -sf -X POST "$BASE/api/projects" \
 section "GET /api/projects/$SLUG  (snapshot)"
 if [ -n "$JQ" ]; then
   curl -sf "$BASE/api/projects/$SLUG" \
-    | "$JQ" '{seq, phase: .state.phase, paused: .state.paused, autonomy: .state.autonomy,
+    | "$JQ" '{seq, phase: .state.phase, paused: .state.paused, autonomy: .state.config.autonomy,
               title: .state.title, waves: (.state.waveOrder | length)}' || die "snapshot"
 else
   curl -sf "$BASE/api/projects/$SLUG" >/dev/null || die "snapshot"

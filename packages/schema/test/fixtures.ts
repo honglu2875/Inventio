@@ -90,6 +90,22 @@ export function buildCanonicalEvents(): Event[] {
     by: "human",
   });
   ev("webSearch.changed", { enabled: true, by: "human" });
+  ev("project.settingsChanged", {
+    settings: {
+      models: {
+        researchManager: { model: "gpt-5.6-sol", effort: "max" },
+        solver: { model: "gpt-5.6-sol", effort: "max" },
+        explorer: { model: null, effort: "medium" },
+        reviewer: { model: null, effort: "high" },
+        synthesizer: { model: "gpt-5.6-terra", effort: "high" },
+      },
+      autonomy: "auto",
+      allowWebSearch: true,
+      totalTokens: 40_000_000,
+      maxWaves: 20,
+    },
+    by: "human",
+  });
   ev("directive.submitted", { id: "D001", text: "Try induction first.", urgent: false });
 
   ev("decision.requested", { decisionId: "DEC001", kind: "next_move", waveId: null });

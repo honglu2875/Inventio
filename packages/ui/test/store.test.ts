@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import type { Event } from "@inventio/schema";
+import { defaultConfig, projectSettingsFromConfig, type Event } from "@inventio/schema";
 import { defaultCollapsed, reconcileCollapse, runningWaveIds } from "../src/lib/collapse.js";
 import { collapsedSet, useStore } from "../src/store/store.js";
 
@@ -87,6 +87,52 @@ describe("fixture fold", () => {
     fold("log", [HAPPY]);
     expect(slotOf("log").events.length).toBe(HAPPY.length);
     expect(slotOf("log").waveIds).toEqual(["W001"]);
+  });
+});
+
+describe("project settings projection", () => {
+  beforeEach(() => {
+    useStore.setState({ projects: {}, collapse: {}, toasts: [] });
+  });
+
+  it("shows the creation value and folds one atomic later settings change", () => {
+    const config = defaultConfig();
+    config.allowWebSearch = true;
+    config.autonomy = "gated";
+    const created: Event = {
+      seq: 1,
+      ts: new Date(1).toISOString(),
+      type: "project.created",
+      slug: "settings-test",
+      title: "Settings test",
+      statement: "Prove P.",
+      contextMarkdown: "",
+      config,
+    };
+    fold("settings-test", [[created]]);
+    expect(projectSettingsFromConfig(slotOf("settings-test").state!.config)).toMatchObject({
+      allowWebSearch: true,
+      autonomy: "gated",
+    });
+
+    const settings = projectSettingsFromConfig(config);
+    settings.allowWebSearch = false;
+    settings.autonomy = "auto";
+    settings.totalTokens = 55_000_000;
+    settings.maxWaves = 30;
+    const changed: Event = {
+      seq: 2,
+      ts: new Date(2).toISOString(),
+      type: "project.settingsChanged",
+      settings,
+      by: "human",
+    };
+    useStore.getState().applyEvents("settings-test", [changed]);
+    const state = slotOf("settings-test").state!;
+    expect(projectSettingsFromConfig(state.config)).toEqual(settings);
+    expect(state.budget.totalTokens).toBe(55_000_000);
+    expect(state.autonomy).toBe(state.config.autonomy);
+    expect(slotOf("settings-test").lastError).toBeNull();
   });
 });
 

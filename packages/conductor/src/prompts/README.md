@@ -28,10 +28,10 @@ instruction boundary.
 
 | File | What may be revised there | Direct consumers |
 |---|---|---|
-| `researchManager.ts` | W000, next-move, completed-round assessment, legacy statement-revision, and final-report contracts; all Research Manager context-file composition | `engine/engine.ts` |
+| `researchManager.ts` | W000, post-report W###.n revision, next-move, completed-round assessment, legacy statement-revision, and final-report contracts; all Research Manager context-file composition | `engine/engine.ts` |
 | `workers.ts` | Solver, Explorer, Reviewer, and Synthesizer contracts; generated worker `AGENTS.md`; generated `research-question.md` | `engine/packets.ts` |
 | `shared.ts` | Mathematical-writing rules inserted into both Research Manager and worker contracts | `researchManager.ts`, `workers.ts` |
-| `managerExamples.ts` | Owner-written and owner-review Research Manager voice examples | `researchManager.ts` |
+| `managerExamples.ts` | Owner-written and owner-review Research Manager voice examples, including the W000 voice-and-emphasis contrast | `researchManager.ts` |
 | `operational.ts` | Short launch, resume, focused-follow-up, unusable-work, replacement-worker, structured-output repair, and automatic retry messages | `engine/engine.ts`, `codex/structured.ts` |
 | `tools.ts` | Model-visible names, descriptions, and argument descriptions for the memory and original-source MCP tools | `memory/service.ts` |
 | `diagnostics.ts` | Prompts used only by manual Codex diagnostic scripts, never by a research project | `scripts/probe-mcp-approval.ts` |
@@ -59,7 +59,8 @@ allowed, writes `output-schema.json`, and invokes `codex/structured.ts`.
   though the production caller currently always passes `false`.
 - **Long contract:** `INTAKE_CONTRACT`, written as packet `AGENTS.md` by
   `intakePacketFiles()`.
-- **Context:** verbatim `statement.md`, optional `context.md`,
+- **Context:** verbatim `statement.md`, optional `context.md`, the
+  owner-supplied `w000-voice-example.md` contrast,
   `raw-materials/index.md`, and copies/extractions of every indexed intake
   source.
 - **Output:** `IntakeOutput` from `@inventio/schema`, principally the editable
@@ -82,6 +83,30 @@ allowed, writes `output-schema.json`, and invokes `codex/structured.ts`.
 - **Isolation:** standalone call with memory disabled; it uses the legacy
   intake model setting for replay compatibility.
 
+### Revising the view after a stopping report
+
+- **When:** immediately after the owner chooses Continue Research and before
+  any new research round or next-move decision. If the owner supplies the
+  complete revised view directly, the call is skipped and that text is
+  recorded with `human_edited` authorship.
+- **Short prompt:** `CONTINUATION_REVISION_PROMPT`.
+- **Long contract:** `CONTINUATION_REVISION_CONTRACT`, written by
+  `continuationRevisionPacketFiles()` as `AGENTS.md`.
+- **Context:** the previous recurrent view, immutable stopping report, complete
+  continuation comment, confirmed problem, current record and working library,
+  voice examples, and compact intake context.
+- **Output:** `ContinuationRevisionOutput`: the revised mathematical view and
+  its one- or two-sentence navigation abstract.
+- **Persistence:** the note is numbered from the last completed round, for
+  example `W020.2`; repeated continuations without a new round become `.3`,
+  `.4`, and so on. The full owner comment remains separately present as
+  `continuation-direction.md` in later next-move, assessment, and final calls
+  until another stopping report is reached.
+- **Recovery:** a stopped process leaves the revision pending for replay. A
+  failed completed call records a visibly marked fallback containing the
+  owner's direction and preceding view, then continues without asking the
+  owner an operational question.
+
 ### Choosing the next mathematical step
 
 - **When:** the project is active, not paused/blocked/gated/terminal, no round
@@ -91,7 +116,8 @@ allowed, writes `output-schema.json`, and invokes `codex/structured.ts`.
   `decisionPacketFiles()` as `AGENTS.md`.
 - **Context:** confirmed problem, current Research Manager view, current
   mathematical record, working library, voice examples, newest round/report
-  material, owner guidance, and the active candidate when one exists.
+  material, pending owner guidance, the full active continuation direction,
+  and the active candidate when one exists.
 - **Output:** `ActionEnvelope` from `@inventio/schema`.
 - **Validation/retry:** `engine/validate.ts` checks the proposed action. A
   failed process gets `nextMoveCallRetryNote()`; an illegal action gets
@@ -109,7 +135,8 @@ allowed, writes `output-schema.json`, and invokes `codex/structured.ts`.
   `curationPacketFiles()` as `AGENTS.md`.
 - **Context:** deterministic round findings, complete structured reports,
   previous short role notes, current mathematical record and library, previous
-  Research Manager view, voice examples, and the previous project summary.
+  Research Manager view, voice examples, the previous project summary, and the
+  full active continuation direction when the run resumed from a report.
 - **Output:** `CurationOutput`: a rewritten current view, mathematical account
   of the round, a decision for every assignment, bounded claim/library edits,
   short role notes, and a compact project summary.
@@ -127,7 +154,8 @@ allowed, writes `output-schema.json`, and invokes `codex/structured.ts`.
 - **Long contract:** `FINAL_CONTRACT`, written by `finalPacketFiles()` as
   `AGENTS.md`.
 - **Context:** confirmed problem, current record and view, project summary,
-  verified partial-results section, and accepted candidate when applicable.
+  verified partial-results section, active continuation direction, and accepted
+  candidate when applicable.
 - **Output:** `FinalOutput.finalMarkdown`. The Conductor—not the model—prepends
   the authoritative `RESULT:` line. If composition cannot run, deterministic
   fallback prose is used.

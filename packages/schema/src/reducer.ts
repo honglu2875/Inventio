@@ -71,6 +71,7 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
       return state;
     }
     case "autonomy.changed":
+      state.config.autonomy = event.mode;
       state.autonomy = event.mode;
       return state;
     case "models.changed":
@@ -78,6 +79,17 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
       return state;
     case "webSearch.changed":
       state.config.allowWebSearch = event.enabled;
+      return state;
+    case "project.settingsChanged":
+      state.config.models = { ...state.config.models, ...event.settings.models };
+      state.config.autonomy = event.settings.autonomy;
+      state.config.allowWebSearch = event.settings.allowWebSearch;
+      state.config.budget.totalTokens = event.settings.totalTokens;
+      state.budget.totalTokens = event.settings.totalTokens;
+      state.config.limits.maxWaves = event.settings.maxWaves;
+      // Compatibility projection retained for old UI snapshots. Runtime code
+      // reads config.autonomy, so config remains the sole effective setting.
+      state.autonomy = event.settings.autonomy;
       return state;
 
     // ---- intake & human channel -----------------------------------------
@@ -222,6 +234,7 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
       bump(state, "wave", event.waveId);
       state.waves[event.waveId] = {
         id: event.waveId,
+        plannedAtSeq: event.seq,
         title: event.title,
         status: "open",
         decisionId: event.decisionId,
@@ -564,8 +577,8 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
         recordedAtSeq: event.seq,
         recordedAt: event.ts,
       };
-      // A curation call may be retried after a process crash. Keep one
-      // authoritative snapshot per round instead of duplicating its history.
+      // A call may be retried after a process crash. Keep one authoritative
+      // snapshot per round or numbered checkpoint revision.
       const existing = state.researchManagerNotes.findIndex((entry) => entry.waveId === event.waveId);
       if (existing === -1) state.researchManagerNotes.push(note);
       else state.researchManagerNotes[existing] = note;

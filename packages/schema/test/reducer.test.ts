@@ -8,6 +8,9 @@ import {
   applyEvent,
   defaultConfig,
   initialState,
+  nextContinuationRevisionId,
+  pendingIntakeDecision,
+  pendingContinuationRevision,
   replay,
   usageSpend,
   validateActionEnvelope,
@@ -74,6 +77,85 @@ describe("intake abstracts", () => {
 });
 
 describe("reducer", () => {
+  it("derives an in-progress intake reading from durable decision state", () => {
+    const state = initialState();
+    applyEvent(state, {
+      type: "project.created",
+      slug: "intake-busy",
+      title: "Intake busy",
+      statement: "Prove P.",
+      config: defaultConfig(),
+      seq: 1,
+      ts: "created",
+    });
+    applyEvent(state, {
+      type: "decision.requested",
+      decisionId: "DEC001",
+      kind: "intake",
+      waveId: null,
+      seq: 2,
+      ts: "requested",
+    });
+    expect(pendingIntakeDecision(state)?.id).toBe("DEC001");
+
+    applyEvent(state, {
+      type: "decision.proposed",
+      decisionId: "DEC001",
+      action: null,
+      usage: null,
+      seq: 3,
+      ts: "finished",
+    });
+    expect(pendingIntakeDecision(state)).toBeNull();
+  });
+
+  it("derives W###.2 continuation views before any later research round", () => {
+    const events = buildCanonicalEvents();
+    const continuedAt = events.findIndex((event) => event.type === "project.continued");
+    const state = replay(initialState(), events.slice(0, continuedAt + 2));
+
+    expect(state.terminal).toBeNull();
+    expect(pendingContinuationRevision(state)?.note).toContain("parity reduction");
+    expect(nextContinuationRevisionId(state)).toBe("W001.2");
+
+    applyEvent(
+      state,
+      EventSchema.parse({
+        type: "manager.noteRecorded",
+        waveId: "W001.2",
+        path: "artifacts/manager-notes/W001.2.md",
+        markdown: "The renewed view keeps the parity reduction and broadens the search.",
+        abstract: "The renewed view broadens the search.",
+        source: "research_manager",
+        seq: state.seq + 1,
+        ts: "2026-08-26T00:00:00.000Z",
+      }),
+    );
+    expect(pendingContinuationRevision(state)).toBeNull();
+    expect(nextContinuationRevisionId(state)).toBe("W001.3");
+  });
+
+  it("does not insert a retroactive revision into a legacy continuation that already planned work", () => {
+    const events = buildCanonicalEvents();
+    const continuedAt = events.findIndex((event) => event.type === "project.continued");
+    const state = replay(initialState(), events.slice(0, continuedAt + 2));
+    applyEvent(
+      state,
+      EventSchema.parse({
+        type: "wave.planned",
+        waveId: "W002",
+        title: "Legacy post-continuation round",
+        decisionId: "DEC999",
+        roster: [],
+        reserveTokens: 0,
+        rationale: "This round was already planned by an older engine.",
+        seq: state.seq + 1,
+        ts: "2026-08-26T00:00:01.000Z",
+      }),
+    );
+    expect(pendingContinuationRevision(state)).toBeNull();
+  });
+
   it("loads legacy configs with a strong Research Manager default", () => {
     const legacy = defaultConfig() as unknown as Record<string, unknown>;
     const models = { ...(legacy.models as Record<string, unknown>) };
@@ -83,7 +165,7 @@ describe("reducer", () => {
     expect(parsed.models.researchManager).toEqual({ model: "gpt-5.6-sol", effort: "max" });
   });
 
-  it("persists user model settings while retaining the legacy compatibility key", () => {
+  it("persists unified project settings while retaining legacy compatibility fields", () => {
     const state = replay(initialState(), buildCanonicalEvents());
     expect(state.config.models.solver).toEqual({ model: "gpt-5.6-sol", effort: "max" });
     expect(state.config.models.researchManager).toEqual({
@@ -92,6 +174,12 @@ describe("reducer", () => {
     });
     expect(state.config.models.planner).toEqual({ model: null, effort: "high" });
     expect(state.config.allowWebSearch).toBe(true);
+    expect(state.config.autonomy).toBe("auto");
+    // The canonical history later continues once with another 100k tokens
+    // and two rounds; both extensions must remain reflected in config.
+    expect(state.config.budget.totalTokens).toBe(40_100_000);
+    expect(state.config.limits.maxWaves).toBe(22);
+    expect(state.autonomy).toBe(state.config.autonomy);
   });
 
   it("folds the canonical sequence without throwing and lands in TERMINAL", () => {

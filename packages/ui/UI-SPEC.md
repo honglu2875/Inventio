@@ -56,7 +56,7 @@ src/
 │   ├── ManagerView.tsx                # current Research Manager view + history
 │   ├── EvidenceView.tsx               # claim DAG
 │   ├── LibraryView.tsx                # library tree + content
-│   ├── SettingsView.tsx               # per-role model and reasoning effort
+│   ├── SettingsView.tsx               # unified project policy and model settings
 │   └── IntakeConfirm.tsx              # AWAITING_CONFIRMATION screen
 ├── components/
 │   ├── nodes/                         # one file per node type (§5)
@@ -161,7 +161,7 @@ interface UiStore {
 | `/p/:slug/manager` | ManagerView (latest mathematical view open; earlier views collapsed) |
 | `/p/:slug/evidence` | EvidenceView (`?version=C001.v2` selects a version) |
 | `/p/:slug/library` and `/p/:slug/library/:section/:id?` | LibraryView |
-| `/p/:slug/settings` | SettingsView (model and reasoning effort for each active role) |
+| `/p/:slug/settings` | SettingsView (effective project policy and models) |
 | `/p/:slug/node/:nodeId` | resolver: waves/tasks/candidates/reviews/questions → OpsView with inspector open + node centered; claims/issues/obligations → EvidenceView with inspector open; cards/artifacts → LibraryView |
 
 The inspector's open target is part of the URL (`/node/:nodeId` or a
@@ -248,7 +248,8 @@ Left→right:
    28×14px). Hidden when no candidate.
 5. Active workers count (`pool` glyph ⚙ n) when > 0.
 6. Right side: **Fresh start** (once intake exists), autonomy toggle (Auto /
-   Gated switch), Pause/Resume button, theme toggle, connection dot (live green
+   Gated switch), Pause/Resume button (or Continue Research at a stopping
+   report), theme toggle, connection dot (live green
    / reconnecting amber pulse / fixture purple). Fresh start requires a
    different project title and creates a separate project at editable intake
    confirmation. It copies the raw objective and background, project-local
@@ -262,14 +263,32 @@ and collapsed by default, with the round and timestamp in each heading. A
 fallback note is visibly marked and says that no new mathematical judgment was
 returned; it must never look like an ordinary Manager conclusion.
 
-SettingsView also has a project-level **Web search** permission. When enabled,
-the Research Manager may grant native Web search to an individual future worker
-assignment; it is not added to every worker automatically. Turning the setting
-off removes search from assignments waiting to launch, while already-running
-workers keep their launch configuration. W000 remains offline because it reads
-the owner's potentially private raw submission.
+Continue Research first creates a revised recurrent view at the preceding
+round's checkpoint (`W020.2`, then `.3` if needed) and only afterward permits a
+new research decision. The dialog accepts the complete owner direction and
+offers one explicit alternative: treat that text as the complete human-written
+revision instead of spending a Research Manager call. While the default
+revision is running, ManagerView shows the pending numbered view and states
+that no new round has yet been planned. Once recorded, it is the newest open
+view; the unabridged owner direction remains model-visible until the next
+stopping report.
 
-The same view edits the model ID and reasoning effort for Research Manager,
+SettingsView reads one effective project-settings value from the shared
+snapshot and saves the token ceiling, maximum research rounds, autonomy, Web
+search, and all active-role model choices in one atomic event. It must never
+initialize these fields from UI constants or a second browser-side settings
+store. The top-strip autonomy control and budget display are convenience
+projections of the same value. A ceiling cannot be lowered below resources
+already consumed, or lowered at all while a research round is open.
+
+When project-level **Web search** is enabled, the Research Manager may grant
+native Web search to an individual future worker assignment; it is not added
+to every worker automatically. Turning the setting off removes search from
+assignments waiting to launch, while already-running workers keep their launch
+configuration. W000 remains offline because it reads the owner's potentially
+private raw submission.
+
+The same saved form edits the model ID and reasoning effort for Research Manager,
 Solver, Explorer, Reviewer, and Synthesizer. W000 uses the Research Manager
 choice. Model fields accept known
 choices as suggestions without preventing a custom CLI model ID; an empty field
@@ -438,7 +457,8 @@ blocking ones open a modal with answer textarea (answer/dismiss).
   collapse defaults logic, fixture replay determinism.
 - URL resolver: `/p/x/node/T003` → ops+sel, `/p/x/node/K002` → evidence.
 - Format helpers: token formatting, truncation.
-- Model settings: user-selectable-role projection, legacy-project defaults, change detection.
+- Project settings: creation-value projection, unified settings-event replay,
+  legacy-event compatibility, active-role defaults, and change detection.
 - Components are NOT unit-tested in v1 (manual pass + fixture mode).
 
 ## 15. Acceptance checklist (executor: verify before reporting done)

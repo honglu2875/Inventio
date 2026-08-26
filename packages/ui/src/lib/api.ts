@@ -6,6 +6,7 @@ import type {
   IssueSeverity,
   IntakeMemory,
   Memo,
+  ProjectSettings,
   ProjectState,
   Result,
   TaskState,
@@ -239,10 +240,23 @@ export const api = {
     note: string,
     addTokens: number,
     addWaves: number,
+    humanRevisionMarkdown?: string,
   ): Promise<{ ok: true; phase: string; totalTokens: number; maxWaves: number }> =>
-    request("POST", `/projects/${enc(slug)}/continue`, { note, addTokens, addWaves }),
+    request("POST", `/projects/${enc(slug)}/continue`, {
+      note,
+      addTokens,
+      addWaves,
+      ...(humanRevisionMarkdown === undefined ? {} : { humanRevisionMarkdown }),
+    }),
   setAutonomy: (slug: string, mode: "auto" | "gated"): Promise<{ ok: true; autonomy: string }> =>
     request("POST", `/projects/${enc(slug)}/autonomy`, { mode }),
+  projectSettings: (slug: string): Promise<{ settings: ProjectSettings }> =>
+    request("GET", `/projects/${enc(slug)}/settings`),
+  setProjectSettings: (
+    slug: string,
+    settings: ProjectSettings,
+  ): Promise<{ ok: true; settings: ProjectSettings }> =>
+    request("POST", `/projects/${enc(slug)}/settings`, settings),
   setWebSearch: (slug: string, enabled: boolean): Promise<{ ok: true; enabled: boolean }> =>
     request("POST", `/projects/${enc(slug)}/web-search`, { enabled }),
   setModelSettings: (

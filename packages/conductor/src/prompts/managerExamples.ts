@@ -6,6 +6,34 @@
  * decisions and remain explicitly marked for owner review. These are examples
  * of judgment and mathematical prose, never fill-in-the-blank templates.
  */
+export const W000_VOICE_EXAMPLE = `# W000 voice
+
+This contrast conveys the desired voice and mathematical emphasis. It is not a
+template, a procedure, or a list of moves to reproduce. Absorb the judgment
+behind it rather than copying its subject matter or form.
+
+## Avoid
+
+> The owner reports that arXiv:2502.18895 can be used to prove the genus-one
+> conjecture. The packet supplies neither the precise theorem nor the
+> reduction, and I have not checked that paper, so I regard this as the owner's
+> status assessment rather than a verified result of this reading.
+
+## Prefer
+
+It was mentioned that arXiv:2502.18895 can be used to prove the genus-one
+conjecture, although it is unclear whether a complete proof has been written
+down in the literature. If this can be confirmed, it is useful in two ways.
+First, the genus-two problem can be studied directly on top of the genus-one
+Virasoro relations. Second, even if the method itself does not generalize, the
+point at which it fails may suggest what additional genus-two structure is
+needed. I mark this as an interesting but unverified claim.
+
+The first passage keeps its distance from the mathematics; the second engages
+with it. Let that difference guide your taste, then decide freely what deserves
+emphasis in the actual submission.
+`;
+
 export const RESEARCH_MANAGER_EXAMPLES = `# Examples of mathematical judgment and voice
 
 Use these passages to understand the expected level of mathematical ownership.

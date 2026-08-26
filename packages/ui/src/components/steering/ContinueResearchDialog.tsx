@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { ProjectState } from "@inventio/schema";
+import { nextContinuationRevisionId, type ProjectState } from "@inventio/schema";
 import { api } from "../../lib/api";
 import { formatExact, formatTokens } from "../../lib/format";
 import { useActionGuard, useApiAction } from "../../store/hooks";
@@ -23,15 +23,18 @@ export default function ContinueResearchDialog({
   const roundsRemaining = Math.max(0, state.config.limits.maxWaves - state.waveOrder.length);
   const suggestedTokens = remaining < state.config.budget.defaultTaskTokens * 2 ? 5_000_000 : 0;
   const suggestedWaves = roundsRemaining < 3 ? 5 : 0;
+  const revisionId = nextContinuationRevisionId(state);
   const [note, setNote] = useState(DEFAULT_FOCUS);
   const [tokens, setTokens] = useState(String(suggestedTokens));
   const [waves, setWaves] = useState(String(suggestedWaves));
+  const [useDirectView, setUseDirectView] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     setNote(DEFAULT_FOCUS);
     setTokens(String(suggestedTokens));
     setWaves(String(suggestedWaves));
+    setUseDirectView(false);
   }, [state.terminal?.finalPath, suggestedTokens, suggestedWaves]);
 
   const parsed = useMemo(() => {
@@ -54,8 +57,17 @@ export default function ContinueResearchDialog({
     if (busy || guard.disabled || note.trim() === "" || !parsed.valid) return;
     setBusy(true);
     void run(
-      () => api.continueResearch(slug, note.trim(), parsed.addTokens, parsed.addWaves),
-      "research continued from the saved checkpoint",
+      () =>
+        api.continueResearch(
+          slug,
+          note.trim(),
+          parsed.addTokens,
+          parsed.addWaves,
+          useDirectView ? note.trim() : undefined,
+        ),
+      useDirectView
+        ? `${revisionId} was recorded before the next research round`
+        : `${revisionId} is being prepared before the next research round`,
     )
       .then((result) => {
         if (result) onClose();
@@ -84,8 +96,18 @@ export default function ContinueResearchDialog({
         <div className="modal-body">
           <p>
             The current <strong>{state.terminal?.result}</strong> report stays immutable and
-            readable. A new research decision will receive that report, the complete existing
-            record, and your direction below.
+            readable. {useDirectView ? (
+              <>
+                Your text will be recorded directly as <strong>{revisionId}</strong> before the
+                next research round is chosen.
+              </>
+            ) : (
+              <>
+                The Research Manager will first revise its current mathematical view as
+                <strong> {revisionId}</strong>, using that report, the preceding view, and your
+                complete direction below. Only then will it choose the next research round.
+              </>
+            )}
           </p>
           <div className="continuation-summary">
             <span>
@@ -102,7 +124,11 @@ export default function ContinueResearchDialog({
             </span>
           </div>
           <label className="field">
-            <span className="field-label">What should the research chair push further?</span>
+            <span className="field-label">
+              {useDirectView
+                ? `Write the complete revised mathematical view for ${revisionId}`
+                : "What should the Research Manager reconsider or push further?"}
+            </span>
             <textarea
               className="textarea"
               rows={7}
@@ -110,6 +136,18 @@ export default function ContinueResearchDialog({
               value={note}
               onChange={(event) => setNote(event.target.value)}
             />
+          </label>
+          <label className="continuation-direct-view">
+            <input
+              type="checkbox"
+              checked={useDirectView}
+              disabled={busy}
+              onChange={(event) => setUseDirectView(event.target.checked)}
+            />
+            <span>
+              My text is already the complete revised mathematical view; record it directly
+              instead of asking the Research Manager to rewrite it.
+            </span>
           </label>
           <div className="continuation-fields">
             <label className="field">
@@ -153,7 +191,13 @@ export default function ContinueResearchDialog({
             {...(guard.title === undefined ? {} : { title: guard.title })}
             onClick={submit}
           >
-            {busy ? "Continuing…" : "Continue from this report"}
+            {busy
+              ? useDirectView
+                ? "Recording revision…"
+                : "Preparing revision…"
+              : useDirectView
+                ? `Record ${revisionId} and continue`
+                : `Prepare ${revisionId} and continue`}
           </button>
         </footer>
       </section>

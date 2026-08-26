@@ -54,6 +54,8 @@ export type WaveStatus = "open" | "softInterrupted" | "closed";
 
 export interface WaveState {
   id: string;
+  /** Event sequence at which this research round was accepted and created. */
+  plannedAtSeq: number;
   title: string;
   status: WaveStatus;
   decisionId: string;
@@ -211,7 +213,7 @@ export interface ContinuationState {
   atSeq: number;
 }
 
-/** One recurrent Research Manager view, rewritten after a completed round. */
+/** One recurrent Research Manager view, written at intake, a round, or a numbered continuation revision. */
 export interface ResearchManagerNoteState {
   waveId: string;
   path: string;
@@ -229,6 +231,7 @@ export interface ProjectState {
   seq: number;
   phase: Phase;
   paused: boolean;
+  /** @deprecated Compatibility mirror of config.autonomy. */
   autonomy: "auto" | "gated";
   statement: string;
   /** Long owner-supplied notes, kept verbatim and separate from the objective. */
@@ -278,6 +281,61 @@ export interface ProjectState {
   /** Owner-authorized resumptions; prior reports remain immutable evidence. */
   continuations: ContinuationState[];
   counters: Partial<Record<IdKind, number>>;
+}
+
+/**
+ * The latest intake decision is the only one that can still be running.
+ * Keeping this derivation in the shared schema lets every UI client recover
+ * the same busy state from a snapshot or SSE replay instead of relying on a
+ * component-local loading flag.
+ */
+export function pendingIntakeDecision(state: ProjectState): DecisionState | null {
+  for (let index = state.decisionOrder.length - 1; index >= 0; index -= 1) {
+    const decision = state.decisions[state.decisionOrder[index]!]!;
+    if (decision.kind !== "intake") continue;
+    return decision.status === "requested" ? decision : null;
+  }
+  return null;
+}
+
+/**
+ * Latest continuation awaiting its W###.n revised Manager view. A later wave
+ * marks an older, pre-revision continuation that must not be rewritten during
+ * replay after work has already begun.
+ */
+export function pendingContinuationRevision(
+  state: ProjectState,
+): ContinuationState | null {
+  if (state.terminal !== null) return null;
+  const continuation = state.continuations.at(-1);
+  if (!continuation) return null;
+  if (state.researchManagerNotes.some((note) => note.recordedAtSeq > continuation.atSeq)) {
+    return null;
+  }
+  if (
+    state.waveOrder.some(
+      (waveId) => state.waves[waveId]!.plannedAtSeq > continuation.atSeq,
+    )
+  ) {
+    return null;
+  }
+  return continuation;
+}
+
+/** W020 is version one at its checkpoint; renewed views are W020.2, .3, … */
+export function nextContinuationRevisionId(state: ProjectState): string {
+  const base = state.waveOrder.at(-1) ?? "W000";
+  let highest = 1;
+  for (const note of state.researchManagerNotes) {
+    if (note.waveId === base) {
+      highest = Math.max(highest, 1);
+      continue;
+    }
+    if (!note.waveId.startsWith(`${base}.`)) continue;
+    const suffix = Number(note.waveId.slice(base.length + 1));
+    if (Number.isSafeInteger(suffix) && suffix >= 2) highest = Math.max(highest, suffix);
+  }
+  return `${base}.${highest + 1}`;
 }
 
 export function initialState(): ProjectState {

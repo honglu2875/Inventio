@@ -226,7 +226,6 @@ export class EngineManager {
     // inherited; project-local uploads are copied below as ordinary bytes.
     const config = ProjectConfig.parse({
       ...source.state.config,
-      autonomy: source.state.autonomy,
       sourceMounts: [],
     });
     const legacyDigest = source.state.problem.contextDigestMarkdown;
@@ -382,7 +381,7 @@ export class EngineManager {
           phase: s.phase,
           paused: s.paused,
           terminal: s.terminal,
-          autonomy: s.autonomy,
+          autonomy: s.config.autonomy,
           waves: s.waveOrder.length,
           budget: s.budget,
           openBlockingQuestions: Object.values(s.questions).filter(

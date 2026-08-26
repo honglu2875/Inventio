@@ -1,6 +1,6 @@
 import { candidateLifecycle, type ProjectState } from "@inventio/schema";
 import { reviewBacklog, unassessedClaimSources } from "../engine/validate.js";
-import { RESEARCH_MANAGER_EXAMPLES } from "./managerExamples.js";
+import { RESEARCH_MANAGER_EXAMPLES, W000_VOICE_EXAMPLE } from "./managerExamples.js";
 import { TEX_LAYOUT_GUIDANCE } from "./shared.js";
 
 /**
@@ -38,10 +38,12 @@ of what the owner is trying to do and what the supplied material means.
 Write W000 in your natural mathematical voice. Do not force the material into
 a checklist or a predetermined taxonomy. Preserve the exact operational
 meaning of named methods and constructions from their surrounding context;
-do not silently replace one formalism by a nearby one. Distinguish the owner's
-claims and proposals from your own inferences whenever that distinction
-matters. Be prepared for W000 to become your recurrent starting point when you
-later choose and brief researchers.
+do not silently replace one formalism by a nearby one. Let the supplied W000
+voice contrast inform your tone and taste without treating it as a template.
+Use your own judgment about uncertainty, relevance, and emphasis. W000 is an
+editable mathematical view, not a report on the reading process. Be prepared
+for it to become your recurrent starting point when you later choose and brief
+researchers.
 
 Reply with ONLY one JSON object conforming to the provided output schema.`;
 
@@ -55,9 +57,17 @@ exact source for anything learned this way, distinguish it from the owner's mate
 and do not let search results broaden or replace the stated objective.`
       : `Literature search is not enabled. Work from the submitted materials and ordinary
 mathematical knowledge. Do not fill uncertainty about a named paper or method from
-memory: mark the point as unverified and preserve the owner's intended meaning.`
+memory; preserve both the uncertainty and the intended mathematical meaning.`
   }`;
 }
+
+/**
+ * engine/engine.ts → prepareContinuationRevision(): a short, non-executive
+ * pass between an immutable stopping report and the next research decision.
+ */
+export const CONTINUATION_REVISION_PROMPT =
+  "Read only the files in this directory. Revise your current mathematical view in light of the stopping report and the owner's complete continuation direction. Do not choose assignments or begin a new research round. " +
+  "Reply with ONLY one JSON object conforming to the provided output schema.";
 
 /**
  * engine/engine.ts → runCuration(): stdin message after a research round
@@ -87,6 +97,16 @@ mind. The accompanying voice examples show a style of judgment, not a form to
 copy. Use disciplinary knowledge and take an intellectual position; do not
 turn the project into a workflow for its own sake. Agreement is not proof. A
 final conclusion requires a complete argument and independent referee reports.
+
+When continuation-direction.md is present, it is the owner's complete current
+direction for the resumed project. The numbered revision in
+research-manager-current-view.md was written from that direction immediately
+before this decision. It supersedes categorical planning language in the
+pre-continuation view. A multi-part direction need not be exhausted in one
+round, but do not silently collapse requested orthogonal approaches into the
+one approach that was already active. If one strand should come first, explain
+the mathematical reason in the round rationale and keep the other credible
+strands alive for later rounds.
 
 Continue an attempt only when its concrete result changes what can reasonably
 be tried next. Ask one focused follow-up when a specific missing theorem,
@@ -273,6 +293,11 @@ Keep W000 free-form. The schema has only two reader-facing parts:
   preview. It may use headings when they genuinely help, but no fixed headings
   or categories are required.
 
+Read w000-voice-example.md for one owner-supplied contrast. It conveys a
+preference in voice and emphasis, not a procedure, checklist, or required
+structure. Let it inform your taste and use your own mathematical judgment.
+The human will edit this view before accepting it.
+
 For each ID in raw-materials/index.md, return one matching
 \`sourceSummaries\` entry. Its abstract is one complete plain-text sentence,
 again aiming for at most 220 characters with a 320-character hard ceiling.
@@ -315,6 +340,47 @@ the statement.
 Write mathematics as LaTeX delimited by $ … $ inline and $$ … $$ for display;
 never \\( … \\) or \\[ … \\], which do not render for the reader.`;
 
+/** Generated as AGENTS.md for the W###.n continuation-view revision. */
+const CONTINUATION_REVISION_CONTRACT = `# Revising the current mathematical view
+
+This is a private thinking pass by the Research Manager between a saved
+stopping report and any new research round. It is not a research assignment
+and it is not the next-move decision. Read the previous mathematical view, the
+complete stopping report, the owner's continuation direction, and the compact
+current record. Then write the revised view identified in revision-id.md.
+
+The preceding view is evidence of your earlier judgment, not an instruction
+that outranks the owner. Preserve conclusions and intuitions that remain
+mathematically sound, but explicitly revise claims such as “the sole worthwhile
+next step” when the owner has reopened the horizon. Interpret the owner's words
+with ordinary subject knowledge and retain their exact operational meaning.
+If several genuinely orthogonal directions were requested, give each a clear
+place in the revised landscape. You may recommend an order, but do not erase a
+direction merely because it differs from the approach pursued before stopping.
+
+Write one coherent current mathematical view in natural research language. It
+should explain what is established, what remains uncertain, what the stopping
+report changes, how the owner's comment changes the emphasis, and which
+mathematical possibilities should shape the coming rounds. Express judgment
+and intuition rather than producing a task list. Do not dispatch workers,
+assign budgets, or choose the next round here; that happens in the following
+decision.
+
+Return exactly:
+
+- \`managerNoteMarkdown\`: the substantive revised view;
+- \`managerAbstract\`: one or two complete plain-text sentences, at most 320
+  characters, stating the principal change in outlook.
+
+The revised view will be shown to the owner and will become the recurrent
+context for the next round. The owner's original comment remains separately
+available and must not be paraphrased out of existence.
+
+Write mathematics as LaTeX delimited by $ … $ inline and $$ … $$ for display.
+${TEX_LAYOUT_GUIDANCE}
+Because the reply is JSON, double every TeX backslash (for example
+\`\\\\frac\`, never \`\\frac\`) so JSON cannot turn it into a control character.`;
+
 /** Generated as AGENTS.md for completed-round assessment and library revision. */
 const CURATION_CONTRACT = `# Assessing a completed research round
 
@@ -322,6 +388,13 @@ Read the findings from the round, the complete reports, and the earlier
 research notes. Reconstruct what happened mathematically. Do not reward length,
 confidence, consensus, or activity, and do not make an unsupported statement
 sound established.
+
+When continuation-direction.md is present, it remains the owner's direction
+for this resumed research period. Assess the round against the numbered
+post-continuation view as well as its immediate result. New mathematics may
+justify changing emphasis, but do not let one successful or familiar approach
+silently erase other credible directions the owner explicitly asked to keep
+open.
 
 Decide separately how each assignment should be used:
 
@@ -745,6 +818,8 @@ export function decisionPacketFiles(
   if (extras.docket) files["latest-round-findings.md"] = extras.docket;
   if (extras.resolution) files["previous-round-summary.md"] = extras.resolution;
   if (extras.previousReport) files["earlier-report.md"] = extras.previousReport;
+  const continuationDirection = continuationDirectionMarkdown(state);
+  if (continuationDirection) files["continuation-direction.md"] = continuationDirection;
   const intakeContext = intakeContextMarkdown(state);
   if (intakeContext) files["intake-context.md"] = intakeContext;
 
@@ -763,10 +838,52 @@ export function decisionPacketFiles(
   return files;
 }
 
+/** Full, persistent owner direction for the currently resumed research period. */
+export function continuationDirectionMarkdown(state: ProjectState): string | null {
+  if (state.terminal !== null) return null;
+  const continuation = state.continuations.at(-1);
+  if (!continuation) return null;
+  return [
+    "# Current direction from the owner",
+    "",
+    `The owner resumed research after the ${continuation.previousResult} report at ${continuation.previousFinalPath}.`,
+    "This direction remains active until the project reaches another stopping report. Preserve its full meaning when choosing and assessing later rounds.",
+    "",
+    continuation.note.trim(),
+    "",
+  ].join("\n");
+}
+
+/** Builds the bounded directory for a W###.n continuation-view revision. */
+export function continuationRevisionPacketFiles(
+  state: ProjectState,
+  revisionId: string,
+  previousView: string | null,
+  previousReport: string,
+): Record<string, string> {
+  const direction = continuationDirectionMarkdown(state);
+  if (!direction) throw new Error("continuation revision requires active owner direction");
+  const files: Record<string, string> = {
+    "AGENTS.md": CONTINUATION_REVISION_CONTRACT,
+    "revision-id.md": `# Revised view identifier\n\n${revisionId}\n`,
+    "problem.md": state.problem.confirmedMarkdown ?? state.statement,
+    "current-record.md": ledgerSummary(state),
+    "working-library.md": workingLibraryMarkdown(state),
+    "continuation-direction.md": direction,
+    "stopping-report.md": previousReport,
+    "research-manager-voice-examples.md": RESEARCH_MANAGER_EXAMPLES,
+  };
+  if (previousView) files["research-manager-previous-view.md"] = previousView;
+  const intakeContext = intakeContextMarkdown(state);
+  if (intakeContext) files["intake-context.md"] = intakeContext;
+  return files;
+}
+
 /** Builds the initial W000 directory before raw source files are copied in. */
 export function intakePacketFiles(statement: string, contextMarkdown: string): Record<string, string> {
   return {
     "AGENTS.md": INTAKE_CONTRACT,
+    "w000-voice-example.md": W000_VOICE_EXAMPLE,
     "statement.md": statement,
     "context.md": contextMarkdown.trim() || "(No separate background notes supplied.)",
   };
@@ -817,6 +934,8 @@ export function curationPacketFiles(
   };
   const currentNote = state.researchManagerNotes.at(-1);
   if (currentNote) files["research-manager-previous-view.md"] = currentNote.markdown;
+  const continuationDirection = continuationDirectionMarkdown(state);
+  if (continuationDirection) files["continuation-direction.md"] = continuationDirection;
   const intakeContext = intakeContextMarkdown(state);
   if (intakeContext) files["intake-context.md"] = intakeContext;
   if (digest) files["project-summary-previous.md"] = digest;
@@ -861,6 +980,8 @@ export function finalPacketFiles(
   };
   const currentNote = state.researchManagerNotes.at(-1);
   if (currentNote) files["research-manager-current-view.md"] = currentNote.markdown;
+  const continuationDirection = continuationDirectionMarkdown(state);
+  if (continuationDirection) files["continuation-direction.md"] = continuationDirection;
   if (candidateText) files["candidate.md"] = candidateText;
   if (digest) files["project-summary.md"] = digest;
   return files;

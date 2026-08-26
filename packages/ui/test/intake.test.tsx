@@ -91,4 +91,25 @@ describe("intake revision journey", () => {
     expect(html).toContain("changed after this W000 was written");
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Accept W000 &amp; begin research<\/button>/);
   });
+
+  it("keeps W000 controls locked from event state when regeneration outlives the page", () => {
+    const state = awaitingW000();
+    applyEvent(state, {
+      seq: 7,
+      ts: "regenerating",
+      type: "decision.requested",
+      decisionId: "DEC001",
+      kind: "intake",
+      waveId: null,
+    });
+
+    // Static rendering deliberately creates a fresh component. This is the
+    // regression case: navigation, refresh, or another browser has no local
+    // `regenerating` hook state and must still honor the server-side call.
+    const html = renderToStaticMarkup(<IntakeConfirm slug="editable-intake" state={state} />);
+    expect(html).toContain("Research Manager is reading the original materials");
+    expect(html).toContain("Regenerating…");
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Accept W000 &amp; begin research<\/button>/);
+    expect(html).toMatch(/<textarea[^>]*disabled=""[^>]*aria-label="W000 abstract"/);
+  });
 });

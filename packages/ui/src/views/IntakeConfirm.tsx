@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   INTAKE_ABSTRACT_MAX_CHARS,
+  pendingIntakeDecision,
   type IntakeSource,
   type ProjectState,
 } from "@inventio/schema";
@@ -223,6 +224,11 @@ function W000Review({ slug, state }: { slug: string; state: ProjectState }): JSX
   const dirty = abstract.trim() !== initialAbstract.trim() || markdown.trim() !== initialMarkdown.trim();
   const abstractTooLong = abstract.length > INTAKE_ABSTRACT_MAX_CHARS;
   const rawChangedAfterW000 = (w000?.recordedAtSeq ?? 0) < state.problem.rawUpdatedAtSeq;
+  // Local state covers the click before SSE arrives. The event-derived state
+  // survives tab changes, reloads, and a second browser while the Manager is
+  // still reading the source material.
+  const regenerationPending = pendingIntakeDecision(state) !== null;
+  const w000Busy = regenerating || regenerationPending;
 
   useEffect(() => {
     setAbstract(initialAbstract);
@@ -232,7 +238,7 @@ function W000Review({ slug, state }: { slug: string; state: ProjectState }): JSX
   }, [version]);
 
   const confirm = async (): Promise<void> => {
-    if (rawChangedAfterW000 || abstractTooLong || markdown.trim() === "" || submitting || regenerating || guard.disabled) return;
+    if (rawChangedAfterW000 || abstractTooLong || markdown.trim() === "" || submitting || w000Busy || guard.disabled) return;
     setSubmitting(true);
     try {
       await run(
@@ -252,7 +258,7 @@ function W000Review({ slug, state }: { slug: string; state: ProjectState }): JSX
   };
 
   const regenerate = async (): Promise<void> => {
-    if (submitting || regenerating || guard.disabled) return;
+    if (submitting || w000Busy || guard.disabled) return;
     setRegenerating(true);
     try {
       await run(() => api.regenerateIntake(slug), "W000 regenerated from the original materials");
@@ -296,7 +302,7 @@ function W000Review({ slug, state }: { slug: string; state: ProjectState }): JSX
               className="w000-abstract-editor"
               maxLength={INTAKE_ABSTRACT_MAX_CHARS}
               value={abstract}
-              disabled={submitting || regenerating}
+              disabled={submitting || w000Busy}
               onChange={(event) => setAbstract(event.target.value)}
               aria-label="W000 abstract"
               aria-invalid={abstractTooLong}
@@ -313,7 +319,7 @@ function W000Review({ slug, state }: { slug: string; state: ProjectState }): JSX
               className="w000-markdown-editor"
               maxLength={16_000}
               value={markdown}
-              disabled={submitting || regenerating}
+              disabled={submitting || w000Busy}
               spellCheck={false}
               onChange={(event) => setMarkdown(event.target.value)}
               aria-label="W000 current mathematical view"
@@ -342,12 +348,18 @@ function W000Review({ slug, state }: { slug: string; state: ProjectState }): JSX
         </div>
       ) : null}
 
+      {regenerationPending ? (
+        <div className="banner info w000-regenerating" role="status">
+          The Research Manager is reading the original materials and regenerating W000. You can leave this page; these controls will unlock when the new reading is ready.
+        </div>
+      ) : null}
+
       <footer className="intake-actions">
         <div className="intake-action-buttons">
           <button
             type="button"
             className="button ghost"
-            disabled={submitting || regenerating || guard.disabled}
+            disabled={submitting || w000Busy || guard.disabled}
             title={dirty ? "Your local W000 edits remain until you regenerate" : "Revise the objective, background, or files"}
             onClick={() => setEditingRaw(true)}
           >
@@ -356,18 +368,18 @@ function W000Review({ slug, state }: { slug: string; state: ProjectState }): JSX
           <button
             type="button"
             className="button"
-            disabled={submitting || regenerating || guard.disabled}
+            disabled={submitting || w000Busy || guard.disabled}
             title={dirty ? "Regeneration replaces your unsaved edits" : (guard.title ?? "Read the original materials again")}
             onClick={() => void regenerate()}
           >
-            {regenerating ? "Regenerating…" : "Regenerate from originals"}
+            {w000Busy ? "Regenerating…" : "Regenerate from originals"}
           </button>
         </div>
         <button
           type="button"
           className="button primary"
-          disabled={rawChangedAfterW000 || abstractTooLong || markdown.trim() === "" || submitting || regenerating || guard.disabled}
-          {...(guard.title === undefined ? {} : { title: guard.title })}
+          disabled={rawChangedAfterW000 || abstractTooLong || markdown.trim() === "" || submitting || w000Busy || guard.disabled}
+          title={regenerationPending ? "Wait for the regenerated W000 to finish" : guard.title}
           onClick={() => void confirm()}
         >
           {submitting ? "Saving…" : "Accept W000 & begin research"}

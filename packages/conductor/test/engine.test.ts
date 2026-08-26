@@ -4,12 +4,14 @@ import type { MemoryAccess } from "../src/engine/engine.js";
 import type { TaskScope } from "../src/memory/types.js";
 import {
   CURATION_MATCH,
+  CONTINUATION_REVISION_MATCH,
   DECISION_MATCH,
   FINAL_MATCH,
   Harness,
   INTAKE_MATCH,
   assessResults,
   curationOutput,
+  continuationRevisionOutput,
   envelope,
   finalOutput,
   freezeCandidate,
@@ -146,6 +148,43 @@ describe("ProjectEngine end-to-end (codex-sim)", () => {
       }),
     ]);
     expect(h.read("artifacts/manager-notes/W000.md")).toContain("intended geometric interpretation");
+  });
+
+  it("unlocks W000 after a regeneration process is interrupted and restarted", async () => {
+    const h = harness("w000-regeneration-recovery", [
+      plannerCall(INTAKE_MATCH, intakeOutput()),
+      plannerCall(INTAKE_MATCH, {
+        ...intakeOutput(),
+        managerAbstract: "A regenerated view of the same objective.",
+        managerNoteMarkdown: "# Current mathematical view\n\nA regenerated view.",
+      }),
+    ]);
+
+    h.start();
+    await h.waitFor((state) => state.phase === "AWAITING_CONFIRMATION", "first W000 preview");
+    await h.engine.regenerateIntake();
+    expect(h.state.decisions["DEC002"]?.status).toBe("accepted");
+
+    // Leave exactly the durable state a hard stop during the model call would
+    // leave: the request exists, but no response closes it.
+    await h.stop();
+    h.truncateLogFrom(
+      (event) => event.type === "decision.proposed" && event.decisionId === "DEC002",
+    );
+    await h.reload();
+    expect(h.state.decisions["DEC002"]?.status).toBe("requested");
+    expect(h.engine.canReviseRawIntake()).toBe(false);
+
+    h.start();
+    await h.waitFor(
+      (state) => state.decisions["DEC002"]?.status === "rejected",
+      "interrupted W000 request to be closed",
+    );
+    expect(h.state.phase).toBe("AWAITING_CONFIRMATION");
+    expect(h.engine.canReviseRawIntake()).toBe(true);
+    expect(h.state.decisions["DEC002"]?.violations.at(-1)?.join(" ")).toContain(
+      "previous W000 was preserved",
+    );
   });
 
   it("turns human-approved intake notes into durable unverified memory", async () => {
@@ -672,14 +711,27 @@ describe("ProjectEngine end-to-end (codex-sim)", () => {
   it("3f. continuing research preserves the first report and reaches a new checkpoint", async () => {
     const h = harness("continue-research", [
       plannerCall(INTAKE_MATCH, intakeOutput()),
-      plannerCall(DECISION_MATCH, terminate("the first pass found no productive direction")),
-      plannerCall(FINAL_MATCH, finalOutput("# First checkpoint\n\nNo useful reduction was found yet.")),
       plannerCall(DECISION_MATCH, soloDiscovery()),
       workerCall(
         "T001",
+        solverOutput("UNCERTAIN", "CONCLUSION: UNCERTAIN\n\nThe global attack reaches a local lemma."),
+      ),
+      plannerCall(CURATION_MATCH, curationOutput({}, ["T001"])),
+      plannerCall(DECISION_MATCH, terminate("the first pass found no productive direction")),
+      plannerCall(FINAL_MATCH, finalOutput("# First checkpoint\n\nNo useful reduction was found yet.")),
+      plannerCall(
+        CONTINUATION_REVISION_MATCH,
+        continuationRevisionOutput({
+          managerNoteMarkdown:
+            "## Current mathematical view\n\nThe local lemma is now the primary concrete direction, while the global attack should not be repeated unchanged.",
+        }),
+      ),
+      plannerCall(DECISION_MATCH, soloDiscovery()),
+      workerCall(
+        "T002",
         solverOutput("UNCERTAIN", "CONCLUSION: UNCERTAIN\n\nA local lemma remains plausible."),
       ),
-      plannerCall(CURATION_MATCH, curationOutput()),
+      plannerCall(CURATION_MATCH, curationOutput({}, ["T002"])),
       plannerCall(DECISION_MATCH, terminate("the focused continuation produced a partial result")),
       plannerCall(FINAL_MATCH, finalOutput("# Second checkpoint\n\nThe local lemma is the strongest surviving lead.")),
     ]);
@@ -706,7 +758,7 @@ describe("ProjectEngine end-to-end (codex-sim)", () => {
     expect(h.state.config.budget.totalTokens).toBe(originalTotal + 200_000);
     expect(h.state.budget.totalTokens).toBe(originalTotal + 200_000);
     expect(h.state.config.limits.maxWaves).toBe(originalMaxWaves + 3);
-    expect(h.state.waveOrder).toEqual(["W001"]);
+    expect(h.state.waveOrder).toEqual(["W001", "W002"]);
     expect(h.state.terminalHistory.map((report) => report.finalPath)).toEqual([
       "artifacts/final.md",
       "artifacts/finals/final-2.md",
@@ -725,6 +777,25 @@ describe("ProjectEngine end-to-end (codex-sim)", () => {
     });
     const events = h.diskEvents();
     const continuedAt = events.findIndex((event) => event.type === "project.continued");
+    const revisionDecision = events
+      .slice(continuedAt + 1)
+      .find((event): event is Extract<Event, { type: "decision.requested" }> =>
+        event.type === "decision.requested" && event.kind === "continuation_revision",
+      );
+    expect(revisionDecision).toBeTruthy();
+    expect(h.readDecisionPacket(revisionDecision!.decisionId, "continuation-direction.md")).toContain(
+      "Push the local lemma instead of repeating the global attack.",
+    );
+    expect(h.readDecisionPacket(revisionDecision!.decisionId, "stopping-report.md")).toBe(firstText);
+    expect(h.state.researchManagerNotes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          waveId: "W001.2",
+          source: "research_manager",
+          markdown: expect.stringContaining("local lemma is now the primary concrete direction"),
+        }),
+      ]),
+    );
     const nextDecision = events
       .slice(continuedAt + 1)
       .find((event): event is Extract<Event, { type: "decision.requested" }> =>
@@ -734,8 +805,68 @@ describe("ProjectEngine end-to-end (codex-sim)", () => {
     expect(h.readDecisionPacket(nextDecision!.decisionId, "current-record.md")).toContain(
       "Push the local lemma instead of repeating the global attack.",
     );
+    expect(h.readDecisionPacket(nextDecision!.decisionId, "continuation-direction.md")).toContain(
+      "Push the local lemma instead of repeating the global attack.",
+    );
+    expect(h.readDecisionPacket(nextDecision!.decisionId, "research-manager-current-view.md")).toContain(
+      "local lemma is now the primary concrete direction",
+    );
     expect(h.readDecisionPacket(nextDecision!.decisionId, "earlier-report.md")).toBe(firstText);
+    const curationDecision = events
+      .slice(continuedAt + 1)
+      .find((event): event is Extract<Event, { type: "decision.requested" }> =>
+        event.type === "decision.requested" && event.kind === "curation",
+      );
+    expect(curationDecision).toBeTruthy();
+    expect(h.readDecisionPacket(curationDecision!.decisionId, "continuation-direction.md")).toContain(
+      "Push the local lemma instead of repeating the global attack.",
+    );
     expect(h.diskState()).toEqual(h.state);
+  }, 30_000);
+
+  it("3g. the owner may write the numbered continuation view directly", async () => {
+    const h = harness("human-continuation-view", [
+      plannerCall(INTAKE_MATCH, intakeOutput()),
+      plannerCall(DECISION_MATCH, terminate("the initial reading is complete")),
+      plannerCall(FINAL_MATCH, finalOutput("# First checkpoint\n\nThe first reading is preserved.")),
+      plannerCall(DECISION_MATCH, terminate("the owner-authored revision is now recorded")),
+      plannerCall(FINAL_MATCH, finalOutput("# Second checkpoint\n\nThe revised direction is preserved.")),
+    ]);
+
+    await runToConfirmation(h);
+    await h.waitForTerminal();
+    const humanView =
+      "## Current mathematical view\n\nThe earlier local route remains available, but the renewed project should compare it with a genuinely different global construction.";
+    h.engine.continueResearch(humanView, 0, 1, "human", humanView);
+    await h.waitFor(
+      (state) => state.terminalHistory.length === 2 && state.terminal !== null,
+      "the owner-directed second checkpoint",
+    );
+
+    expect(
+      h.eventsOfType("decision.requested").filter(
+        (event) => event.kind === "continuation_revision",
+      ),
+    ).toEqual([]);
+    expect(h.state.researchManagerNotes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          waveId: "W000.2",
+          source: "human_edited",
+          markdown: expect.stringContaining("genuinely different global construction"),
+        }),
+      ]),
+    );
+    const continuedAt = h.diskEvents().findIndex((event) => event.type === "project.continued");
+    const nextDecision = h.diskEvents()
+      .slice(continuedAt + 1)
+      .find((event): event is Extract<Event, { type: "decision.requested" }> =>
+        event.type === "decision.requested" && event.kind === "next_move",
+      );
+    expect(nextDecision).toBeTruthy();
+    expect(h.readDecisionPacket(nextDecision!.decisionId, "research-manager-current-view.md")).toContain(
+      "genuinely different global construction",
+    );
   }, 30_000);
 
   it("4. an illegal proposal is bounced once and the corrected wave runs", async () => {

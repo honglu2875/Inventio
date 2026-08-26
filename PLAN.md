@@ -14,8 +14,8 @@ Rules for whoever (human or agent) picks this up:
 - Record every deliberate divergence from DESIGN.md in the deviation log
   at the bottom, with a reason.
 
-**Status: M0–M10 complete; M12 behavioral tuning, M13 selective rebase, M14 working-library curation, M15 single-controller Research Manager, M16 per-project model settings, M17 verbatim intake/editable W000, M18 intake-summary discipline/project Web search, M19 central prompt architecture, and M20 revisable raw intake are green. The Research Manager now carries a recurrent mathematical view between rounds, owns research judgment and library organization, can inspect the working library and original intake sources on demand, may direct up to eight research workers per round, and uses separately budgeted rigorous synthesis. 285 tests pass (schema 27, conductor 140, UI 97, codex-sim 21), all three TypeScript packages typecheck, and the production UI builds. An isolated migration audit of every computation present in the active genus-2 project at the final snapshot repaired 32/32 baselines: every command exited 0 and every pristine rerun matched exactly. The revised lifecycle also established one substantive scoped theorem after two independent PASS reviews, while retiring 66 unsupported leads and preserving four unresolved background leads. The standalone repository has been released; remaining work is owner review of the four explicitly marked draft voice examples and optional M11 polish.**
-Last updated: 2026-08-25 by Codex (revisable raw intake and W000 regeneration).
+**Status: M0–M10 complete; M12 behavioral tuning, M13 selective rebase, M14 working-library curation, M15 single-controller Research Manager, M16 per-project model settings, M17 verbatim intake/editable W000, M18 intake-summary discipline/project Web search, M19 central prompt architecture, M20 revisable raw intake, M21 unified effective project settings, M22 numbered continuation views, M23 W000 regeneration-state recovery, M24 mathematical W000 voice, and M25 explicit Web-search state are green. The Research Manager now carries a recurrent mathematical view between rounds, owns research judgment and library organization, can inspect the working library and original intake sources on demand, may direct up to eight research workers per round, and uses separately budgeted rigorous synthesis. 296 tests pass (schema 30, conductor 144, UI 101, codex-sim 21), all three TypeScript packages typecheck, and the production UI builds. An isolated migration audit of every computation present in the active genus-2 project at the final snapshot repaired 32/32 baselines: every command exited 0 and every pristine rerun matched exactly. The revised lifecycle also established one substantive scoped theorem after two independent PASS reviews, while retiring 66 unsupported leads and preserving four unresolved background leads. The standalone repository has been released; remaining work is owner review of the four explicitly marked draft voice examples and optional M11 polish.**
+Last updated: 2026-08-26 by Codex (explicit Web-search settings state).
 
 Quota note: work has been interrupted twice by Opus subagent quota limits. The
 tracker is the recovery point — check the milestone boxes, then
@@ -450,8 +450,8 @@ runtime and interface without importing obsolete implementations wholesale.
       two clean independent reviews establish a scoped partial durably and
       release the active lineage without claiming the whole problem.
 - [x] Terminal reports are immutable checkpoints. “Continue research” adds
-      explicit resources/directive context and writes later reports to unique
-      paths rather than overwriting history.
+      explicit resources and retained owner direction and writes later reports
+      to unique paths rather than overwriting history.
 - [x] UI fixes: inspector opening no longer continually recenters the graph;
       event-card contents stay contained; exact blocking questions live in a
       persistent nonmodal strip; long intake memories are editable.
@@ -667,6 +667,96 @@ follow-up, and stopping.
       immutable retained-intake boundary when research begins.
 - [x] Full repository verification: 285 tests (schema 27, conductor 140,
       UI 97, codex-sim 21), all package typechecks, and production UI build.
+
+## M21 — Unified effective project settings (2026-08-26)
+
+- [x] Make the reduced project configuration the single effective source for
+      resource ceilings, autonomy, Web-search permission, and active-role
+      model choices; retain the old top-level autonomy field and specialized
+      setting events only for replay compatibility.
+- [x] Add one atomic `project.settingsChanged` event and one GET/POST project
+      settings endpoint. Keep the older autonomy, Web-search, and model routes
+      as compatibility adapters that write through the unified engine method.
+- [x] Make Settings initialize only from the loaded project snapshot and edit
+      the token ceiling, maximum rounds, autonomy, Web search, and all five
+      model roles in one form. New-project defaults now come from the shared
+      schema rather than duplicated browser constants.
+- [x] Reject token ceilings below recorded spend, round ceilings below rounds
+      already used, and reductions of either ceiling during an open round.
+      Preserve continuation extensions and fresh-start settings through replay.
+- [x] Full repository verification: 287 tests (schema 27, conductor 141,
+      UI 98, codex-sim 21), all package typechecks, and production UI build.
+
+## M22 — Numbered continuation views (2026-08-26)
+
+- [x] Replace the one-decision continuation directive with a durable revision
+      of the Research Manager's recurrent mathematical view before any new
+      round is planned. Number it at the preceding checkpoint (`W020.2`, then
+      `.3` when continuing again without a new round).
+- [x] Give the revision call the preceding view, immutable stopping report,
+      complete owner comment, current record/library, and voice examples. Its
+      output is mathematical reflection only; task selection remains the next
+      ordinary Research Manager decision.
+- [x] Preserve the owner's full continuation direction in every later
+      next-move, completed-round assessment, and final-composition context until
+      the next stopping report. Explicitly prevent prior categorical language
+      from silently overriding requested orthogonal directions.
+- [x] Let the owner declare that the continuation text is already the complete
+      revised view. Record it directly as `human_edited` and skip the revision
+      model call; otherwise use the configured Research Manager.
+- [x] Show the pending numbered revision in ManagerView and explain in the
+      Continue Research dialog that no new research round is selected first.
+      Preserve replay compatibility by not inserting a retroactive revision
+      when an older project already planned post-continuation work.
+- [x] Full repository verification: 290 tests (schema 29, conductor 142,
+      UI 98, codex-sim 21), all package typechecks, and production UI build.
+
+## M23 — W000 regeneration-state recovery (2026-08-26)
+
+- [x] Derive an active W000 reading from the shared decision history so the
+      intake page remains locked after tab changes, reloads, or access from a
+      second browser instead of relying only on one component's loading flag.
+- [x] Keep the editable W000 visible with a clear progress notice while the
+      Research Manager is rereading the original materials. Prevent raw-source
+      changes, duplicate regenerations, and confirmation until that reading
+      has finished.
+- [x] On server restart, close an intake request that was interrupted before a
+      response and preserve the preceding W000 for another regeneration. Do
+      not turn this operational interruption into a question for the owner.
+- [x] Full repository verification: 293 tests (schema 30, conductor 143,
+      UI 99, codex-sim 21), all package typechecks, production UI build, and
+      diff whitespace check.
+
+## M24 — Mathematical W000 voice (2026-08-26)
+
+- [x] Add the owner's W000-only avoid/prefer contrast for uncertain literature
+      claims. Keep it separate from the later-round voice examples so its
+      genus-specific subject matter does not become a template for the whole
+      research process.
+- [x] Use the contrast as a soft cue for mathematical voice and taste, not a
+      procedure or list of required moves. Keep the surrounding guidance at a
+      high level and leave relevance, uncertainty, and emphasis to the
+      Manager's mathematical judgment.
+- [x] Treat W000 as an editable mathematical interpretation rather than an
+      evidentiary record of the reading process, while retaining clear labels
+      for genuinely unverified claims.
+- [x] Full repository verification: 294 tests (schema 30, conductor 144,
+      UI 99, codex-sim 21), all package typechecks, production UI build, and
+      diff whitespace check.
+
+## M25 — Explicit Web-search settings state (2026-08-26)
+
+- [x] Replace the ambiguous dynamic checkbox with two mutually exclusive
+      `Allowed` / `Not allowed` choices. The radio matching the effective saved
+      Boolean is visibly selected, so a stored `false` no longer looks like an
+      unloaded control.
+- [x] Keep the existing event-sourced project configuration as the sole value;
+      this change does not silently alter any project's network permission or
+      change the default for future projects.
+- [x] Add saved-true and saved-false rendering regressions. Full repository
+      verification passes: 296 tests (schema 30, conductor 144, UI 101,
+      codex-sim 21), all package typechecks, production UI build, and diff
+      whitespace check.
 
 ## M11 — Polish and hardening
 
