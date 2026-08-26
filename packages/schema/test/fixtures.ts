@@ -207,6 +207,45 @@ export function buildCanonicalEvents(): Event[] {
   ev("phase.changed", { from: "TERMINAL", to: "DISCOVERY", reason: "owner continued" });
   ev("phase.changed", { from: "DISCOVERY", to: "TERMINAL", reason: "second checkpoint" });
   ev("terminal.reached", { result: "UNCERTAIN", finalPath: "artifacts/final.md" });
+  const publicationCheckpointSeq = seq;
+  ev("decision.requested", { decisionId: "DEC002", kind: "publication", waveId: null });
+  ev("publication.requested", {
+    publicationId: "P001",
+    decisionId: "DEC002",
+    terminalResult: "UNCERTAIN",
+    terminalFinalPath: "artifacts/final.md",
+    terminalReachedAtSeq: publicationCheckpointSeq,
+    by: "human",
+  });
+  ev("decision.proposed", {
+    decisionId: "DEC002",
+    action: { kind: "research_report", result: "UNCERTAIN" },
+    usage: null,
+  });
+  ev("decision.accepted", {
+    decisionId: "DEC002",
+    action: { kind: "research_report", result: "UNCERTAIN" },
+  });
+  ev("publication.drafted", {
+    publicationId: "P001",
+    kind: "research_report",
+    result: "UNCERTAIN",
+    title: "A report on P",
+    assessment: "The inductive step remains open.",
+    texPath: "publications/P001/manuscript.tex",
+    logPath: "publications/P001/compile.log",
+  });
+  ev("publication.failed", {
+    publicationId: "P001",
+    stage: "compilation",
+    error: "the local compiler was interrupted",
+  });
+  ev("publication.compilationRequested", { publicationId: "P001", by: "human" });
+  ev("publication.completed", {
+    publicationId: "P001",
+    pdfPath: "publications/P001/manuscript.pdf",
+    compiler: "tectonic 0.16.9",
+  });
 
   return events;
 }

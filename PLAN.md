@@ -14,8 +14,8 @@ Rules for whoever (human or agent) picks this up:
 - Record every deliberate divergence from DESIGN.md in the deviation log
   at the bottom, with a reason.
 
-**Status: M0–M10 complete; M12 behavioral tuning, M13 selective rebase, M14 working-library curation, M15 single-controller Research Manager, M16 per-project model settings, M17 verbatim intake/editable W000, M18 intake-summary discipline/project Web search, M19 central prompt architecture, M20 revisable raw intake, M21 unified effective project settings, M22 numbered continuation views, M23 W000 regeneration-state recovery, M24 mathematical W000 voice, and M25 explicit Web-search state are green. The Research Manager now carries a recurrent mathematical view between rounds, owns research judgment and library organization, can inspect the working library and original intake sources on demand, may direct up to eight research workers per round, and uses separately budgeted rigorous synthesis. 296 tests pass (schema 30, conductor 144, UI 101, codex-sim 21), all three TypeScript packages typecheck, and the production UI builds. An isolated migration audit of every computation present in the active genus-2 project at the final snapshot repaired 32/32 baselines: every command exited 0 and every pristine rerun matched exactly. The revised lifecycle also established one substantive scoped theorem after two independent PASS reviews, while retiring 66 unsupported leads and preserving four unresolved background leads. The standalone repository has been released; remaining work is owner review of the four explicitly marked draft voice examples and optional M11 polish.**
-Last updated: 2026-08-26 by Codex (explicit Web-search settings state).
+**Status: M0–M10 complete; M12 behavioral tuning, M13 selective rebase, M14 working-library curation, M15 single-controller Research Manager, M16 per-project model settings, M17 verbatim intake/editable W000, M18 intake-summary discipline/project Web search, M19 central prompt architecture, M20 revisable raw intake, M21 unified effective project settings, M22 numbered continuation views, M23 W000 regeneration-state recovery, M24 mathematical W000 voice, M25 explicit Web-search state, and M26 standalone TeX publication are green. The Research Manager now carries a recurrent mathematical view between rounds, owns research judgment and library organization, can inspect the working library and original intake sources on demand, may direct up to eight research workers per round, and uses separately budgeted rigorous synthesis. After a stopping report it can independently reassess the complete record, write a preprint or research report in TeX, and hand accepted source to the local untrusted compiler. 308 tests pass (schema 32, conductor 151, UI 104, codex-sim 21), all three TypeScript packages typecheck, and the production UI builds. An isolated migration audit of every computation present in the active genus-2 project at the final snapshot repaired 32/32 baselines: every command exited 0 and every pristine rerun matched exactly. The revised lifecycle also established one substantive scoped theorem after two independent PASS reviews, while retiring 66 unsupported leads and preserving four unresolved background leads. The standalone repository has been released; remaining work is owner review of the four explicitly marked draft voice examples and optional M11 polish.**
+Last updated: 2026-08-26 by Codex (standalone TeX publication).
 
 Quota note: work has been interrupted twice by Opus subagent quota limits. The
 tracker is the recovery point — check the milestone boxes, then
@@ -758,6 +758,30 @@ follow-up, and stopping.
       codex-sim 21), all package typechecks, production UI build, and diff
       whitespace check.
 
+## M26 — Standalone TeX publication after a stopping report (2026-08-26)
+
+- [x] Add an owner-triggered, post-terminal Research Manager reading tied to
+      the exact stopping checkpoint. Keep the earlier terminal result immutable
+      while allowing this final mathematical reading to uphold or change it.
+- [x] Enforce the binary document decision in the structured schema: a
+      `PROVED`/`DISPROVED` result is a preprint; an `UNCERTAIN` result is a
+      research report with sound proofs, calculations, gaps, and next steps.
+- [x] Give the Research Manager an indexed, on-demand copy of the complete
+      mathematical record and original context. Draft title, abstract, and
+      body as TeX fragments without delegating the final judgment.
+- [x] Reject leaked project labels, product references, document boundaries,
+      and file-I/O TeX. Supply a fixed article preamble and compile locally
+      with Tectonic in explicit untrusted mode; preserve source and logs.
+- [x] Make drafting, validation, compilation, failure, retry, and ready states
+      event-sourced and restart-safe. A compilation-only retry reuses accepted
+      TeX and spends no new model call.
+- [x] Add the terminal Prepare paper control, persistent cross-tab status,
+      prominent changed-result warning, retry controls, and confined PDF
+      download endpoint.
+- [x] Full repository verification: 308 tests (schema 32, conductor 151,
+      UI 104, codex-sim 21), all package typechecks, production UI build, and
+      diff whitespace check.
+
 ## M11 — Polish and hardening
 
 - [ ] Empty/error states, toasts, loading skeletons throughout UI
@@ -767,7 +791,9 @@ follow-up, and stopping.
 - [ ] Node-count stress fixture (20 waves) — layout + SSE perf budget
 - [x] `README.md` quickstart, env vars, custom ports, and Tailscale binding
 - [ ] README screenshots
-- [ ] Optional: snapshot.json boot cache; artifact export
+- [ ] Optional: snapshot.json boot cache
+- [x] Owner-requested standalone TeX/PDF publication (implemented as the M26
+      final mathematical reading, not a mechanical export of `final.md`)
 
 ---
 
@@ -810,6 +836,11 @@ follow-up, and stopping.
   first W000 reading. Before confirmation, explicit owner revisions are
   event-sourced and require a fresh W000; confirmation remains the hard
   immutability boundary for retained source material.
+- 2026-08-26 M26: standalone PDF generation is deliberately not a rendering of
+  `final.md`. The Research Manager makes a fresh mathematical judgment and
+  writes TeX; deterministic code validates and compiles it. This permits an
+  earlier definite stopping assessment to become an honest research report
+  without rewriting the historical terminal event.
 - 2026-08-24 M13 (found by the real milestone run): adversarial questions for a
   referee are now stored as `reviewQuestions`, separate from admitted
   `obligations`. Obligations continue to block acceptance mechanically, while

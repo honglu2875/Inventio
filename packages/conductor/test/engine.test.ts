@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { unlinkSync } from "node:fs";
 import type { Event, IntakeMemory } from "@inventio/schema";
 import type { MemoryAccess } from "../src/engine/engine.js";
 import type { TaskScope } from "../src/memory/types.js";
@@ -9,6 +10,7 @@ import {
   FINAL_MATCH,
   Harness,
   INTAKE_MATCH,
+  PUBLICATION_MATCH,
   assessResults,
   curationOutput,
   continuationRevisionOutput,
@@ -20,6 +22,7 @@ import {
   planWave,
   plannedTask,
   plannerCall,
+  publicationOutput,
   reviewerOutput,
   solverOutput,
   terminate,
@@ -301,6 +304,23 @@ describe("ProjectEngine end-to-end (codex-sim)", () => {
         ),
       ),
       plannerCall(FINAL_MATCH, finalOutput("# Final report\n\nThe widget is round.")),
+      plannerCall(
+        PUBLICATION_MATCH,
+        publicationOutput({
+          kind: "research_report",
+          result: "UNCERTAIN",
+          title: "Roundness of Planar Widgets: Established Reductions and an Open Step",
+          abstractTex:
+            "We prove the planar reduction underlying the roundness problem and identify an unresolved final implication.",
+          bodyTex:
+            "\\section{Introduction}\nWe study the roundness of widgets under the stated geometric hypotheses.\n\n" +
+            "\\section{The planar reduction}\n\\begin{proposition}The problem reduces to the planar case.\\end{proposition}\n" +
+            "\\begin{proof}The reduction follows by applying the geometric decomposition to each component.\\end{proof}\n\n" +
+            "\\section{Remaining gap}\nThe available argument does not establish the final implication from planar reduction to global roundness.",
+          assessment:
+            "The final review found that the independently checked planar reduction does not by itself prove the global conclusion.",
+        }),
+      ),
     ]);
 
     await runToConfirmation(h);
@@ -365,10 +385,155 @@ describe("ProjectEngine end-to-end (codex-sim)", () => {
     expect(h.state.budget.spentTokens).toBe(3 * 1100);
     expect(h.state.budget.plannerSpentTokens).toBe(7 * 1100);
 
+    // A separate post-terminal reading may overrule the stopping assessment.
+    // It writes TeX, compiles locally, and never mutates the historical result.
+    const publicationId = h.engine.requestPublication();
+    expect(publicationId).toBe("P001");
+    await h.waitFor(
+      (state) => state.publications[0]?.status === "ready",
+      "standalone publication",
+    );
+    const publication = h.state.publications[0]!;
+    expect(publication).toMatchObject({
+      id: "P001",
+      decisionId: "DEC008",
+      status: "ready",
+      terminalResult: "PROVED",
+      kind: "research_report",
+      result: "UNCERTAIN",
+      compiler: "fake-tectonic 1.0",
+    });
+    expect(h.state.terminal).toEqual({ result: "PROVED", finalPath: "artifacts/final.md" });
+    expect(h.publicationCompiler.compileCalls).toBe(1);
+    expect(h.read("publications/P001/manuscript.tex")).toContain("\\documentclass[11pt]{article}");
+    expect(h.read("publications/P001/manuscript.tex")).toContain("\\section{Remaining gap}");
+    expect(h.read("publications/P001/manuscript.tex")).not.toMatch(/Inventio|C001\.v1|A001|T001/);
+    expect(h.read("publications/P001/manuscript.pdf").startsWith("%PDF-")).toBe(true);
+    expect(h.read("publications/P001/compile.log")).toContain("compilation succeeded");
+    expect(h.readDecisionPacket("DEC008", "research-record-index.md")).toContain(
+      "research-record/write-ups/A001.md",
+    );
+    expect(h.readDecisionPacket("DEC008", "research-record/write-ups/A001.md")).toContain(
+      "A complete argument",
+    );
+    expect(h.state.budget.plannerSpentTokens).toBe(8 * 1100);
+
     // Replay from disk reproduces the identical state (DESIGN §5).
     await h.stop();
     expect(h.diskState()).toEqual(h.state);
   }, 30_000);
+
+  it("retries local PDF compilation without another Research Manager call", async () => {
+    const h = harness("publication-retry", [
+      plannerCall(INTAKE_MATCH, intakeOutput()),
+      plannerCall(DECISION_MATCH, terminate("the remaining implication is open")),
+      plannerCall(
+        FINAL_MATCH,
+        finalOutput("# Final report\n\nThe planar reduction is established, but the last implication remains open."),
+      ),
+      plannerCall(PUBLICATION_MATCH, publicationOutput()),
+    ]);
+
+    await runToConfirmation(h);
+    await h.waitForTerminal();
+    expect(h.state.terminal?.result).toBe("UNCERTAIN");
+
+    h.publicationCompiler.failuresRemaining = 1;
+    expect(h.engine.requestPublication()).toBe("P001");
+    await h.waitFor(
+      (state) => state.publications[0]?.status === "failed",
+      "first PDF compilation to fail",
+    );
+    expect(h.state.publications[0]).toMatchObject({
+      status: "failed",
+      failureStage: "compilation",
+      texPath: "publications/P001/manuscript.tex",
+    });
+    expect(h.read("publications/P001/compile.log")).toContain("did not compile");
+    const modelCallsAfterDraft = h.simLog().length;
+
+    await h.stop();
+    await h.reload();
+    h.start();
+    expect(h.state.publications[0]?.status).toBe("failed");
+
+    expect(h.engine.requestPublication()).toBe("P001");
+    await h.waitFor(
+      (state) => state.publications[0]?.status === "ready",
+      "retried PDF compilation",
+    );
+    expect(h.publicationCompiler.compileCalls).toBe(2);
+    expect(h.simLog()).toHaveLength(modelCallsAfterDraft);
+    expect(h.state.publications).toHaveLength(1);
+    expect(h.eventsOfType("publication.compilationRequested")).toHaveLength(1);
+    expect(h.read("publications/P001/manuscript.pdf").startsWith("%PDF-")).toBe(true);
+  });
+
+  it("repairs a draft that leaks internal labels before accepting its TeX", async () => {
+    const publicationThread = "th-publication-private-label";
+    const h = harness("publication-validation-repair", [
+      plannerCall(INTAKE_MATCH, intakeOutput()),
+      plannerCall(DECISION_MATCH, terminate("the strongest partial result has been isolated")),
+      plannerCall(FINAL_MATCH, finalOutput("# Final report\n\nA partial reduction is proved.")),
+      plannerCall(
+        PUBLICATION_MATCH,
+        publicationOutput({
+          bodyTex: "\\section{Internal note}\nThe argument appears in W000, A001, and E001.\\input{private-note}",
+        }),
+        { threadId: publicationThread },
+      ),
+      {
+        match: { resumeOf: publicationThread },
+        finalMessage: publicationOutput({
+          bodyTex:
+            "\\section{Partial result}\n\\begin{proposition}The planar reduction holds.\\end{proposition}\n" +
+            "\\begin{proof}Apply the stated decomposition.\\end{proof}",
+        }),
+        usage: USAGE,
+      },
+    ]);
+
+    await runToConfirmation(h);
+    await h.waitForTerminal();
+    h.engine.requestPublication();
+    await h.waitFor(
+      (state) => state.publications[0]?.status === "ready",
+      "repaired standalone publication",
+    );
+
+    const tex = h.read("publications/P001/manuscript.tex");
+    expect(tex).not.toMatch(/W000|A001|E001|\\input/);
+    expect(tex).toContain("\\section{Partial result}");
+    expect(h.simLog().some((row) => row.resumeOf === publicationThread)).toBe(true);
+    expect(h.state.budget.plannerSpentTokens).toBe(5 * 1100);
+  });
+
+  it("closes the publication decision when drafting cannot begin", async () => {
+    const h = harness("publication-missing-report", [
+      plannerCall(INTAKE_MATCH, intakeOutput()),
+      plannerCall(DECISION_MATCH, terminate("the project has reached its stopping point")),
+      plannerCall(FINAL_MATCH, finalOutput("# Final report\n\nNo complete proof was obtained.")),
+    ]);
+
+    await runToConfirmation(h);
+    await h.waitForTerminal();
+    unlinkSync(h.paths.dir + "/artifacts/final.md");
+    h.engine.requestPublication();
+    await h.waitFor(
+      (state) => state.publications[0]?.status === "failed",
+      "missing stopping report failure",
+    );
+
+    expect(h.state.publications[0]).toMatchObject({
+      failureStage: "drafting",
+      error: "stopping report is missing: artifacts/final.md",
+    });
+    expect(h.state.decisions["DEC004"]).toMatchObject({
+      kind: "publication",
+      status: "rejected",
+    });
+    expect(h.simLog()).toHaveLength(3);
+  });
 
   it("2. repair loop: FAIL review → repair wave → v2 → PROVED", async () => {
     const h = harness("repair", [

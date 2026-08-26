@@ -33,6 +33,7 @@ export async function main(): Promise<void> {
   const memoryPort = envInt("MEMORY_PORT", 4701);
   const root = path.resolve(process.env["INVENTIO_ROOT"] ?? DEFAULT_ROOT);
   const codexBin = process.env["INVENTIO_CODEX_BIN"] ?? "codex";
+  const texBin = process.env["INVENTIO_TEX_BIN"] ?? "tectonic";
   const poolSize = envInt("INVENTIO_POOL", 3);
   const memoryDisabled = process.env["INVENTIO_DISABLE_MEMORY"] === "1";
 
@@ -45,7 +46,13 @@ export async function main(): Promise<void> {
   }
 
   const pool = new WorkerPool(poolSize);
-  const manager = new EngineManager({ root, codexBin, pool, memoryService: memory });
+  const manager = new EngineManager({
+    root,
+    codexBin,
+    texBin,
+    pool,
+    memoryService: memory,
+  });
   manager.openAll();
 
   const app = buildApp(manager, { logger: false });
@@ -62,6 +69,7 @@ export async function main(): Promise<void> {
       `  memory   ${memory ? memory.url : "(disabled)"}`,
       `  root     ${root}`,
       `  codex    ${codexBin}   pool=${poolSize}`,
+      `  TeX      ${manager.publicationCompiler.info().ok ? texBin : `${texBin} (unavailable)`}`,
       `  projects ${projects.length}${projects.length ? `: ${projects.map((p) => `${p.slug} [${p.phase}]`).join(", ")}` : ""}`,
       ``,
     ].join("\n"),

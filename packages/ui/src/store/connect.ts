@@ -96,6 +96,10 @@ export function refreshRuntime(): void {
       const runtime = await api.runtime();
       useStore.getState().setRuntime({
         codexOk: runtime.codex.ok,
+        texOk: runtime.tex?.ok ?? false,
+        texDetail:
+          runtime.tex?.detail ??
+          (runtime.tex === undefined ? "This backend does not report a TeX compiler." : null),
         poolActive: runtime.pool.active,
         poolQueued: runtime.pool.queued,
       });

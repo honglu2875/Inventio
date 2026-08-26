@@ -275,6 +275,7 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
 
   app.get("/api/runtime", async () => ({
     codex: probeCodex(manager.codexBin),
+    tex: manager.publicationCompiler.info(),
     pool: { active: manager.pool.active, queued: manager.pool.queued },
     projects: manager.list().length,
   }));
@@ -440,6 +441,36 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
   );
 
   app.get<{ Params: { slug: string; id: string } }>(
+    "/api/projects/:slug/publications/:id/pdf",
+    async (request, reply) =>
+      run(reply, () => {
+        const engine = engineOf(request.params.slug);
+        const id = checkedId(request.params.id, "publication");
+        const publication = engine.state.publications.find((entry) => entry.id === id);
+        if (!publication) throw new ManagerError("unknown publication " + id, 404);
+        if (publication.status !== "ready" || publication.pdfPath === null) {
+          throw new ManagerError("publication " + id + " does not have a ready PDF", 409);
+        }
+        const file = confine(engine.paths.dir, publication.pdfPath);
+        if (!existsSync(file) || !statSync(file).isFile()) {
+          throw new ManagerError("publication PDF is missing: " + publication.pdfPath, 404);
+        }
+        const filename =
+          (publication.kind === "preprint" ? "preprint" : "research-report") +
+          "-" +
+          engine.slug +
+          ".pdf";
+        void reply
+          .type("application/pdf")
+          .header(
+            "content-disposition",
+            "attachment; filename*=UTF-8''" + encodeURIComponent(filename),
+          );
+        return readFileSync(file);
+      }),
+  );
+
+  app.get<{ Params: { slug: string; id: string } }>(
     "/api/projects/:slug/tasks/:id",
     async (request, reply) =>
       run(reply, () => {
@@ -583,6 +614,24 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
         maxWaves: engine.state.config.limits.maxWaves,
       };
     }),
+  );
+
+  app.post<{ Params: { slug: string } }>(
+    "/api/projects/:slug/publication",
+    async (request, reply) =>
+      run(reply, () => {
+        const engine = engineOf(request.params.slug);
+        const publicationId = engine.requestPublication();
+        const publication = engine.state.publications.find(
+          (entry) => entry.id === publicationId,
+        );
+        void reply.code(202);
+        return {
+          ok: true,
+          publicationId,
+          status: publication?.status ?? "drafting",
+        };
+      }),
   );
 
   app.post<{ Params: { slug: string } }>("/api/projects/:slug/autonomy", async (request, reply) =>

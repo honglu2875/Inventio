@@ -28,7 +28,7 @@ instruction boundary.
 
 | File | What may be revised there | Direct consumers |
 |---|---|---|
-| `researchManager.ts` | W000, post-report W###.n revision, next-move, completed-round assessment, legacy statement-revision, and final-report contracts; all Research Manager context-file composition | `engine/engine.ts` |
+| `researchManager.ts` | W000, post-report W###.n revision, next-move, completed-round assessment, legacy statement-revision, stopping-report composition, and post-terminal TeX-publication contracts; all Research Manager context-file composition | `engine/engine.ts` |
 | `workers.ts` | Solver, Explorer, Reviewer, and Synthesizer contracts; generated worker `AGENTS.md`; generated `research-question.md` | `engine/packets.ts` |
 | `shared.ts` | Mathematical-writing rules inserted into both Research Manager and worker contracts | `researchManager.ts`, `workers.ts` |
 | `managerExamples.ts` | Owner-written and owner-review Research Manager voice examples, including the W000 voice-and-emphasis contrast | `researchManager.ts` |
@@ -159,6 +159,31 @@ allowed, writes `output-schema.json`, and invokes `codex/structured.ts`.
 - **Output:** `FinalOutput.finalMarkdown`. The Conductor—not the model—prepends
   the authoritative `RESULT:` line. If composition cannot run, deterministic
   fallback prose is used.
+
+### Standalone TeX publication
+
+- **When:** only after a project has reached a stopping report and the owner
+  explicitly chooses Prepare paper. It is not part of automatic termination.
+- **Short prompt:** `PUBLICATION_PROMPT`.
+- **Long contract:** `PUBLICATION_CONTRACT`, written by
+  `publicationPacketFiles()` as `AGENTS.md`.
+- **Context:** the exact problem and stopping report, current Manager view,
+  current record and library, compact project summary, every full mathematical
+  write-up copied under `research-record/`, computation status, and the
+  original intake sources. The Manager may open these files on demand and may
+  use Web search only when the project's saved setting permits it.
+- **Output:** `PublicationOutput`, a binary choice. A `preprint` must carry
+  a definite PROVED or DISPROVED result; a `research_report` must carry
+  UNCERTAIN. The Manager may change the earlier stopping assessment after its
+  final mathematical reading.
+- **Persistence and compilation:** the Conductor rejects file-I/O TeX,
+  surviving internal labels, and references to Inventio; supplies a fixed
+  article preamble; writes `publications/P###/manuscript.tex`; then invokes
+  local Tectonic in untrusted mode. It records the compiler log and publishes
+  the PDF only after checking the PDF header. A compilation retry reuses the
+  accepted TeX and does not spend another Manager call.
+- **Isolation:** no workers or delegation. This is the Research Manager's own
+  final deduction and drafting pass.
 
 ## Worker calls
 

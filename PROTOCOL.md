@@ -402,6 +402,31 @@ from conjecture, states the decisive gaps, summarizes failed directions,
 and recommends the next most informative work. A mathematical assumption or
 gap is never hidden for the sake of polish.
 
+### 9.1 Standalone paper after research stops
+
+At the human's request, the Research Manager makes a separate final reading
+of the complete mathematical record and writes a TeX manuscript. The stopping
+label is not binding in this reading: the Manager reconstructs the decisive
+argument, may complete one bounded deduction itself, and must change the
+assessment if the earlier proof or counterexample does not survive.
+
+There are exactly two outcomes. If a complete proof or counterexample survives,
+the document is a preprint and its result is `PROVED` or `DISPROVED`. Otherwise
+the result is `UNCERTAIN` and the document is a research report: it gathers the
+sound partial theorems, proofs, and calculations; separates them from
+heuristics; states the exact remaining gap; and records worthwhile next steps.
+An uncertain conclusion is never formatted as a publishable theorem merely
+because the project previously stopped with a definite label.
+
+The manuscript is written for mathematicians who have no access to the project.
+It contains no project name, internal labels, assignment history, or references
+to the research software. Mathematical statements replace private identifiers,
+and ordinary bibliographic citations replace source labels. The Research
+Manager supplies TeX fragments; deterministic code supplies a fixed preamble,
+rejects file-reading commands and leaked private labels, and compiles locally.
+The accepted TeX, compilation log, and PDF are preserved. A compiler failure
+may be retried without asking the Research Manager to redraft the paper.
+
 ## 10. Human authority
 
 The human reviews and may directly edit W000 before discovery begins. At any

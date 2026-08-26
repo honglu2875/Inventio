@@ -355,6 +355,13 @@ function RuntimeStrip(): JSX.Element {
             <span className="conn-dot" />
             <span className="small">codex {runtime.codexOk ? "ok" : "unavailable"}</span>
           </span>
+          <span
+            className={`conn conn-${runtime.texOk ? "live" : "reconnecting"}`}
+            title={runtime.texDetail ?? "Local TeX compiler is ready"}
+          >
+            <span className="conn-dot" />
+            <span className="small">TeX {runtime.texOk ? "ok" : "unavailable"}</span>
+          </span>
           <span className="pool" title="worker pool occupancy">
             ⚙ {runtime.poolActive} active · {runtime.poolQueued} queued
           </span>

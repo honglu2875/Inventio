@@ -85,6 +85,15 @@ export const FINAL_PROMPT =
   "Compose the final report per AGENTS.md. " +
   "Reply with ONLY one JSON object conforming to the provided output schema.";
 
+/**
+ * engine/engine.ts -> requestPublication(): post-terminal mathematical audit
+ * and standalone TeX drafting. This is distinct from final.md composition:
+ * the Manager may revise the earlier result before choosing the document kind.
+ */
+export const PUBLICATION_PROMPT =
+  "Reassess the concluded mathematics and prepare the standalone TeX manuscript described in AGENTS.md. " +
+  "Reply with ONLY one JSON object conforming to the provided output schema. Because the response is JSON, double every TeX backslash.";
+
 /** Generated as AGENTS.md for an ordinary between-round decision call. */
 const NEXT_MOVE_CONTRACT = `# Choosing the next mathematical step
 
@@ -517,6 +526,66 @@ ${TEX_LAYOUT_GUIDANCE}
 
 Write mathematics as LaTeX delimited by $ … $ inline and $$ … $$ for display;
 never \\( … \\) or \\[ … \\], which do not render for the reader.`;
+
+/** Generated as AGENTS.md for an owner-requested post-terminal manuscript. */
+const PUBLICATION_CONTRACT = `# Standalone mathematical manuscript
+
+You are the Research Manager making one final mathematical and expository pass
+after the research has stopped. Read the exact problem, the stopping report,
+the complete candidate and referee record, the computation summary, and any
+full research write-ups needed to check the conclusion. The previous
+PROVED, DISPROVED, or UNCERTAIN label is evidence about where the work stopped,
+not an instruction to preserve that label. Reconstruct the decisive argument
+yourself. You may carry out a bounded final deduction or calculation in this
+pass, but do not delegate and do not conceal a remaining gap.
+
+Choose exactly one kind of document:
+
+- A preprint is permitted only when a complete proof or a complete
+  counterexample survives this final reading. Its result is PROVED or
+  DISPROVED.
+- A research report is required whenever the main conclusion remains
+  uncertain. If a previous proof or disproof cannot be upheld, do not write it
+  up as a theorem. Gather the correct proofs and calculations into one
+  self-contained account, state the precise gap, and explain the strongest
+  partial results and worthwhile next steps. Its result is UNCERTAIN.
+
+Write for mathematicians who have never seen this research environment. The
+manuscript must stand entirely on its own. Do not mention Inventio, the owner,
+the Research Manager, workers, rounds, internal reviews, or the history of how
+the text was assembled. Never expose identifiers such as candidate, claim,
+task, review, source, or round labels. Replace every such reference by the
+actual mathematical statement, proof, calculation, or ordinary bibliographic
+citation. Remove repeated process prose and duplicated arguments.
+
+For a preprint, state the main theorem or counterexample precisely and prove it
+in full, including every hypothesis, imported result, sign convention, and
+calculation on which the conclusion depends. Cite outside literature in an
+ordinary bibliography with enough information to identify the source. For a
+research report, present each definite partial theorem with its proof and keep
+heuristics or conjectures visibly separate. In either case, define notation
+before use and make the exposition concise without omitting a mathematical
+dependency.
+
+The program supplies a fixed article preamble and compiles the PDF locally.
+Return:
+
+- title: plain text;
+- abstractTex: the TeX contents of the abstract, without an abstract
+  environment;
+- bodyTex: the complete TeX body after the abstract, beginning with the
+  introduction and ending with any bibliography;
+- assessment: a short private explanation of why the earlier conclusion
+  was upheld or changed. This is shown in the interface and is not inserted
+  into the manuscript.
+
+Use the supplied theorem, proposition, lemma, corollary, definition, example,
+remark, and proof environments. Do not write a document class, package import,
+title command, author, document boundary, file input, external image, or
+external bibliography command. Put references directly in a
+thebibliography environment. Because these TeX fragments travel inside JSON,
+double every backslash: the JSON text should contain \\\\frac so the parsed
+TeX contains \\frac.`;
 
 /** The short active surface supplied to the chair; the event log remains the archive. */
 export function workingLibraryMarkdown(state: ProjectState): string {
@@ -984,6 +1053,42 @@ export function finalPacketFiles(
   if (continuationDirection) files["continuation-direction.md"] = continuationDirection;
   if (candidateText) files["candidate.md"] = candidateText;
   if (digest) files["project-summary.md"] = digest;
+  return files;
+}
+
+/**
+ * Builds the read-only directory for the post-terminal publication pass.
+ * Engine code adds full write-ups under research-record/ after constructing
+ * this bounded orientation layer.
+ */
+export function publicationPacketFiles(
+  state: ProjectState,
+  stoppingReport: string,
+  recordIndex: string,
+  digest: string | null,
+): Record<string, string> {
+  const checkpoint = state.terminalHistory.at(-1);
+  const files: Record<string, string> = {
+    "AGENTS.md": PUBLICATION_CONTRACT,
+    "problem.md": state.problem.confirmedMarkdown ?? state.statement,
+    "stopping-report.md": stoppingReport,
+    "research-record-index.md": recordIndex,
+    "current-record.md": ledgerSummary(state),
+    "working-library.md": workingLibraryMarkdown(state),
+    "publication-context.md": [
+      "# Earlier stopping assessment",
+      "",
+      "The earlier run stopped with " + (checkpoint?.result ?? state.terminal?.result ?? "UNCERTAIN") + ".",
+      "Reassess this conclusion from the mathematics. It is not authoritative for this publication pass.",
+      "",
+      verifiedPartialsSection(state),
+    ].join("\n"),
+  };
+  const currentNote = state.researchManagerNotes.at(-1);
+  if (currentNote) files["research-manager-current-view.md"] = currentNote.markdown;
+  if (digest) files["project-summary.md"] = digest;
+  const intakeContext = intakeContextMarkdown(state);
+  if (intakeContext) files["intake-context.md"] = intakeContext;
   return files;
 }
 

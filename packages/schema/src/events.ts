@@ -27,6 +27,9 @@ export type Phase = z.infer<typeof Phase>;
 export const Result = z.enum(["PROVED", "DISPROVED", "UNCERTAIN"]);
 export type Result = z.infer<typeof Result>;
 
+export const PublicationKind = z.enum(["preprint", "research_report"]);
+export type PublicationKind = z.infer<typeof PublicationKind>;
+
 export const ClaimStatus = z.enum(["UNVERIFIED", "VERIFIED", "REFUTED", "SUPERSEDED"]);
 export type ClaimStatus = z.infer<typeof ClaimStatus>;
 
@@ -162,6 +165,7 @@ export const DecisionKind = z.enum([
   "continuation_revision",
   "curation",
   "final",
+  "publication",
 ]);
 export type DecisionKind = z.infer<typeof DecisionKind>;
 
@@ -201,6 +205,47 @@ export const EventSchema = z.discriminatedUnion("type", [
     addTokens: z.number().int().min(0),
     addWaves: z.number().int().min(0),
     by: Actor,
+  }),
+  z.object({
+    ...base,
+    type: z.literal("publication.requested"),
+    publicationId: z.string(),
+    decisionId: z.string(),
+    terminalResult: Result,
+    terminalFinalPath: z.string(),
+    terminalReachedAtSeq: z.number().int().positive(),
+    by: Actor,
+  }),
+  z.object({
+    ...base,
+    type: z.literal("publication.drafted"),
+    publicationId: z.string(),
+    kind: PublicationKind,
+    result: Result,
+    title: z.string(),
+    assessment: z.string(),
+    texPath: z.string(),
+    logPath: z.string(),
+  }),
+  z.object({
+    ...base,
+    type: z.literal("publication.compilationRequested"),
+    publicationId: z.string(),
+    by: Actor,
+  }),
+  z.object({
+    ...base,
+    type: z.literal("publication.completed"),
+    publicationId: z.string(),
+    pdfPath: z.string(),
+    compiler: z.string(),
+  }),
+  z.object({
+    ...base,
+    type: z.literal("publication.failed"),
+    publicationId: z.string(),
+    stage: z.enum(["drafting", "validation", "compilation"]),
+    error: z.string(),
   }),
   z.object({ ...base, type: z.literal("autonomy.changed"), mode: z.enum(["auto", "gated"]), by: Actor }),
   z.object({ ...base, type: z.literal("models.changed"), models: ActiveModelSettings, by: Actor }),

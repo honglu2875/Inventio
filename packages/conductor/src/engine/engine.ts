@@ -10,6 +10,7 @@ import {
   FinalOutput,
   IntakeOutput,
   IntakeRevision,
+  PublicationOutput,
   ProjectSettings,
   applyEvent,
   candidateId as makeCandidateId,
@@ -18,6 +19,7 @@ import {
   nextContinuationRevisionId,
   pendingIntakeDecision,
   pendingContinuationRevision,
+  currentTerminalPublication,
   projectSettingsFromConfig,
   validateActionEnvelope,
   workerOutputSchema,
@@ -30,6 +32,7 @@ import {
   type Phase,
   type ProjectConfig,
   type ProjectState,
+  type PublicationState,
   type Result,
   type RosterEntry,
   type TaskState,
@@ -73,11 +76,13 @@ import {
   CURATION_PROMPT,
   DECISION_PROMPT,
   FINAL_PROMPT,
+  PUBLICATION_PROMPT,
   intakePrompt,
   curationPacketFiles,
   continuationRevisionPacketFiles,
   decisionPacketFiles,
   finalPacketFiles,
+  publicationPacketFiles,
   intakePacketFiles,
   intakeContextMarkdown,
   ledgerSummary,
@@ -103,6 +108,12 @@ import {
   copyIntakeSourcesToPacket,
   indexIntakeSources,
 } from "./intakeSources.js";
+import {
+  createTectonicCompiler,
+  renderPublicationTex,
+  validatePublicationManuscript,
+  type PublicationCompiler,
+} from "../publication/tex.js";
 
 /** Narrow view of the memory service the engine needs (wired in main.ts). */
 export interface MemoryAccess {
@@ -116,6 +127,8 @@ export interface EngineDeps {
   codexBin: string;
   pool: WorkerPool;
   memory: MemoryAccess | null;
+  /** Local TeX engine for owner-requested post-terminal PDFs. */
+  publicationCompiler?: PublicationCompiler;
   /** test overrides */
   taskWallClockMsOverride?: number;
   plannerWallClockMsOverride?: number;
@@ -377,7 +390,9 @@ export class ProjectEngine extends EventEmitter {
   private lastProgressAt = new Map<string, number>();
   private intakeRefreshInFlight = false;
   private interruptedIntakeChecked = false;
+  private interruptedPublicationChecked = false;
   private legacyComputationsChecked = false;
+  private publicationPromise: Promise<void> | null = null;
 
   private constructor(slug: string, deps: EngineDeps, log: EventLog, state: ProjectState) {
     super();
@@ -493,7 +508,10 @@ export class ProjectEngine extends EventEmitter {
     const waiters = this.wakeWaiters;
     this.wakeWaiters = [];
     for (const w of waiters) w();
-    await this.loopPromise?.catch(() => undefined);
+    await Promise.all([
+      this.loopPromise?.catch(() => undefined),
+      this.publicationPromise?.catch(() => undefined),
+    ]);
     this.log.close();
   }
 
@@ -520,6 +538,47 @@ export class ProjectEngine extends EventEmitter {
     return null;
   }
 
+  /** Close publication work that could not survive a server process restart. */
+  private recoverInterruptedPublications(): void {
+    const publicationDecisionIds = new Set(
+      this.state.publications.map((publication) => publication.decisionId),
+    );
+    for (const decisionId of this.state.decisionOrder) {
+      const decision = this.state.decisions[decisionId]!;
+      if (
+        decision.kind === "publication" &&
+        decision.status === "requested" &&
+        !publicationDecisionIds.has(decisionId)
+      ) {
+        this.emitEvent({
+          type: "decision.rejected",
+          decisionId,
+          violations: ["The publication request was interrupted before drafting began."],
+        });
+      }
+    }
+    for (const publication of this.state.publications) {
+      if (publication.status !== "drafting" && publication.status !== "compiling") continue;
+      const decision = this.state.decisions[publication.decisionId];
+      if (decision?.status === "requested") {
+        this.emitEvent({
+          type: "decision.rejected",
+          decisionId: decision.id,
+          violations: ["The publication pass was interrupted when the server stopped."],
+        });
+      }
+      this.emitEvent({
+        type: "publication.failed",
+        publicationId: publication.id,
+        stage: publication.status === "compiling" ? "compilation" : "drafting",
+        error:
+          publication.status === "compiling"
+            ? "PDF compilation was interrupted when the server stopped; the accepted TeX can be compiled again."
+            : "The Research Manager's publication pass was interrupted when the server stopped; retry to draft it again.",
+      });
+    }
+  }
+
   private async loop(): Promise<void> {
     if (!this.interruptedIntakeChecked) {
       this.interruptedIntakeChecked = true;
@@ -533,6 +592,10 @@ export class ProjectEngine extends EventEmitter {
           ],
         });
       }
+    }
+    if (!this.interruptedPublicationChecked) {
+      this.interruptedPublicationChecked = true;
+      this.recoverInterruptedPublications();
     }
     if (!this.legacyComputationsChecked) {
       this.legacyComputationsChecked = true;
@@ -591,6 +654,7 @@ export class ProjectEngine extends EventEmitter {
       isolatedTask?: boolean;
       memoryAccess?: boolean;
       intakeSources?: IntakeSource[];
+      webSearch?: boolean;
     } = {},
   ): Promise<{
     output: T | null;
@@ -603,6 +667,7 @@ export class ProjectEngine extends EventEmitter {
     const packetDir = path.join(dir, "packet");
     mkdirSync(packetDir, { recursive: true });
     for (const [name, content] of Object.entries(files)) {
+      mkdirSync(path.dirname(path.join(packetDir, name)), { recursive: true });
       writeFileSync(path.join(packetDir, name), content);
     }
     if (options.intakeSources) {
@@ -633,6 +698,7 @@ export class ProjectEngine extends EventEmitter {
           model: model.model,
           effort: model.effort,
           isolatedTask: options.isolatedTask ?? true,
+          webSearch: options.webSearch ?? false,
           ...(this.deps.memory && token
             ? {
                 mcp: {
@@ -2497,6 +2563,369 @@ export class ProjectEngine extends EventEmitter {
     this.emitEvent({ type: "terminal.reached", result, finalPath: relPath });
   }
 
+  // ----------------------------------------------------------- publication
+
+  private getPublicationCompiler(): PublicationCompiler {
+    return (
+      this.deps.publicationCompiler ??
+      createTectonicCompiler(process.env["INVENTIO_TEX_BIN"] ?? "tectonic")
+    );
+  }
+
+  private publicationInternalIds(): string[] {
+    const ids = [
+      ...this.state.waveOrder,
+      ...this.state.researchManagerNotes.map((note) => note.waveId),
+      ...Object.keys(this.state.tasks),
+      ...Object.keys(this.state.artifacts),
+      ...Object.keys(this.state.lineages),
+      ...Object.keys(this.state.candidates),
+      ...Object.keys(this.state.reviews),
+      ...Object.keys(this.state.claims),
+      ...Object.keys(this.state.issues),
+      ...Object.keys(this.state.cards),
+      ...Object.keys(this.state.questions),
+      ...Object.keys(this.state.directives),
+      ...Object.keys(this.state.decisions),
+      ...Object.keys(this.state.computations),
+      ...this.state.problem.sources.map((source) => source.id),
+      ...this.state.publications.map((publication) => publication.id),
+    ];
+    // Some artifact keys (notably "final") are ordinary English words. Only
+    // structural labels belong to the private research notation and should be
+    // forbidden in the standalone manuscript.
+    return [...new Set(ids.filter((id) => /^(?:DEC\d+|[WTAECRKIMQDXSP]\d+)(?:\.v\d+)?$/.test(id)))];
+  }
+
+  /**
+   * Copy the complete text record into the read-only publication directory.
+   * It is an on-demand library, not one giant injected prompt: the Manager
+   * chooses which full write-ups to open after reading the index.
+   */
+  private publicationRecordFiles(): {
+    files: Record<string, string>;
+    index: string;
+  } {
+    const files: Record<string, string> = {};
+    const index = [
+      "# Complete research record",
+      "",
+      "Open the full files below as needed for the final mathematical check. Internal labels are navigation aids in this private directory only and must not appear in the standalone manuscript.",
+      "",
+      "## Mathematical write-ups",
+      "",
+    ];
+    let totalCharacters = 0;
+    const totalCap = 50_000_000;
+    const fileCap = 5_000_000;
+    const add = (name: string, absolutePath: string, label: string): void => {
+      if (!existsSync(absolutePath) || !statSync(absolutePath).isFile()) {
+        index.push("- " + label + ": file unavailable");
+        return;
+      }
+      const size = statSync(absolutePath).size;
+      if (size > fileCap || totalCharacters + size > totalCap) {
+        index.push("- " + label + ": omitted from the copied reading directory because it exceeds the safety size limit");
+        return;
+      }
+      const content = repairLegacyArtifactControls(readFileSync(absolutePath, "utf8"));
+      files[name] = content;
+      totalCharacters += content.length;
+      index.push("- " + label + ": " + name);
+    };
+
+    const artifacts = Object.values(this.state.artifacts).sort(
+      (a, b) => a.recordedAtSeq - b.recordedAtSeq,
+    );
+    for (const artifact of artifacts) {
+      add(
+        path.join("research-record", "write-ups", artifact.id + ".md"),
+        path.join(this.paths.dir, artifact.path),
+        artifact.id + " [" + artifact.kind + "; " + (artifact.conclusion ?? "no conclusion") + "]",
+      );
+    }
+
+    index.push("", "## Research-round assessments", "");
+    for (const waveId of this.state.waveOrder) {
+      const wave = this.state.waves[waveId]!;
+      if (wave.resolutionPath) {
+        add(
+          path.join("research-record", "round-assessments", waveId + ".md"),
+          path.join(this.paths.dir, wave.resolutionPath),
+          waveId + " assessment",
+        );
+      }
+      if (wave.docketMarkdown) {
+        const name = path.join("research-record", "round-findings", waveId + ".md");
+        files[name] = wave.docketMarkdown;
+        index.push("- " + waveId + " findings: " + name);
+      }
+    }
+
+    index.push("", "## Structured assignment returns", "");
+    for (const task of Object.values(this.state.tasks)) {
+      const output = path.join(this.paths.tasksDir, task.id, "output.json");
+      add(
+        path.join("research-record", "assignment-returns", task.id + ".json"),
+        output,
+        task.id + " [" + task.role + "; " + task.status + "]",
+      );
+    }
+
+    index.push("", "## Research-library notes", "");
+    for (const card of Object.values(this.state.cards)) {
+      add(
+        path.join("research-record", "library", card.id + ".md"),
+        path.join(this.paths.cardsDir, card.id + ".md"),
+        card.id + " [" + card.status + "]",
+      );
+    }
+
+    index.push("", "## Reproducible computations", "");
+    for (const computation of Object.values(this.state.computations)) {
+      const dir = path.join(this.paths.computationsDir, computation.id);
+      index.push(
+        "- " +
+          computation.id +
+          " from " +
+          computation.taskId +
+          ": " +
+          (computation.reproduced?.match === true ? "exact clean rerun" : "not a matching clean rerun"),
+      );
+      for (const name of ["record.json", "stdout.txt", "stderr.txt"]) {
+        add(
+          path.join("research-record", "computations", computation.id, name),
+          path.join(dir, name),
+          computation.id + " " + name,
+        );
+      }
+    }
+
+    index.push("", "## Earlier Research Manager views", "");
+    for (const note of this.state.researchManagerNotes) {
+      const name = path.join("research-record", "mathematical-views", note.waveId + ".md");
+      files[name] = note.markdown;
+      index.push("- " + note.waveId + ": " + name);
+    }
+
+    return { files, index: index.join("\n") + "\n" };
+  }
+
+  private launchPublicationOperation(
+    publicationId: string,
+    operation: () => Promise<void>,
+  ): void {
+    const pending = operation().catch((error: unknown) => {
+      if (this.stopped) return;
+      const publication = this.state.publications.find((entry) => entry.id === publicationId);
+      if (!publication || publication.status === "ready" || publication.status === "failed") return;
+      const message = (error instanceof Error ? error.message : String(error)).slice(0, 2_000);
+      const decision = this.state.decisions[publication.decisionId];
+      if (decision?.status === "requested") {
+        this.emitEvent({
+          type: "decision.rejected",
+          decisionId: decision.id,
+          violations: [message],
+        });
+      }
+      this.emitEvent({
+        type: "publication.failed",
+        publicationId,
+        stage: publication.status === "compiling" ? "compilation" : "drafting",
+        error: message,
+      });
+    });
+    this.publicationPromise = pending;
+    void pending.finally(() => {
+      if (this.publicationPromise === pending) this.publicationPromise = null;
+    });
+  }
+
+  private async draftPublication(publicationId: string, decisionId: string): Promise<void> {
+    const publication = this.state.publications.find((entry) => entry.id === publicationId);
+    if (!publication) throw new Error("unknown publication " + publicationId);
+    const stoppingReportPath = path.join(this.paths.dir, publication.terminalFinalPath);
+    if (!existsSync(stoppingReportPath)) {
+      throw new Error("stopping report is missing: " + publication.terminalFinalPath);
+    }
+    const stoppingReport = readFileSync(stoppingReportPath, "utf8");
+    const digest = existsSync(this.paths.digestFile)
+      ? readFileSync(this.paths.digestFile, "utf8")
+      : null;
+    const record = this.publicationRecordFiles();
+    const files = {
+      ...publicationPacketFiles(this.state, stoppingReport, record.index, digest),
+      ...record.files,
+    };
+    const internalIds = this.publicationInternalIds();
+    const schema = PublicationOutput.superRefine((output, context) => {
+      for (const message of validatePublicationManuscript(output, internalIds)) {
+        context.addIssue({ code: "custom", message });
+      }
+    });
+    const call = await this.runResearchManagerCall(
+      decisionId,
+      files,
+      PUBLICATION_PROMPT,
+      schema,
+      {
+        memoryAccess: true,
+        intakeSources: this.state.problem.sources,
+        webSearch: this.state.config.allowWebSearch,
+      },
+    );
+    if (this.stopped) return;
+
+    this.emitEvent({
+      type: "decision.proposed",
+      decisionId,
+      action: call.output,
+      usage: call.usage,
+    });
+    if (!call.output) {
+      const failure = call.error ?? "the publication pass did not return a manuscript";
+      this.emitEvent({ type: "decision.rejected", decisionId, violations: [failure] });
+      this.emitEvent({
+        type: "publication.failed",
+        publicationId,
+        stage: failure.startsWith("invalid Research Manager output") ? "validation" : "drafting",
+        error: failure.slice(0, 2_000),
+      });
+      return;
+    }
+
+    this.emitEvent({ type: "decision.accepted", decisionId, action: call.output });
+    const publicationDir = path.join(this.paths.publicationsDir, publicationId);
+    const texPath = path.join(publicationDir, "manuscript.tex");
+    const logPath = path.join(publicationDir, "compile.log");
+    writeFileAtomic(texPath, renderPublicationTex(call.output));
+    this.emitEvent({
+      type: "publication.drafted",
+      publicationId,
+      kind: call.output.kind,
+      result: call.output.result,
+      title: call.output.title,
+      assessment: call.output.assessment,
+      texPath: path.relative(this.paths.dir, texPath),
+      logPath: path.relative(this.paths.dir, logPath),
+    });
+    await this.compilePublication(publicationId);
+  }
+
+  private async compilePublication(publicationId: string): Promise<void> {
+    const publication = this.state.publications.find((entry) => entry.id === publicationId);
+    if (!publication?.texPath || !publication.logPath) {
+      throw new Error("publication " + publicationId + " has no accepted TeX source");
+    }
+    const publicationDir = path.join(this.paths.publicationsDir, publicationId);
+    const texPath = path.join(this.paths.dir, publication.texPath);
+    const logPath = path.join(this.paths.dir, publication.logPath);
+    const killKey = "publication-compiler:" + publicationId;
+    try {
+      const result = await this.getPublicationCompiler().compile({
+        texPath,
+        outputDir: publicationDir,
+        registerKill: (kill) => this.killHandles.set(killKey, () => kill()),
+      });
+      if (this.stopped) return;
+      writeFileAtomic(logPath, result.log);
+      const resolvedDir = path.resolve(publicationDir);
+      const resolvedPdf = path.resolve(result.pdfPath);
+      if (!resolvedPdf.startsWith(resolvedDir + path.sep)) {
+        throw new Error("TeX compiler returned a PDF outside the publication directory");
+      }
+      this.emitEvent({
+        type: "publication.completed",
+        publicationId,
+        pdfPath: path.relative(this.paths.dir, resolvedPdf),
+        compiler: result.compiler,
+      });
+    } catch (error) {
+      if (this.stopped) return;
+      const compileLog =
+        error !== null &&
+        typeof error === "object" &&
+        typeof (error as { compileLog?: unknown }).compileLog === "string"
+          ? (error as { compileLog: string }).compileLog
+          : "";
+      writeFileAtomic(logPath, compileLog);
+      this.emitEvent({
+        type: "publication.failed",
+        publicationId,
+        stage: "compilation",
+        error: (error instanceof Error ? error.message : String(error)).slice(0, 2_000),
+      });
+    } finally {
+      this.killHandles.delete(killKey);
+    }
+  }
+
+  /**
+   * Start a fresh mathematical publication audit, or retry compilation of the
+   * accepted TeX when that was the only failed stage.
+   */
+  requestPublication(by = "human"): string {
+    const terminal = this.state.terminal;
+    const checkpoint = this.state.terminalHistory.at(-1);
+    if (!terminal || !checkpoint) {
+      throw new Error("a standalone paper can be prepared only from a stopping report");
+    }
+    const current = currentTerminalPublication(this.state);
+    if (current?.status === "drafting" || current?.status === "compiling") {
+      throw new Error("a publication pass is already in progress");
+    }
+    const compiler = this.getPublicationCompiler().info();
+    if (!compiler.ok) {
+      throw new Error(
+        "local TeX compiler unavailable (" +
+          compiler.bin +
+          "): " +
+          (compiler.detail ?? "install Tectonic or set INVENTIO_TEX_BIN"),
+      );
+    }
+    if (
+      current?.status === "failed" &&
+      current.failureStage === "compilation" &&
+      current.texPath !== null &&
+      existsSync(path.join(this.paths.dir, current.texPath))
+    ) {
+      this.emitEvent({
+        type: "publication.compilationRequested",
+        publicationId: current.id,
+        by,
+      });
+      this.launchPublicationOperation(current.id, () => this.compilePublication(current.id));
+      return current.id;
+    }
+    if (this.remainingBudget() <= 0) {
+      throw new Error(
+        "no Research Manager token allowance remains; increase the project token ceiling before preparing a paper",
+      );
+    }
+
+    const publicationId = this.allocId("publication");
+    const decisionId = this.allocId("decision");
+    this.emitEvent({
+      type: "decision.requested",
+      decisionId,
+      kind: "publication",
+      waveId: null,
+    });
+    this.emitEvent({
+      type: "publication.requested",
+      publicationId,
+      decisionId,
+      terminalResult: terminal.result,
+      terminalFinalPath: terminal.finalPath,
+      terminalReachedAtSeq: checkpoint.reachedAtSeq,
+      by,
+    });
+    this.launchPublicationOperation(publicationId, () =>
+      this.draftPublication(publicationId, decisionId),
+    );
+    return publicationId;
+  }
+
   // ------------------------------------------------------------ human API
 
   continueResearch(
@@ -2508,6 +2937,10 @@ export class ProjectEngine extends EventEmitter {
   ): void {
     const terminal = this.state.terminal;
     if (!terminal) throw new Error("project is not currently at a stopping report");
+    const publication = currentTerminalPublication(this.state);
+    if (publication?.status === "drafting" || publication?.status === "compiling") {
+      throw new Error("wait for the active publication pass to finish before continuing research");
+    }
     if (note.trim() === "") throw new Error("continuation needs a concrete research direction");
     if (!Number.isSafeInteger(addTokens) || addTokens < 0) {
       throw new Error("addTokens must be a non-negative safe integer");

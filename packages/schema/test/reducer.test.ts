@@ -208,7 +208,8 @@ describe("reducer", () => {
     expect(state.counters.task).toBe(3);
     expect(state.counters.wave).toBe(1);
     expect(state.counters.claim).toBe(2);
-    expect(state.counters.decision).toBe(1);
+    expect(state.counters.decision).toBe(2);
+    expect(state.counters.publication).toBe(1);
   });
 
   it("preserves the original intake context and the owner's edited digest and raw memories", () => {
@@ -305,6 +306,36 @@ describe("reducer", () => {
     expect(state.budget.totalTokens).toBe(state.config.budget.totalTokens);
     expect(state.config.limits.maxWaves).toBe(defaultConfig().limits.maxWaves + 2);
     expect(state.terminal).toEqual({ result: "UNCERTAIN", finalPath: "artifacts/final.md" });
+  });
+
+  it("tracks a publication audit and compilation retry without changing the stopping result", () => {
+    const state = replay(initialState(), buildCanonicalEvents());
+    expect(state.terminal?.result).toBe("UNCERTAIN");
+    expect(state.publications).toEqual([
+      expect.objectContaining({
+        id: "P001",
+        decisionId: "DEC002",
+        status: "ready",
+        terminalResult: "UNCERTAIN",
+        kind: "research_report",
+        result: "UNCERTAIN",
+        texPath: "publications/P001/manuscript.tex",
+        pdfPath: "publications/P001/manuscript.pdf",
+        compiler: "tectonic 0.16.9",
+        error: null,
+      }),
+    ]);
+  });
+
+  it("refuses to replay a research report with a definite publication result", () => {
+    const events = buildCanonicalEvents();
+    const draftIndex = events.findIndex((event) => event.type === "publication.drafted");
+    const state = replay(initialState(), events.slice(0, draftIndex));
+    const drafted = events[draftIndex]!;
+    if (drafted.type !== "publication.drafted") throw new Error("missing publication fixture");
+    expect(() =>
+      applyEvent(state, { ...drafted, kind: "research_report", result: "PROVED" }),
+    ).toThrow(/incompatible kind research_report and result PROVED/);
   });
 
   it("tracks candidates, reviews, issues, lineage abandonment", () => {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import type { ProjectState } from "@inventio/schema";
+import { currentTerminalPublication, type ProjectState } from "@inventio/schema";
 import { api, type ProjectSummary } from "../lib/api";
 import { formatExact, formatTokens } from "../lib/format";
 import { PHASES, burnDownChips, resultColor } from "../lib/visual";
@@ -208,11 +208,13 @@ export default function TopStrip({ slug, state }: { slug: string; state: Project
   const run = useApiAction();
   const [continueOpen, setContinueOpen] = useState(false);
   const [freshStartOpen, setFreshStartOpen] = useState(false);
+  const [publicationStarting, setPublicationStarting] = useState(false);
   useEffect(() => {
     // React Router keeps this component mounted between /p/:slug routes.
     // Project-specific dialogs must never carry over to the next project.
     setContinueOpen(false);
     setFreshStartOpen(false);
+    setPublicationStarting(false);
   }, [slug]);
   const runningTasks = useMemo(
     () =>
@@ -221,6 +223,9 @@ export default function TopStrip({ slug, state }: { slug: string; state: Project
         : Object.values(state.tasks).filter((t) => t.status === "running").length,
     [state],
   );
+  const publication = state === null ? null : currentTerminalPublication(state);
+  const publicationBusy =
+    publication?.status === "drafting" || publication?.status === "compiling";
 
   return (
     <>
@@ -263,15 +268,58 @@ export default function TopStrip({ slug, state }: { slug: string; state: Project
               {state.config.autonomy === "auto" ? "Auto" : "Gated"}
             </button>
             {state.terminal ? (
-              <button
-                type="button"
-                className="button primary"
-                disabled={guard.disabled}
-                {...(guard.title === undefined ? {} : { title: guard.title })}
-                onClick={() => setContinueOpen(true)}
-              >
-                Continue research
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="button"
+                  disabled={guard.disabled || publicationBusy || publicationStarting}
+                  title={
+                    guard.title ??
+                    (publicationBusy
+                      ? "The current publication pass is still running"
+                      : publication?.status === "failed" &&
+                          publication.failureStage === "compilation"
+                        ? "Compile the accepted TeX again"
+                        : "Ask the Research Manager for a final mathematical review and standalone paper")
+                  }
+                  onClick={async () => {
+                    setPublicationStarting(true);
+                    try {
+                      await run(() => api.preparePublication(slug), "Publication review started");
+                    } finally {
+                      setPublicationStarting(false);
+                    }
+                  }}
+                >
+                  {publicationStarting
+                    ? "Starting…"
+                    : publication?.status === "drafting"
+                      ? "Preparing paper…"
+                      : publication?.status === "compiling"
+                        ? "Compiling PDF…"
+                        : publication?.status === "failed"
+                          ? publication.failureStage === "compilation"
+                            ? "Retry PDF"
+                            : "Retry paper"
+                          : publication?.status === "ready"
+                            ? "Prepare again"
+                            : "Prepare paper"}
+                </button>
+                <button
+                  type="button"
+                  className="button primary"
+                  disabled={guard.disabled || publicationBusy}
+                  title={
+                    guard.title ??
+                    (publicationBusy
+                      ? "Wait for the standalone publication pass to finish"
+                      : undefined)
+                  }
+                  onClick={() => setContinueOpen(true)}
+                >
+                  Continue research
+                </button>
+              </>
             ) : (
               <button
                 type="button"

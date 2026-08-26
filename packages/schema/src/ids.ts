@@ -18,6 +18,7 @@ export const ID_PREFIXES = {
   directive: "D",
   decision: "DEC",
   computation: "X",
+  publication: "P",
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;

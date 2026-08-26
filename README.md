@@ -69,6 +69,9 @@ browser ── REST + SSE ──> conductor (Node) ── codex exec --json ─�
 ## Quickstart
 
 Requirements: Node 20, 22, or 24+ and a logged-in `codex` CLI (`codex login`).
+[Tectonic](https://tectonic-typesetting.github.io/book/latest/installation/) is
+also required when you use **Prepare paper** to build a standalone PDF; ordinary
+research runs do not require a TeX installation.
 
 ```bash
 git clone git@github.com:honglu2875/Inventio.git
@@ -155,6 +158,7 @@ into assignments that the Research Manager explicitly grants them to.
 | `MEMORY_PORT` | `4701` | MCP memory service for workers |
 | `INVENTIO_ROOT` | `./projects` | project data directory |
 | `INVENTIO_CODEX_BIN` | `codex` | codex binary (point at the sim for tests) |
+| `INVENTIO_TEX_BIN` | `tectonic` | local Tectonic executable used to compile standalone papers |
 | `INVENTIO_POOL` | `3` | max concurrent workers across all projects |
 | `INVENTIO_DISABLE_MEMORY` | — | set to `1` to skip the memory service |
 
@@ -186,6 +190,15 @@ The system runs to a terminal state on its own. You can always:
   into a numbered revision such as `W020.2`. You may instead mark your text as
   the complete revised view and record it directly. The full direction remains
   available to later decisions throughout the continued run.
+- **prepare a standalone paper** — after a stopping report, ask the Research
+  Manager to reread the complete mathematical record and draft TeX for the
+  mathematical community. A complete proof or counterexample becomes a
+  preprint; anything uncertain becomes a research report containing the sound
+  partial results, calculations, precise gap, and next steps. This final reading
+  may change the earlier assessment, which is shown prominently before the PDF
+  download. Inventio supplies a fixed preamble and compiles the TeX locally in
+  Tectonic's untrusted mode. If compilation alone fails, **Retry PDF** reuses the
+  accepted TeX without another model call.
 
 ## Safety notes
 

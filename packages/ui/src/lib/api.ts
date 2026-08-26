@@ -103,6 +103,7 @@ export interface ProjectSummary {
 
 export interface RuntimeInfo {
   codex: { bin: string; version: string | null; ok: boolean };
+  tex?: { bin: string; version: string | null; ok: boolean; detail: string | null };
   pool: { active: number; queued: number };
   projects: number;
 }
@@ -248,6 +249,10 @@ export const api = {
       addWaves,
       ...(humanRevisionMarkdown === undefined ? {} : { humanRevisionMarkdown }),
     }),
+  preparePublication: (
+    slug: string,
+  ): Promise<{ ok: true; publicationId: string; status: string }> =>
+    request("POST", `/projects/${enc(slug)}/publication`),
   setAutonomy: (slug: string, mode: "auto" | "gated"): Promise<{ ok: true; autonomy: string }> =>
     request("POST", `/projects/${enc(slug)}/autonomy`, { mode }),
   projectSettings: (slug: string): Promise<{ settings: ProjectSettings }> =>
@@ -328,6 +333,17 @@ export const api = {
   quarantineCard: (slug: string, cardId: string, note: string): Promise<{ ok: true }> =>
     request("POST", `/projects/${enc(slug)}/memory/${enc(cardId)}/quarantine`, { note }),
 };
+
+export function publicationPdfUrl(slug: string, publicationId: string): string {
+  return (
+    API_BASE +
+    "/projects/" +
+    enc(slug) +
+    "/publications/" +
+    enc(publicationId) +
+    "/pdf"
+  );
+}
 
 // -------------------------------------------------- artifact body cache (§10)
 

@@ -23,6 +23,7 @@ export interface ProjectPaths {
   capsulesDir: string;
   managerNotesDir: string;
   computationsDir: string;
+  publicationsDir: string;
 }
 
 export function projectPaths(root: string, slug: string): ProjectPaths {
@@ -45,6 +46,7 @@ export function projectPaths(root: string, slug: string): ProjectPaths {
     capsulesDir: path.join(dir, "memory", "capsules"),
     managerNotesDir: path.join(dir, "artifacts", "manager-notes"),
     computationsDir: path.join(dir, "computations"),
+    publicationsDir: path.join(dir, "publications"),
   };
 }
 
@@ -64,6 +66,7 @@ export function createProjectDirs(p: ProjectPaths): void {
     p.capsulesDir,
     p.managerNotesDir,
     p.computationsDir,
+    p.publicationsDir,
   ]) {
     mkdirSync(d, { recursive: true });
   }

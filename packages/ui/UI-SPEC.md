@@ -61,7 +61,7 @@ src/
 ├── components/
 │   ├── nodes/                         # one file per node type (§5)
 │   ├── inspector/                     # Inspector.tsx + one file per tab (§7)
-│   ├── steering/                      # DirectiveDock, GateCard, QuestionsToast, fresh/continue dialogs
+│   ├── steering/                      # DirectiveDock, GateCard, QuestionsToast, publication status, fresh/continue dialogs
 │   ├── TopStrip.tsx                   # phase, budget, burn-down (§6)
 │   └── Markdown.tsx                   # the single markdown renderer
 └── styles/
@@ -126,7 +126,8 @@ interface ProjectSlot {
 }
 interface UiStore {
   projects: Record<string, ProjectSlot>;
-  runtime: { codexOk: boolean; poolActive: number; poolQueued: number } | null;
+  runtime: { codexOk: boolean; texOk: boolean; texDetail: string | null;
+             poolActive: number; poolQueued: number } | null;
   collapse: Record<string, string[]>;   // slug → collapsed wave ids (persisted)
   selection: { slug: string; nodeId: string } | null;
   theme: "dark" | "light" | "system";
@@ -248,8 +249,8 @@ Left→right:
    28×14px). Hidden when no candidate.
 5. Active workers count (`pool` glyph ⚙ n) when > 0.
 6. Right side: **Fresh start** (once intake exists), autonomy toggle (Auto /
-   Gated switch), Pause/Resume button (or Continue Research at a stopping
-   report), theme toggle, connection dot (live green
+   Gated switch), Pause/Resume button (or **Prepare paper** and **Continue
+   research** at a stopping report), theme toggle, connection dot (live green
    / reconnecting amber pulse / fixture purple). Fresh start requires a
    different project title and creates a separate project at editable intake
    confirmation. It copies the raw objective and background, project-local
@@ -272,6 +273,19 @@ revision is running, ManagerView shows the pending numbered view and states
 that no new round has yet been planned. Once recorded, it is the newest open
 view; the unabridged owner direction remains model-visible until the next
 stopping report.
+
+At a stopping report, **Prepare paper** starts a separate final mathematical
+reading by the Research Manager. The control changes to “Preparing paper…” and
+then “Compiling PDF…” while active, and Continue research is disabled only for
+that interval. A full-width status row immediately below the navigation remains
+visible on every project tab. It explains whether the result became a preprint
+or a research report and gives the Manager's short private assessment. If the
+final reading cannot uphold an earlier PROVED or DISPROVED result, the row is a
+warning and says so directly; it never offers an unsupported preprint. Ready
+documents have **Download PDF**. A drafting/validation failure offers **Retry
+publication review**; a compiler failure offers **Retry PDF compilation** and
+does not imply another model call. The older stopping result remains visible as
+historical state rather than being silently rewritten.
 
 SettingsView reads one effective project-settings value from the shared
 snapshot and saves the token ceiling, maximum research rounds, autonomy, Web
@@ -421,7 +435,7 @@ background/literature/idea notes, and supplementary files. Its collapsed
 advanced section contains total token budget, autonomy, max waves, web search,
 and source mounts. Next stores all materials and generates W000 only after
 uploads finish. Top of page: runtime
-strip (codex ok/version, pool occupancy, memory service state) from
+strip (Codex status, local TeX-compiler status, pool occupancy, memory service state) from
 `/api/runtime`.
 
 ## 12. Steering dock
@@ -471,4 +485,6 @@ blocking ones open a modal with answer textarea (answer/dismiss).
 - [ ] Both themes pass a visual check on every view; no unreadable text.
 - [ ] Deep link to a claim opens Evidence with the claim selected.
 - [ ] Gate flow (gated project): approve and reject-with-note both work.
+- [ ] At a stopping report, Prepare paper shows persistent progress, a changed
+      mathematical assessment is unmistakable, and the ready PDF downloads.
 - [ ] `vite build` succeeds; conductor serves `dist/` at `/`.

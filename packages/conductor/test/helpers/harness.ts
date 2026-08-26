@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +16,7 @@ import {
   type PlannedTask,
   type ProjectConfig,
   type ProjectState,
+  type PublicationOutput,
   type ReviewerOutput,
   type WorkerOutput,
 } from "@inventio/schema";
@@ -26,6 +27,11 @@ import {
 } from "../../src/engine/engine.js";
 import { WorkerPool } from "../../src/engine/pool.js";
 import { EventLog } from "../../src/store/eventLog.js";
+import type {
+  PublicationCompiler,
+  TexCompileRequest,
+  TexCompileResult,
+} from "../../src/publication/tex.js";
 import { projectPaths, type ProjectPaths } from "../../src/store/projectStore.js";
 
 /**
@@ -48,6 +54,7 @@ export const CONTINUATION_REVISION_MATCH = "Revise your current mathematical vie
 export const DECISION_MATCH = "choose one proportionate next step";
 export const CURATION_MATCH = "Assess the completed research round";
 export const FINAL_MATCH = "Compose the final report";
+export const PUBLICATION_MATCH = "Reassess the concluded mathematics";
 export const WORKER_MATCH = "Work on the question in research-question.md";
 
 export const USAGE = {
@@ -257,6 +264,25 @@ export function finalOutput(finalMarkdown: string): FinalOutput {
   return { finalMarkdown };
 }
 
+export function publicationOutput(
+  over: Partial<PublicationOutput> = {},
+): PublicationOutput {
+  return {
+    kind: "research_report",
+    result: "UNCERTAIN",
+    title: "A Research Report on Round Widgets",
+    abstractTex:
+      "We record a rigorous partial analysis of the roundness problem and isolate the remaining gap.",
+    bodyTex:
+      "\\section{Statement and setting}\nThe problem concerns round widgets.\n\n" +
+      "\\section{Established results}\n\\begin{proposition}The planar reduction is valid.\\end{proposition}\n" +
+      "\\begin{proof}This follows from the reduction proved below.\\end{proof}\n\n" +
+      "\\section{Remaining question}\nThe final implication has not been established.",
+    assessment: "The final implication remains open after an independent reading.",
+    ...over,
+  } as PublicationOutput;
+}
+
 export function memo(over: Partial<Memo> = {}): Memo {
   return {
     summary: "worked the assigned direction to a conclusion",
@@ -320,6 +346,35 @@ export interface SimLogRow {
 
 const DEFAULT_TIMEOUT = 20_000;
 
+/** Deterministic local compiler used by engine tests; no system TeX install is required. */
+export class FakePublicationCompiler implements PublicationCompiler {
+  failuresRemaining = 0;
+  compileCalls = 0;
+
+  info() {
+    return { bin: "fake-tectonic", ok: true, version: "fake-tectonic 1.0", detail: null };
+  }
+
+  async compile(request: TexCompileRequest): Promise<TexCompileResult> {
+    this.compileCalls += 1;
+    request.registerKill?.(() => undefined);
+    if (this.failuresRemaining > 0) {
+      this.failuresRemaining -= 1;
+      throw Object.assign(new Error("simulated TeX compilation failure"), {
+        compileLog: "fake-tectonic: manuscript did not compile",
+      });
+    }
+    mkdirSync(request.outputDir, { recursive: true });
+    const pdfPath = path.join(request.outputDir, "manuscript.pdf");
+    writeFileSync(pdfPath, "%PDF-1.4\n% deterministic test document\n");
+    return {
+      compiler: "fake-tectonic 1.0",
+      pdfPath,
+      log: "fake-tectonic: compilation succeeded",
+    };
+  }
+}
+
 export class Harness {
   readonly root: string;
   readonly slug = "e2e-project";
@@ -328,6 +383,7 @@ export class Harness {
   readonly paths: ProjectPaths;
   readonly events: Event[] = [];
   engine: ProjectEngine;
+  readonly publicationCompiler = new FakePublicationCompiler();
   private pool = new WorkerPool(1);
   private stopped = false;
   private readonly memory: MemoryAccess | null;
@@ -378,6 +434,7 @@ export class Harness {
       plannerWallClockMsOverride: 15_000,
       killGraceMs: 200,
       progressThrottleMs: 0,
+      publicationCompiler: this.publicationCompiler,
     };
   }
 

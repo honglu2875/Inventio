@@ -9,6 +9,7 @@ import type {
   IntakeMemory,
   IntakeSource,
   Phase,
+  PublicationKind,
   ProposedCard,
   Result,
   RosterEntry,
@@ -213,6 +214,35 @@ export interface ContinuationState {
   atSeq: number;
 }
 
+export type PublicationStatus = "drafting" | "compiling" | "ready" | "failed";
+
+/**
+ * One owner-requested, post-terminal publication review. It is tied to an
+ * immutable stopping checkpoint: continuing research never rewrites an older
+ * manuscript or its mathematical reassessment.
+ */
+export interface PublicationState {
+  id: string;
+  decisionId: string;
+  status: PublicationStatus;
+  terminalResult: Result;
+  terminalFinalPath: string;
+  terminalReachedAtSeq: number;
+  requestedAtSeq: number;
+  requestedBy: string;
+  kind: PublicationKind | null;
+  result: Result | null;
+  title: string | null;
+  assessment: string | null;
+  texPath: string | null;
+  pdfPath: string | null;
+  logPath: string | null;
+  compiler: string | null;
+  failureStage: "drafting" | "validation" | "compilation" | null;
+  error: string | null;
+  completedAtSeq: number | null;
+}
+
 /** One recurrent Research Manager view, written at intake, a round, or a numbered continuation revision. */
 export interface ResearchManagerNoteState {
   waveId: string;
@@ -280,7 +310,27 @@ export interface ProjectState {
   terminalHistory: TerminalRecord[];
   /** Owner-authorized resumptions; prior reports remain immutable evidence. */
   continuations: ContinuationState[];
+  /** Post-terminal manuscripts and reports, oldest first. */
+  publications: PublicationState[];
   counters: Partial<Record<IdKind, number>>;
+}
+
+/** Latest publication attempt for the current stopping checkpoint, if any. */
+export function currentTerminalPublication(state: ProjectState): PublicationState | null {
+  const terminal = state.terminal;
+  const checkpoint = state.terminalHistory.at(-1);
+  if (!terminal || !checkpoint) return null;
+  for (let index = state.publications.length - 1; index >= 0; index -= 1) {
+    const publication = state.publications[index]!;
+    if (
+      publication.terminalReachedAtSeq === checkpoint.reachedAtSeq &&
+      publication.terminalResult === terminal.result &&
+      publication.terminalFinalPath === terminal.finalPath
+    ) {
+      return publication;
+    }
+  }
+  return null;
 }
 
 /**
@@ -386,6 +436,7 @@ export function initialState(): ProjectState {
     terminal: null,
     terminalHistory: [],
     continuations: [],
+    publications: [],
     counters: {},
   };
 }

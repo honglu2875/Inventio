@@ -96,7 +96,7 @@ flags were captured live; see §8.1). Pin expectations there, not here.
   versions `C001.v1`, `C001.v2…`, claims `K001…`, issues `I001…`,
   memory cards `M001…`, questions `Q001…`, directives `D001…`,
   decisions `DEC001…`, computations `X001…`, and original intake sources
-  `S001…`.
+  `S001…`. Post-terminal publication attempts use `P001…`.
 - Event sequence numbers are per-project, monotonically increasing
   integers assigned at append time; they are the SSE resume cursor.
 
@@ -129,6 +129,10 @@ projects/<slug>/
 │   ├── codex-events.jsonl             # full archived worker stream
 │   ├── output.json                    # validated structured return
 │   └── meta.json                      # threadId, usage, timestamps, exit info
+├── publications/P001/
+│   ├── manuscript.tex                 # accepted Research Manager TeX in fixed preamble
+│   ├── compile.log                    # bounded local compiler output
+│   └── manuscript.pdf                 # present only after a successful compile
 └── computations/X001/                 # code + inputs + outputs + hashes (§10)
 ```
 
@@ -157,6 +161,13 @@ Lifecycle & phases
 - `terminal.reached { result: "PROVED"|"DISPROVED"|"UNCERTAIN", finalPath }`
 - `project.continued { previousResult, previousFinalPath, note, addTokens,
   addWaves, by }` (the note is retained verbatim for the entire resumed period)
+- `publication.requested { publicationId, decisionId, terminalResult,
+  terminalFinalPath, terminalReachedAtSeq, by }`
+- `publication.drafted { publicationId, kind, result, title, assessment,
+  texPath, logPath }`
+- `publication.compilationRequested { publicationId, by }`
+- `publication.completed { publicationId, pdfPath, compiler }`
+- `publication.failed { publicationId, stage, error }`
 
 Intake & human channel
 - `intake.rawUpdated { statement, contextMarkdown, by }` (explicit owner
@@ -216,8 +227,8 @@ Memory
 
 The reducer in `schema` folds these into `ProjectState`:
 `{ config, phase, problem, waves, tasks, artifacts, lineages, candidates,
-claims, issues, cards, questions, directives, decisions, researchManagerNotes, computations,
-budget, autonomy, terminal }` — plain serializable data. The frontend runs
+claims, issues, cards, questions, directives, decisions, researchManagerNotes,
+computations, publications, budget, autonomy, terminal }` — plain serializable data. The frontend runs
 the identical reducer, so backend and UI can never disagree about state.
 
 `deriveGraph(state, view)` (also in `schema`) projects state into typed
@@ -347,6 +358,12 @@ yet:
   capsules: { solver, explorer, reviewer } }
 // final
 { finalMarkdown }   // RESULT: line is stamped by the Conductor, never by the model
+// owner-requested post-terminal publication
+{ kind: "preprint", result: "PROVED"|"DISPROVED",
+  title, abstractTex, bodyTex, assessment }
+// or
+{ kind: "research_report", result: "UNCERTAIN",
+  title, abstractTex, bodyTex, assessment }
 ```
 
 Assessment outputs pass the same deterministic filters (library rules §9.4,
@@ -435,6 +452,36 @@ and return the structured output; otherwise mark `task.interrupted
 engine steps are idempotent against the log (e.g. a decision with a
 `decision.requested` but no terminal decision event is re-run under the
 same `decisionId`).
+
+### 6.9 Post-terminal TeX publication
+
+`requestPublication()` is an owner-triggered operation available only while a
+stopping report is current. It does not reopen the research loop and it does
+not rewrite the historical `terminal.result`. A new publication record is tied
+to the exact stopping event sequence and report path, so continuing research
+and stopping again creates a new checkpoint rather than silently replacing an
+older paper.
+
+The Research Manager receives the confirmed problem, stopping report, current
+mathematical view, short library and claim surfaces, original intake context,
+and an index of copied full write-ups, referee reports, assignment returns,
+library notes, and reproducible-computation records. It reads those full files
+on demand and performs the final mathematical judgment itself; no workers are
+spawned. The configured Research Manager model and project Web-search
+permission apply, and usage is charged to Research Manager spend.
+
+The response is the binary schema in §6.3. Before acceptance, deterministic
+validation rejects product references, private research IDs, document
+boundaries, package imports, file input/output, external images, and shell-like
+TeX commands. The runtime escapes the plain-text title, places the accepted
+abstract and body fragments inside a fixed article preamble, writes
+`publications/P###/manuscript.tex`, and invokes
+`tectonic -X compile --untrusted`. It checks the output header before recording
+the PDF as ready. Compilation failures retain both TeX and a bounded log; a
+retry runs only the compiler. Drafting or validation failures instead start a
+new publication reading. On restart, an interrupted drafting or compilation
+stage becomes an explicit retryable failure rather than remaining permanently
+busy.
 
 ## 7. Task packets — the jail
 
@@ -795,10 +842,12 @@ validated; artifact reads path-confined to the project directory.
 | Method | Route | Purpose |
 |---|---|---|
 | GET  | `/api/health` | version, paths, codex binary status |
-| GET  | `/api/runtime` | account/auth summary, pool occupancy, model defaults |
+| GET  | `/api/runtime` | Codex and local TeX compiler status, pool occupancy, model defaults |
 | GET/POST | `/api/projects` | list / create `{ title, slug?, statement, contextMarkdown?, config?, start? }`; `start:false` permits uploads before W000 |
 | GET  | `/api/projects/:slug` | full `ProjectState` snapshot + `seq` |
 | GET  | `/api/projects/:slug/events?since=` | SSE event stream (resumable) |
+| POST | `/api/projects/:slug/publication` | start the current stopping report's final TeX reading, or retry its accepted TeX compilation |
+| GET  | `/api/projects/:slug/publications/:id/pdf` | download a ready standalone PDF |
 | GET  | `/api/projects/:slug/artifacts/:id` | artifact body + metadata |
 | GET  | `/api/projects/:slug/tasks/:id` | task detail (packet manifest, memo, meta) |
 | GET  | `/api/projects/:slug/tasks/:id/packet/*` | packet file viewer |
@@ -868,7 +917,8 @@ launch.
 
 Server env: `INVENTIO_ROOT` (default `./projects`), `PORT` (4700),
 `MEMORY_PORT` (4701), `HOST` (127.0.0.1), `INVENTIO_CODEX_BIN`
-(default `codex`; the sim binary for tests), `INVENTIO_POOL` (3).
+(default `codex`; the sim binary for tests), `INVENTIO_TEX_BIN` (default
+`tectonic`), `INVENTIO_POOL` (3).
 
 ## 14. Failure modes
 
@@ -882,6 +932,9 @@ Server env: `INVENTIO_ROOT` (default `./projects`), `PORT` (4700),
 | conductor crash | replay log; resume or mark in-flight tasks interrupted (§6.8) |
 | quota/auth failure from codex | project auto-paused + blocking Question with stderr excerpt |
 | memory service error | worker proceeds without recall; warning event |
+| publication drafting/validation failure | durable failed publication; owner may request a fresh final reading |
+| TeX compiler missing or failing | fail before model spend when missing; otherwise retain accepted TeX and log for compiler-only retry |
+| conductor stops during publication | replay converts the in-flight stage to an explicit drafting or compilation failure |
 | torn tail line in events.jsonl | dropped on replay (write-ahead of artifacts prevents dangling refs) |
 | SSE client lag/disconnect | resumable via `since`; server keeps no per-client state |
 
@@ -919,12 +972,15 @@ authenticates every call with a per-task bearer token and enforces role
 visibility server-side. Mounted sources are owner-trusted by definition;
 worker-produced text is data everywhere in the pipeline (the docket
 builder never executes or interprets it; the UI renders Markdown with
-raw HTML disabled).
+raw HTML disabled). Post-terminal manuscripts pass an additional TeX boundary:
+only abstract/body fragments are accepted, private IDs and file-I/O commands
+are rejected, and a fixed preamble is compiled locally with Tectonic's
+`--untrusted` mode. A PDF is served only after path confinement and a `%PDF-`
+header check.
 
 ## 17. Future extensions (explicitly out of v1)
 
 Concurrent active lineages with budget arbitration; embedding-based
 memory search; a Lean-formalization worker role and proof-artifact
 checker; gated web-research role with citation capture; multi-machine
-worker pools; snapshot.json boot cache; artifact export (LaTeX/PDF) of
-`final.md`; cost accounting in currency.
+worker pools; snapshot.json boot cache; cost accounting in currency.

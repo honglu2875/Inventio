@@ -48,7 +48,13 @@ export const MAX_RETAINED_EVENTS = 5000;
 
 export interface UiStore {
   projects: Record<string, ProjectSlot>;
-  runtime: { codexOk: boolean; poolActive: number; poolQueued: number } | null;
+  runtime: {
+    codexOk: boolean;
+    texOk: boolean;
+    texDetail: string | null;
+    poolActive: number;
+    poolQueued: number;
+  } | null;
   collapse: Record<string, string[]>;
   selection: Selection | null;
   theme: ThemeChoice;

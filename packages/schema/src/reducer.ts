@@ -47,6 +47,107 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
         reachedAtSeq: event.seq,
       });
       return state;
+    case "publication.requested": {
+      const terminal = must(state.terminal ?? undefined, "terminal report");
+      const checkpoint = must(state.terminalHistory.at(-1), "terminal checkpoint");
+      const decision = must(state.decisions[event.decisionId], `decision ${event.decisionId}`);
+      if (decision.kind !== "publication") {
+        throw new Error(`decision ${event.decisionId} is not a publication decision`);
+      }
+      if (
+        terminal.result !== event.terminalResult ||
+        terminal.finalPath !== event.terminalFinalPath ||
+        checkpoint.reachedAtSeq !== event.terminalReachedAtSeq
+      ) {
+        throw new Error(`publication ${event.publicationId} does not match the current stopping checkpoint`);
+      }
+      bump(state, "publication", event.publicationId);
+      state.publications.push({
+        id: event.publicationId,
+        decisionId: event.decisionId,
+        status: "drafting",
+        terminalResult: event.terminalResult,
+        terminalFinalPath: event.terminalFinalPath,
+        terminalReachedAtSeq: event.terminalReachedAtSeq,
+        requestedAtSeq: event.seq,
+        requestedBy: event.by,
+        kind: null,
+        result: null,
+        title: null,
+        assessment: null,
+        texPath: null,
+        pdfPath: null,
+        logPath: null,
+        compiler: null,
+        failureStage: null,
+        error: null,
+        completedAtSeq: null,
+      });
+      return state;
+    }
+    case "publication.drafted": {
+      const publication = must(
+        state.publications.find((entry) => entry.id === event.publicationId),
+        `publication ${event.publicationId}`,
+      );
+      if (
+        (event.kind === "preprint" && event.result === "UNCERTAIN") ||
+        (event.kind === "research_report" && event.result !== "UNCERTAIN")
+      ) {
+        throw new Error(
+          `publication ${event.publicationId} has incompatible kind ${event.kind} and result ${event.result}`,
+        );
+      }
+      publication.status = "compiling";
+      publication.kind = event.kind;
+      publication.result = event.result;
+      publication.title = event.title;
+      publication.assessment = event.assessment;
+      publication.texPath = event.texPath;
+      publication.logPath = event.logPath;
+      publication.failureStage = null;
+      publication.error = null;
+      return state;
+    }
+    case "publication.compilationRequested": {
+      const publication = must(
+        state.publications.find((entry) => entry.id === event.publicationId),
+        `publication ${event.publicationId}`,
+      );
+      if (publication.texPath === null) {
+        throw new Error(`publication ${event.publicationId} has no TeX source to recompile`);
+      }
+      publication.status = "compiling";
+      publication.failureStage = null;
+      publication.error = null;
+      return state;
+    }
+    case "publication.completed": {
+      const publication = must(
+        state.publications.find((entry) => entry.id === event.publicationId),
+        `publication ${event.publicationId}`,
+      );
+      if (publication.texPath === null || publication.kind === null || publication.result === null) {
+        throw new Error(`publication ${event.publicationId} completed before a manuscript was accepted`);
+      }
+      publication.status = "ready";
+      publication.pdfPath = event.pdfPath;
+      publication.compiler = event.compiler;
+      publication.failureStage = null;
+      publication.error = null;
+      publication.completedAtSeq = event.seq;
+      return state;
+    }
+    case "publication.failed": {
+      const publication = must(
+        state.publications.find((entry) => entry.id === event.publicationId),
+        `publication ${event.publicationId}`,
+      );
+      publication.status = "failed";
+      publication.failureStage = event.stage;
+      publication.error = event.error;
+      return state;
+    }
     case "project.continued": {
       const terminal = must(state.terminal ?? undefined, "terminal report");
       if (

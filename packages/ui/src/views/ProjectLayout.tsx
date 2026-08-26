@@ -6,6 +6,7 @@ import Inspector from "../components/inspector/Inspector";
 import DirectiveDock from "../components/steering/DirectiveDock";
 import GateCard from "../components/steering/GateCard";
 import QuestionsToast from "../components/steering/QuestionsToast";
+import PublicationStatusBar from "../components/steering/PublicationStatusBar";
 import { ProjectSlugContext } from "../components/ProjectContext";
 import { connectProject } from "../store/connect";
 import { startFixture } from "../store/fixtures";
@@ -79,6 +80,7 @@ export default function ProjectLayout(): JSX.Element {
           </NavLink>
           {slot?.lastError ? <span className="strip-error">{slot.lastError}</span> : null}
         </nav>
+        {state?.terminal ? <PublicationStatusBar slug={slug} state={state} /> : null}
         <main className="content">
           <QuestionsToast slug={slug} />
           <div className="content-view">

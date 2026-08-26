@@ -10,6 +10,17 @@ import { MemoryService } from "../src/memory/service.js";
 import { buildApp, taskMemoFromOutput } from "../src/server/http.js";
 import { EngineManager, mergeConfig, slugify } from "../src/server/manager.js";
 import { tailJsonl } from "../src/server/sse.js";
+import {
+  FINAL_MATCH,
+  PUBLICATION_MATCH,
+  DECISION_MATCH,
+  FakePublicationCompiler,
+  finalOutput,
+  plannerCall,
+  publicationOutput,
+  terminate,
+  type SimCall,
+} from "./helpers/harness.js";
 
 /**
  * HTTP/SSE control-server tests (DESIGN §12), driven against real engines on
@@ -39,37 +50,46 @@ interface Harness {
   manager: EngineManager;
   app: FastifyInstance;
   root: string;
+  publicationCompiler: FakePublicationCompiler;
 }
 
 const open: Harness[] = [];
 
-/** Scenario: `n` intake calls, so `n` projects can pass intake in one test. */
-function harness(intakeCalls = 4): Harness {
+/** Scenario: `n` intake calls, optionally followed by a complete research path. */
+function harness(intakeCalls = 4, extraCalls: SimCall[] = []): Harness {
   const dir = mkdtempSync(path.join(os.tmpdir(), "collq-server-"));
   const scenario = path.join(dir, "scenario.json");
   writeFileSync(
     scenario,
     JSON.stringify({
-      calls: Array.from({ length: intakeCalls }, () => ({
-        match: { promptContains: "Read the complete raw intake materials" },
-        finalMessage: INTAKE_OUTPUT,
-        usage: { input_tokens: 100, cached_input_tokens: 0, output_tokens: 20, reasoning_output_tokens: 0 },
-      })),
+      calls: [
+        ...Array.from({ length: intakeCalls }, () => ({
+          match: { promptContains: "Read the complete raw intake materials" },
+          finalMessage: INTAKE_OUTPUT,
+          usage: { input_tokens: 100, cached_input_tokens: 0, output_tokens: 20, reasoning_output_tokens: 0 },
+        })),
+        ...extraCalls,
+      ],
     }),
   );
   process.env["INVENTIO_SIM_SCENARIO"] = scenario;
   process.env["INVENTIO_SIM_STATE_DIR"] = path.join(dir, "state");
 
   const root = path.join(dir, "projects");
+  const publicationCompiler = new FakePublicationCompiler();
   const manager = new EngineManager({
     root,
     codexBin: SIM_BIN,
     pool: new WorkerPool(2),
     memoryService: null,
-    engineOverrides: { plannerWallClockMsOverride: 5000, killGraceMs: 200 },
+    engineOverrides: {
+      plannerWallClockMsOverride: 5000,
+      killGraceMs: 200,
+      publicationCompiler,
+    },
   });
   const app = buildApp(manager, { uiDir: null, heartbeatMs: 500, tailPollMs: 50 });
-  const h: Harness = { manager, app, root };
+  const h: Harness = { manager, app, root, publicationCompiler };
   open.push(h);
   return h;
 }
@@ -160,11 +180,17 @@ describe("diagnostics", () => {
     expect(runtime.statusCode).toBe(200);
     const body = runtime.json() as {
       codex: { bin: string; version: string | null; ok: boolean };
+      tex: { bin: string; version: string | null; ok: boolean };
       pool: { active: number; queued: number };
       projects: number;
     };
     expect(body.codex.bin).toBe(SIM_BIN);
     expect(typeof body.codex.ok).toBe("boolean");
+    expect(body.tex).toMatchObject({
+      bin: "fake-tectonic",
+      version: "fake-tectonic 1.0",
+      ok: true,
+    });
     expect(body.pool).toEqual({ active: 0, queued: 0 });
     expect(body.projects).toBe(0);
   });
@@ -222,6 +248,69 @@ describe("diagnostics", () => {
     const api = await h.inject({ method: "GET", url: "/api/nope" });
     expect(api.statusCode).toBe(404);
     await h.close();
+  });
+});
+
+describe("standalone publication HTTP", () => {
+  it("starts only after a stopping report and serves the locally compiled PDF", async () => {
+    const h = harness(1, [
+      plannerCall(DECISION_MATCH, terminate("the last implication remains open")),
+      plannerCall(
+        FINAL_MATCH,
+        finalOutput("# Final report\n\nA partial theorem is proved, while the main implication remains open."),
+      ),
+      plannerCall(PUBLICATION_MATCH, publicationOutput()),
+    ]);
+    const created = await createProject(h.app, {
+      title: "Publication boundary",
+      statement: "Determine whether every widget is round.",
+    });
+    expect(created.status).toBe(201);
+    const slug = created.json["slug"] as string;
+    const engine = h.manager.get(slug)!;
+    await waitFor(() => engine.state.phase === "AWAITING_CONFIRMATION");
+
+    const tooSoon = await h.app.inject({
+      method: "POST",
+      url: `/api/projects/${slug}/publication`,
+    });
+    expect(tooSoon.statusCode).toBe(409);
+    expect((tooSoon.json() as { detail: string }).detail).toContain("stopping report");
+
+    const confirmed = await h.app.inject({
+      method: "POST",
+      url: `/api/projects/${slug}/confirm-problem`,
+      payload: { problemMarkdown: "# Problem\n\nDetermine whether every widget is round." },
+    });
+    expect(confirmed.statusCode).toBe(200);
+    await waitFor(() => engine.state.terminal !== null);
+    expect(engine.state.terminal?.result).toBe("UNCERTAIN");
+
+    const missing = await h.app.inject({
+      method: "GET",
+      url: `/api/projects/${slug}/publications/P001/pdf`,
+    });
+    expect(missing.statusCode).toBe(404);
+
+    const started = await h.app.inject({
+      method: "POST",
+      url: `/api/projects/${slug}/publication`,
+    });
+    expect(started.statusCode).toBe(202);
+    expect(started.json()).toMatchObject({ ok: true, publicationId: "P001" });
+    await waitFor(() => engine.state.publications[0]?.status === "ready");
+
+    const pdf = await h.app.inject({
+      method: "GET",
+      url: `/api/projects/${slug}/publications/P001/pdf`,
+    });
+    expect(pdf.statusCode).toBe(200);
+    expect(pdf.headers["content-type"]).toContain("application/pdf");
+    expect(pdf.headers["content-disposition"]).toContain("research-report-publication-boundary.pdf");
+    expect(pdf.rawPayload.subarray(0, 5).toString("ascii")).toBe("%PDF-");
+    expect(readFileSync(path.join(h.root, slug, "publications", "P001", "manuscript.tex"), "utf8"))
+      .toContain("\\documentclass[11pt]{article}");
+    expect(h.publicationCompiler.compileCalls).toBe(1);
   });
 });
 

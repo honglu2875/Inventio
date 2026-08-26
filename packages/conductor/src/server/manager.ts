@@ -12,6 +12,10 @@ import type { WorkerPool } from "../engine/pool.js";
 import { FileMemoryBackend } from "../memory/cardStore.js";
 import type { MemoryService } from "../memory/service.js";
 import {
+  createTectonicCompiler,
+  type PublicationCompiler,
+} from "../publication/tex.js";
+import {
   listProjectSlugs,
   projectPaths,
   readProjectFile,
@@ -49,6 +53,8 @@ export interface EngineManagerOpts {
   codexBin: string;
   pool: WorkerPool;
   memoryService: MemoryService | null;
+  /** Local TeX engine used for owner-requested standalone PDFs. */
+  texBin?: string;
   /** test/dev overrides folded into every engine's deps */
   engineOverrides?: Partial<EngineDeps>;
 }
@@ -122,6 +128,7 @@ export class EngineManager {
   readonly root: string;
   readonly codexBin: string;
   readonly pool: WorkerPool;
+  readonly publicationCompiler: PublicationCompiler;
   private readonly memoryService: MemoryService | null;
   private readonly engineOverrides: Partial<EngineDeps>;
   private readonly engines = new Map<string, ProjectEngine>();
@@ -132,6 +139,9 @@ export class EngineManager {
     this.pool = opts.pool;
     this.memoryService = opts.memoryService;
     this.engineOverrides = opts.engineOverrides ?? {};
+    this.publicationCompiler =
+      opts.engineOverrides?.publicationCompiler ??
+      createTectonicCompiler(opts.texBin ?? "tectonic");
   }
 
   private deps(): EngineDeps {
@@ -147,6 +157,7 @@ export class EngineManager {
             revokeToken: (token) => memory.revokeToken(token),
           }
         : null,
+      publicationCompiler: this.publicationCompiler,
     };
     Object.assign(deps, this.engineOverrides);
     return deps;

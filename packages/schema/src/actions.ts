@@ -341,5 +341,37 @@ export type IntakeRevision = z.infer<typeof IntakeRevision>;
 export const FinalOutput = z.object({ finalMarkdown: z.string().min(1) });
 export type FinalOutput = z.infer<typeof FinalOutput>;
 
+const PublicationManuscript = {
+  title: z.string().trim().min(1).max(300),
+  /**
+   * The abstract and body are TeX fragments. The Conductor supplies the
+   * document class, packages, theorem environments, title block, and document
+   * boundaries before compiling the local PDF.
+   */
+  abstractTex: z.string().trim().min(1).max(6_000),
+  bodyTex: z.string().trim().min(1).max(500_000),
+  /** Short private explanation for the UI; never inserted in the manuscript. */
+  assessment: z.string().trim().min(1).max(2_000),
+} as const;
+
+/**
+ * The publication pass is deliberately binary. A definite proof or
+ * counterexample yields a preprint; anything less yields an UNCERTAIN
+ * research report. The Research Manager may reassess the stopping result.
+ */
+export const PublicationOutput = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("preprint"),
+    result: z.enum(["PROVED", "DISPROVED"]),
+    ...PublicationManuscript,
+  }),
+  z.object({
+    kind: z.literal("research_report"),
+    result: z.literal("UNCERTAIN"),
+    ...PublicationManuscript,
+  }),
+]);
+export type PublicationOutput = z.infer<typeof PublicationOutput>;
+
 export const CrossExamAnswer = z.object({ answerMarkdown: z.string().min(1) });
 export type CrossExamAnswer = z.infer<typeof CrossExamAnswer>;
