@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PublicationState } from "@inventio/schema";
-import { publicationStatusText } from "../src/components/steering/PublicationStatusBar.js";
-import { publicationPdfUrl } from "../src/lib/api.js";
+import { publicationStatusText } from "../src/components/steering/PublicationDialog.js";
+import { publicationPdfUrl, publicationTexUrl } from "../src/lib/api.js";
 
 function publication(over: Partial<PublicationState> = {}): PublicationState {
   return {
@@ -34,19 +34,23 @@ describe("publication presentation", () => {
     expect(publicationStatusText(publication())).toContain("research report");
   });
 
-  it("distinguishes drafting, local compilation, and an upheld preprint", () => {
-    expect(publicationStatusText(publication({ status: "drafting" }))).toContain("drafting");
+  it("distinguishes drafting, saved TeX, local compilation, and an upheld preprint", () => {
+    expect(publicationStatusText(publication({ status: "drafting" }))).toContain("writing");
+    expect(publicationStatusText(publication({ status: "drafted" }))).toContain("TeX manuscript is saved");
     expect(publicationStatusText(publication({ status: "compiling" }))).toContain("compiled locally");
     expect(
       publicationStatusText(
         publication({ kind: "preprint", result: "DISPROVED", terminalResult: "DISPROVED" }),
       ),
-    ).toBe("The final mathematical review upheld the DISPROVED result.");
+    ).toBe("The final mathematical reading upheld the DISPROVED result.");
   });
 
   it("uses the confined project publication endpoint for downloads", () => {
     expect(publicationPdfUrl("a project", "P001")).toBe(
       "/api/projects/a%20project/publications/P001/pdf",
+    );
+    expect(publicationTexUrl("a project", "P001")).toBe(
+      "/api/projects/a%20project/publications/P001/tex",
     );
   });
 });

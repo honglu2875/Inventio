@@ -348,11 +348,14 @@ const DEFAULT_TIMEOUT = 20_000;
 
 /** Deterministic local compiler used by engine tests; no system TeX install is required. */
 export class FakePublicationCompiler implements PublicationCompiler {
+  available = true;
   failuresRemaining = 0;
   compileCalls = 0;
 
   info() {
-    return { bin: "fake-tectonic", ok: true, version: "fake-tectonic 1.0", detail: null };
+    return this.available
+      ? { bin: "fake-tectonic", ok: true, version: "fake-tectonic 1.0", detail: null }
+      : { bin: "fake-tectonic", ok: false, version: null, detail: "compiler not installed" };
   }
 
   async compile(request: TexCompileRequest): Promise<TexCompileResult> {

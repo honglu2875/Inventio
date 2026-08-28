@@ -386,28 +386,36 @@ describe("ProjectEngine end-to-end (codex-sim)", () => {
     expect(h.state.budget.plannerSpentTokens).toBe(7 * 1100);
 
     // A separate post-terminal reading may overrule the stopping assessment.
-    // It writes TeX, compiles locally, and never mutates the historical result.
+    // It saves TeX first; compilation is a separate owner action.
     const publicationId = h.engine.requestPublication();
     expect(publicationId).toBe("P001");
     await h.waitFor(
-      (state) => state.publications[0]?.status === "ready",
-      "standalone publication",
+      (state) => state.publications[0]?.status === "drafted",
+      "standalone TeX manuscript",
     );
     const publication = h.state.publications[0]!;
     expect(publication).toMatchObject({
       id: "P001",
       decisionId: "DEC008",
-      status: "ready",
+      status: "drafted",
       terminalResult: "PROVED",
       kind: "research_report",
       result: "UNCERTAIN",
-      compiler: "fake-tectonic 1.0",
+      compiler: null,
     });
     expect(h.state.terminal).toEqual({ result: "PROVED", finalPath: "artifacts/final.md" });
-    expect(h.publicationCompiler.compileCalls).toBe(1);
+    expect(h.publicationCompiler.compileCalls).toBe(0);
     expect(h.read("publications/P001/manuscript.tex")).toContain("\\documentclass[11pt]{article}");
     expect(h.read("publications/P001/manuscript.tex")).toContain("\\section{Remaining gap}");
     expect(h.read("publications/P001/manuscript.tex")).not.toMatch(/Inventio|C001\.v1|A001|T001/);
+    expect(h.engine.requestPublication()).toBe("P001");
+    h.engine.requestPublicationCompilation("P001");
+    await h.waitFor(
+      (state) => state.publications[0]?.status === "ready",
+      "standalone PDF",
+    );
+    expect(publication).toMatchObject({ status: "ready", compiler: "fake-tectonic 1.0" });
+    expect(h.publicationCompiler.compileCalls).toBe(1);
     expect(h.read("publications/P001/manuscript.pdf").startsWith("%PDF-")).toBe(true);
     expect(h.read("publications/P001/compile.log")).toContain("compilation succeeded");
     expect(h.readDecisionPacket("DEC008", "research-record-index.md")).toContain(
@@ -441,6 +449,12 @@ describe("ProjectEngine end-to-end (codex-sim)", () => {
     h.publicationCompiler.failuresRemaining = 1;
     expect(h.engine.requestPublication()).toBe("P001");
     await h.waitFor(
+      (state) => state.publications[0]?.status === "drafted",
+      "saved TeX before compilation",
+    );
+    const modelCallsAfterDraft = h.simLog().length;
+    h.engine.requestPublicationCompilation("P001");
+    await h.waitFor(
       (state) => state.publications[0]?.status === "failed",
       "first PDF compilation to fail",
     );
@@ -450,14 +464,16 @@ describe("ProjectEngine end-to-end (codex-sim)", () => {
       texPath: "publications/P001/manuscript.tex",
     });
     expect(h.read("publications/P001/compile.log")).toContain("did not compile");
-    const modelCallsAfterDraft = h.simLog().length;
 
     await h.stop();
     await h.reload();
     h.start();
     expect(h.state.publications[0]?.status).toBe("failed");
 
+    // Opening an existing manuscript is idempotent and never compiles it.
     expect(h.engine.requestPublication()).toBe("P001");
+    expect(h.publicationCompiler.compileCalls).toBe(1);
+    h.engine.requestPublicationCompilation("P001");
     await h.waitFor(
       (state) => state.publications[0]?.status === "ready",
       "retried PDF compilation",
@@ -465,8 +481,37 @@ describe("ProjectEngine end-to-end (codex-sim)", () => {
     expect(h.publicationCompiler.compileCalls).toBe(2);
     expect(h.simLog()).toHaveLength(modelCallsAfterDraft);
     expect(h.state.publications).toHaveLength(1);
-    expect(h.eventsOfType("publication.compilationRequested")).toHaveLength(1);
+    expect(h.eventsOfType("publication.compilationRequested")).toHaveLength(2);
     expect(h.read("publications/P001/manuscript.pdf").startsWith("%PDF-")).toBe(true);
+  });
+
+  it("saves TeX even when the local PDF compiler is unavailable", async () => {
+    const h = harness("publication-without-compiler", [
+      plannerCall(INTAKE_MATCH, intakeOutput()),
+      plannerCall(DECISION_MATCH, terminate("the remaining implication is open")),
+      plannerCall(FINAL_MATCH, finalOutput("# Final report\n\nA partial theorem remains.")),
+      plannerCall(PUBLICATION_MATCH, publicationOutput()),
+    ]);
+
+    await runToConfirmation(h);
+    await h.waitForTerminal();
+    h.publicationCompiler.available = false;
+    h.engine.requestPublication();
+    await h.waitFor(
+      (state) => state.publications[0]?.status === "drafted",
+      "TeX manuscript without compiler",
+    );
+    expect(h.read("publications/P001/manuscript.tex")).toContain("\\documentclass");
+    expect(h.publicationCompiler.compileCalls).toBe(0);
+
+    h.engine.requestPublicationCompilation("P001");
+    expect(h.state.publications[0]).toMatchObject({
+      status: "failed",
+      failureStage: "compilation",
+      texPath: "publications/P001/manuscript.tex",
+      error: expect.stringContaining("compiler not installed"),
+    });
+    expect(h.publicationCompiler.compileCalls).toBe(0);
   });
 
   it("repairs a draft that leaks internal labels before accepting its TeX", async () => {
@@ -497,8 +542,8 @@ describe("ProjectEngine end-to-end (codex-sim)", () => {
     await h.waitForTerminal();
     h.engine.requestPublication();
     await h.waitFor(
-      (state) => state.publications[0]?.status === "ready",
-      "repaired standalone publication",
+      (state) => state.publications[0]?.status === "drafted",
+      "repaired standalone TeX manuscript",
     );
 
     const tex = h.read("publications/P001/manuscript.tex");
@@ -506,6 +551,7 @@ describe("ProjectEngine end-to-end (codex-sim)", () => {
     expect(tex).toContain("\\section{Partial result}");
     expect(h.simLog().some((row) => row.resumeOf === publicationThread)).toBe(true);
     expect(h.state.budget.plannerSpentTokens).toBe(5 * 1100);
+    expect(h.publicationCompiler.compileCalls).toBe(0);
   });
 
   it("closes the publication decision when drafting cannot begin", async () => {

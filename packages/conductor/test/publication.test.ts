@@ -7,7 +7,7 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { PublicationOutput } from "@inventio/schema";
+import { PublicationOutput, toJsonSchema } from "@inventio/schema";
 import {
   createTectonicCompiler,
   renderPublicationTex,
@@ -28,6 +28,16 @@ function report(over: Partial<PublicationOutput> = {}): PublicationOutput {
 }
 
 describe("standalone TeX publications", () => {
+  it("uses a flat structured-output schema accepted by Codex", () => {
+    const jsonSchema = JSON.stringify(toJsonSchema(PublicationOutput));
+    expect(jsonSchema).not.toContain('"oneOf"');
+    expect(jsonSchema).not.toContain('"anyOf"');
+    expect(PublicationOutput.safeParse(report()).success).toBe(true);
+    expect(
+      PublicationOutput.safeParse(report({ kind: "preprint", result: "UNCERTAIN" })).success,
+    ).toBe(false);
+  });
+
   it("wraps mathematical fragments in the fixed article document", () => {
     const tex = renderPublicationTex(report());
     expect(tex).toContain("\\documentclass[11pt]{article}");

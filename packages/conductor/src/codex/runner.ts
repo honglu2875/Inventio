@@ -123,6 +123,37 @@ export function buildArgs(opts: RunCodexOptions): string[] {
   return args;
 }
 
+function nestedErrorMessage(value: unknown, depth = 0): string | null {
+  if (depth > 4) return null;
+  if (typeof value === "string") {
+    const clean = value.trim();
+    if (clean === "") return null;
+    try {
+      const parsed = JSON.parse(clean) as unknown;
+      return nestedErrorMessage(parsed, depth + 1) ?? clean;
+    } catch {
+      return clean;
+    }
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  return (
+    nestedErrorMessage(record["error"], depth + 1) ??
+    nestedErrorMessage(record["message"], depth + 1) ??
+    null
+  );
+}
+
+/** Extract the useful API/CLI error carried on Codex's JSONL stdout. */
+export function codexEventErrorMessage(event: Record<string, unknown>): string | null {
+  if (event["type"] !== "error" && event["type"] !== "turn.failed") return null;
+  return (
+    nestedErrorMessage(event["error"]) ??
+    nestedErrorMessage(event["message"]) ??
+    null
+  );
+}
+
 export function runCodex(opts: RunCodexOptions): Promise<RunCodexResult> {
   mkdirSync(path.dirname(opts.eventsArchiveFile), { recursive: true });
   const archive = createWriteStream(opts.eventsArchiveFile, { flags: "a" });
@@ -145,6 +176,7 @@ export function runCodex(opts: RunCodexOptions): Promise<RunCodexResult> {
     let killTimer: NodeJS.Timeout | null = null;
     let wallTimer: NodeJS.Timeout | null = null;
     let spawnError: string | null = null;
+    let eventError: string | null = null;
     let settled = false;
 
     const kill = (reason: InterruptReason) => {
@@ -175,6 +207,8 @@ export function runCodex(opts: RunCodexOptions): Promise<RunCodexResult> {
       } catch {
         return; // tolerate non-JSON noise
       }
+      const reportedError = codexEventErrorMessage(ev);
+      if (reportedError) eventError = reportedError.slice(-4_000);
       if (ev.type === "thread.started" && typeof ev["thread_id"] === "string") {
         threadId = ev["thread_id"];
         opts.onThread?.(threadId);
@@ -256,7 +290,9 @@ export function runCodex(opts: RunCodexOptions): Promise<RunCodexResult> {
         exitCode: code,
         errorDetail:
           status === "failed"
-            ? spawnError ?? `exit ${code}${usage === null ? ", no turn.completed" : ""}; stderr tail: ${stderrTail.slice(-500)}`
+            ? spawnError ??
+              eventError ??
+              `exit ${code}${usage === null ? ", no turn.completed" : ""}; stderr tail: ${stderrTail.slice(-500)}`
             : null,
       });
     });

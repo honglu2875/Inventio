@@ -195,10 +195,11 @@ The system runs to a terminal state on its own. You can always:
   mathematical community. A complete proof or counterexample becomes a
   preprint; anything uncertain becomes a research report containing the sound
   partial results, calculations, precise gap, and next steps. This final reading
-  may change the earlier assessment, which is shown prominently before the PDF
-  download. Inventio supplies a fixed preamble and compiles the TeX locally in
-  Tectonic's untrusted mode. If compilation alone fails, **Retry PDF** reuses the
-  accepted TeX without another model call.
+  may change the earlier assessment. Inventio first saves the complete TeX and
+  opens a persistent overview. **Generate PDF** is a separate action using
+  Tectonic's untrusted mode. If compilation fails, the error is shown beside
+  the still-downloadable TeX, and **Retry PDF** reuses it without another model
+  call.
 
 ## Safety notes
 

@@ -441,6 +441,36 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
   );
 
   app.get<{ Params: { slug: string; id: string } }>(
+    "/api/projects/:slug/publications/:id/tex",
+    async (request, reply) =>
+      run(reply, () => {
+        const engine = engineOf(request.params.slug);
+        const id = checkedId(request.params.id, "publication");
+        const publication = engine.state.publications.find((entry) => entry.id === id);
+        if (!publication) throw new ManagerError("unknown publication " + id, 404);
+        if (publication.texPath === null) {
+          throw new ManagerError("publication " + id + " does not have a saved TeX manuscript", 409);
+        }
+        const file = confine(engine.paths.dir, publication.texPath);
+        if (!existsSync(file) || !statSync(file).isFile()) {
+          throw new ManagerError("publication TeX is missing: " + publication.texPath, 404);
+        }
+        const filename =
+          (publication.kind === "preprint" ? "preprint" : "research-report") +
+          "-" +
+          engine.slug +
+          ".tex";
+        void reply
+          .type("application/x-tex; charset=utf-8")
+          .header(
+            "content-disposition",
+            "attachment; filename*=UTF-8''" + encodeURIComponent(filename),
+          );
+        return readFileSync(file, "utf8");
+      }),
+  );
+
+  app.get<{ Params: { slug: string; id: string } }>(
     "/api/projects/:slug/publications/:id/pdf",
     async (request, reply) =>
       run(reply, () => {
@@ -630,6 +660,25 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
           ok: true,
           publicationId,
           status: publication?.status ?? "drafting",
+        };
+      }),
+  );
+
+  app.post<{ Params: { slug: string; id: string } }>(
+    "/api/projects/:slug/publications/:id/compile",
+    async (request, reply) =>
+      run(reply, () => {
+        const engine = engineOf(request.params.slug);
+        const publicationId = checkedId(request.params.id, "publication");
+        engine.requestPublicationCompilation(publicationId);
+        const publication = engine.state.publications.find(
+          (entry) => entry.id === publicationId,
+        );
+        void reply.code(202);
+        return {
+          ok: true,
+          publicationId,
+          status: publication?.status ?? "compiling",
         };
       }),
   );

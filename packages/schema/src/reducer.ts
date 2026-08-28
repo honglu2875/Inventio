@@ -98,7 +98,7 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
           `publication ${event.publicationId} has incompatible kind ${event.kind} and result ${event.result}`,
         );
       }
-      publication.status = "compiling";
+      publication.status = "drafted";
       publication.kind = event.kind;
       publication.result = event.result;
       publication.title = event.title;

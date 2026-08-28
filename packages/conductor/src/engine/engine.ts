@@ -538,6 +538,41 @@ export class ProjectEngine extends EventEmitter {
     return null;
   }
 
+  /**
+   * Restore the durable draft if the process stopped after the TeX was written
+   * but before its event reached the log. The accepted/proposed decision keeps
+   * the small metadata record needed to reconstruct publication.drafted.
+   */
+  private recoverSavedPublicationDraft(publication: PublicationState): boolean {
+    const canRecover =
+      publication.status === "drafting" ||
+      (publication.status === "failed" && publication.failureStage === "drafting");
+    if (!canRecover) return false;
+    const decision = this.state.decisions[publication.decisionId];
+    const output = PublicationOutput.safeParse(decision?.action);
+    const publicationDir = path.join(this.paths.publicationsDir, publication.id);
+    const texPath = path.join(publicationDir, "manuscript.tex");
+    if (!output.success || !existsSync(texPath)) return false;
+    if (decision?.status !== "accepted") {
+      this.emitEvent({
+        type: "decision.accepted",
+        decisionId: publication.decisionId,
+        action: output.data,
+      });
+    }
+    this.emitEvent({
+      type: "publication.drafted",
+      publicationId: publication.id,
+      kind: output.data.kind,
+      result: output.data.result,
+      title: output.data.title,
+      assessment: output.data.assessment,
+      texPath: path.relative(this.paths.dir, texPath),
+      logPath: path.relative(this.paths.dir, path.join(publicationDir, "compile.log")),
+    });
+    return true;
+  }
+
   /** Close publication work that could not survive a server process restart. */
   private recoverInterruptedPublications(): void {
     const publicationDecisionIds = new Set(
@@ -558,9 +593,10 @@ export class ProjectEngine extends EventEmitter {
       }
     }
     for (const publication of this.state.publications) {
+      if (this.recoverSavedPublicationDraft(publication)) continue;
       if (publication.status !== "drafting" && publication.status !== "compiling") continue;
       const decision = this.state.decisions[publication.decisionId];
-      if (decision?.status === "requested") {
+      if (decision?.status === "requested" || decision?.status === "proposed") {
         this.emitEvent({
           type: "decision.rejected",
           decisionId: decision.id,
@@ -2721,7 +2757,7 @@ export class ProjectEngine extends EventEmitter {
       if (!publication || publication.status === "ready" || publication.status === "failed") return;
       const message = (error instanceof Error ? error.message : String(error)).slice(0, 2_000);
       const decision = this.state.decisions[publication.decisionId];
-      if (decision?.status === "requested") {
+      if (decision?.status === "requested" || decision?.status === "proposed") {
         this.emitEvent({
           type: "decision.rejected",
           decisionId: decision.id,
@@ -2809,7 +2845,6 @@ export class ProjectEngine extends EventEmitter {
       texPath: path.relative(this.paths.dir, texPath),
       logPath: path.relative(this.paths.dir, logPath),
     });
-    await this.compilePublication(publicationId);
   }
 
   private async compilePublication(publicationId: string): Promise<void> {
@@ -2849,53 +2884,42 @@ export class ProjectEngine extends EventEmitter {
           ? (error as { compileLog: string }).compileLog
           : "";
       writeFileAtomic(logPath, compileLog);
+      const message = error instanceof Error ? error.message : String(error);
+      const compilerTail = compileLog.trim().slice(-3_000);
       this.emitEvent({
         type: "publication.failed",
         publicationId,
         stage: "compilation",
-        error: (error instanceof Error ? error.message : String(error)).slice(0, 2_000),
+        error: (
+          message.slice(0, 1_000) +
+          (compilerTail === "" ? "" : "\n\nCompiler output:\n" + compilerTail)
+        ).slice(0, 4_500),
       });
     } finally {
       this.killHandles.delete(killKey);
     }
   }
 
-  /**
-   * Start a fresh mathematical publication audit, or retry compilation of the
-   * accepted TeX when that was the only failed stage.
-   */
+  /** Start a mathematical publication reading whose durable result is TeX. */
   requestPublication(by = "human"): string {
     const terminal = this.state.terminal;
     const checkpoint = this.state.terminalHistory.at(-1);
     if (!terminal || !checkpoint) {
       throw new Error("a standalone paper can be prepared only from a stopping report");
     }
-    const current = currentTerminalPublication(this.state);
-    if (current?.status === "drafting" || current?.status === "compiling") {
-      throw new Error("a publication pass is already in progress");
-    }
-    const compiler = this.getPublicationCompiler().info();
-    if (!compiler.ok) {
-      throw new Error(
-        "local TeX compiler unavailable (" +
-          compiler.bin +
-          "): " +
-          (compiler.detail ?? "install Tectonic or set INVENTIO_TEX_BIN"),
-      );
+    let current = currentTerminalPublication(this.state);
+    if (current && this.recoverSavedPublicationDraft(current)) {
+      current = currentTerminalPublication(this.state);
     }
     if (
-      current?.status === "failed" &&
-      current.failureStage === "compilation" &&
-      current.texPath !== null &&
+      current?.texPath !== null &&
+      current?.texPath !== undefined &&
       existsSync(path.join(this.paths.dir, current.texPath))
     ) {
-      this.emitEvent({
-        type: "publication.compilationRequested",
-        publicationId: current.id,
-        by,
-      });
-      this.launchPublicationOperation(current.id, () => this.compilePublication(current.id));
       return current.id;
+    }
+    if (current?.status === "drafting" || current?.status === "compiling") {
+      throw new Error("a publication pass is already in progress");
     }
     if (this.remainingBudget() <= 0) {
       throw new Error(
@@ -2924,6 +2948,58 @@ export class ProjectEngine extends EventEmitter {
       this.draftPublication(publicationId, decisionId),
     );
     return publicationId;
+  }
+
+  /** Compile an already saved TeX manuscript without another model call. */
+  requestPublicationCompilation(publicationId: string, by = "human"): string {
+    const publication = this.state.publications.find((entry) => entry.id === publicationId);
+    if (!publication) throw new Error("unknown publication " + publicationId);
+    if (publication.status === "ready" && publication.pdfPath !== null) return publication.id;
+    if (publication.status === "compiling") {
+      throw new Error("PDF compilation is already in progress");
+    }
+    if (publication.status === "drafting") {
+      throw new Error("the TeX manuscript is still being prepared");
+    }
+    if (publication.texPath === null || publication.logPath === null) {
+      throw new Error("publication " + publicationId + " has no saved TeX manuscript");
+    }
+
+    this.emitEvent({
+      type: "publication.compilationRequested",
+      publicationId,
+      by,
+    });
+    const texFile = path.join(this.paths.dir, publication.texPath);
+    if (!existsSync(texFile)) {
+      this.emitEvent({
+        type: "publication.failed",
+        publicationId,
+        stage: "compilation",
+        error: "The saved TeX file is missing: " + publication.texPath,
+      });
+      return publication.id;
+    }
+    const compiler = this.getPublicationCompiler().info();
+    if (!compiler.ok) {
+      const error =
+        "Local TeX compiler unavailable (" +
+        compiler.bin +
+        "): " +
+        (compiler.detail ?? "install Tectonic or set INVENTIO_TEX_BIN");
+      writeFileAtomic(path.join(this.paths.dir, publication.logPath), error + "\n");
+      this.emitEvent({
+        type: "publication.failed",
+        publicationId,
+        stage: "compilation",
+        error,
+      });
+      return publication.id;
+    }
+    this.launchPublicationOperation(publication.id, () =>
+      this.compilePublication(publication.id),
+    );
+    return publication.id;
   }
 
   // ------------------------------------------------------------ human API

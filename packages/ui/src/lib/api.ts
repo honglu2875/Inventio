@@ -253,6 +253,14 @@ export const api = {
     slug: string,
   ): Promise<{ ok: true; publicationId: string; status: string }> =>
     request("POST", `/projects/${enc(slug)}/publication`),
+  compilePublication: (
+    slug: string,
+    publicationId: string,
+  ): Promise<{ ok: true; publicationId: string; status: string }> =>
+    request(
+      "POST",
+      `/projects/${enc(slug)}/publications/${enc(publicationId)}/compile`,
+    ),
   setAutonomy: (slug: string, mode: "auto" | "gated"): Promise<{ ok: true; autonomy: string }> =>
     request("POST", `/projects/${enc(slug)}/autonomy`, { mode }),
   projectSettings: (slug: string): Promise<{ settings: ProjectSettings }> =>
@@ -342,6 +350,17 @@ export function publicationPdfUrl(slug: string, publicationId: string): string {
     "/publications/" +
     enc(publicationId) +
     "/pdf"
+  );
+}
+
+export function publicationTexUrl(slug: string, publicationId: string): string {
+  return (
+    API_BASE +
+    "/projects/" +
+    enc(slug) +
+    "/publications/" +
+    enc(publicationId) +
+    "/tex"
   );
 }
 

@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { currentTerminalPublication, type ProjectState } from "@inventio/schema";
-import { api, type ProjectSummary } from "../lib/api";
+import { api, errorMessage, type ProjectSummary } from "../lib/api";
 import { formatExact, formatTokens } from "../lib/format";
 import { PHASES, burnDownChips, resultColor } from "../lib/visual";
 import { useStore } from "../store/store";
 import { useActionGuard, useApiAction, useConnection } from "../store/hooks";
 import ContinueResearchDialog from "./steering/ContinueResearchDialog";
 import FreshStartDialog from "./steering/FreshStartDialog";
+import PublicationDialog from "./steering/PublicationDialog";
 
 /** Top strip (UI-SPEC §6): phase, budget, burn-down, steering toggles. */
 
@@ -206,15 +207,20 @@ function MathToggle(): JSX.Element {
 export default function TopStrip({ slug, state }: { slug: string; state: ProjectState | null }): JSX.Element {
   const guard = useActionGuard(slug);
   const run = useApiAction();
+  const pushToast = useStore((s) => s.pushToast);
   const [continueOpen, setContinueOpen] = useState(false);
   const [freshStartOpen, setFreshStartOpen] = useState(false);
+  const [publicationOpen, setPublicationOpen] = useState(false);
   const [publicationStarting, setPublicationStarting] = useState(false);
+  const [publicationStartError, setPublicationStartError] = useState<string | null>(null);
   useEffect(() => {
     // React Router keeps this component mounted between /p/:slug routes.
     // Project-specific dialogs must never carry over to the next project.
     setContinueOpen(false);
     setFreshStartOpen(false);
+    setPublicationOpen(false);
     setPublicationStarting(false);
+    setPublicationStartError(null);
   }, [slug]);
   const runningTasks = useMemo(
     () =>
@@ -226,6 +232,26 @@ export default function TopStrip({ slug, state }: { slug: string; state: Project
   const publication = state === null ? null : currentTerminalPublication(state);
   const publicationBusy =
     publication?.status === "drafting" || publication?.status === "compiling";
+
+  useEffect(() => {
+    if (publication !== null) setPublicationStartError(null);
+  }, [publication?.id]);
+
+  const preparePublication = async (): Promise<void> => {
+    if (publicationStarting || guard.disabled) return;
+    setPublicationStarting(true);
+    setPublicationStartError(null);
+    try {
+      await api.preparePublication(slug);
+      pushToast("Manuscript preparation started", "ok");
+    } catch (error) {
+      const message = errorMessage(error);
+      setPublicationStartError(message);
+      pushToast(message, "error");
+    } finally {
+      setPublicationStarting(false);
+    }
+  };
 
   return (
     <>
@@ -272,37 +298,28 @@ export default function TopStrip({ slug, state }: { slug: string; state: Project
                 <button
                   type="button"
                   className="button"
-                  disabled={guard.disabled || publicationBusy || publicationStarting}
+                  disabled={publicationStarting || (publication === null && guard.disabled)}
                   title={
-                    guard.title ??
-                    (publicationBusy
-                      ? "The current publication pass is still running"
-                      : publication?.status === "failed" &&
-                          publication.failureStage === "compilation"
-                        ? "Compile the accepted TeX again"
-                        : "Ask the Research Manager for a final mathematical review and standalone paper")
+                    publication === null
+                      ? guard.title ?? "Ask the Research Manager to prepare a standalone TeX manuscript"
+                      : "Open the standalone manuscript"
                   }
-                  onClick={async () => {
-                    setPublicationStarting(true);
-                    try {
-                      await run(() => api.preparePublication(slug), "Publication review started");
-                    } finally {
-                      setPublicationStarting(false);
-                    }
+                  onClick={() => {
+                    setPublicationOpen(true);
+                    setPublicationStartError(null);
+                    if (publication === null) void preparePublication();
                   }}
                 >
                   {publicationStarting
-                    ? "Starting…"
+                    ? "Preparing manuscript…"
                     : publication?.status === "drafting"
-                      ? "Preparing paper…"
+                      ? "Preparing manuscript…"
                       : publication?.status === "compiling"
                         ? "Compiling PDF…"
-                        : publication?.status === "failed"
-                          ? publication.failureStage === "compilation"
-                            ? "Retry PDF"
-                            : "Retry paper"
-                          : publication?.status === "ready"
-                            ? "Prepare again"
+                        : publication?.texPath
+                          ? "Paper"
+                          : publication?.status === "failed"
+                            ? "Paper needs attention"
                             : "Prepare paper"}
                 </button>
                 <button
@@ -341,6 +358,16 @@ export default function TopStrip({ slug, state }: { slug: string; state: Project
       </header>
       {continueOpen && state?.terminal ? (
         <ContinueResearchDialog slug={slug} state={state} onClose={() => setContinueOpen(false)} />
+      ) : null}
+      {publicationOpen && state?.terminal ? (
+        <PublicationDialog
+          slug={slug}
+          publication={publication}
+          starting={publicationStarting}
+          startError={publicationStartError}
+          onPrepare={() => void preparePublication()}
+          onClose={() => setPublicationOpen(false)}
+        />
       ) : null}
       {freshStartOpen && state !== null && state.problem.normalizedMarkdown !== null ? (
         <FreshStartDialog slug={slug} state={state} onClose={() => setFreshStartOpen(false)} />

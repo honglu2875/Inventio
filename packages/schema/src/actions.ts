@@ -355,22 +355,33 @@ const PublicationManuscript = {
 } as const;
 
 /**
- * The publication pass is deliberately binary. A definite proof or
- * counterexample yields a preprint; anything less yields an UNCERTAIN
- * research report. The Research Manager may reassess the stopping result.
+ * The publication pass is deliberately binary. Keep this transport schema
+ * flat: Codex structured outputs reject JSON Schema `oneOf`, which Zod emits
+ * for discriminated unions. The cross-field rule remains enforced here and
+ * again by the event reducer.
  */
-export const PublicationOutput = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("preprint"),
-    result: z.enum(["PROVED", "DISPROVED"]),
+export const PublicationOutput = z
+  .object({
+    kind: z.enum(["preprint", "research_report"]),
+    result: z.enum(["PROVED", "DISPROVED", "UNCERTAIN"]),
     ...PublicationManuscript,
-  }),
-  z.object({
-    kind: z.literal("research_report"),
-    result: z.literal("UNCERTAIN"),
-    ...PublicationManuscript,
-  }),
-]);
+  })
+  .superRefine((output, context) => {
+    if (output.kind === "preprint" && output.result === "UNCERTAIN") {
+      context.addIssue({
+        code: "custom",
+        path: ["result"],
+        message: "a preprint requires a PROVED or DISPROVED result",
+      });
+    }
+    if (output.kind === "research_report" && output.result !== "UNCERTAIN") {
+      context.addIssue({
+        code: "custom",
+        path: ["result"],
+        message: "a research report requires an UNCERTAIN result",
+      });
+    }
+  });
 export type PublicationOutput = z.infer<typeof PublicationOutput>;
 
 export const CrossExamAnswer = z.object({ answerMarkdown: z.string().min(1) });

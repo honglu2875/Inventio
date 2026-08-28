@@ -214,7 +214,7 @@ export interface ContinuationState {
   atSeq: number;
 }
 
-export type PublicationStatus = "drafting" | "compiling" | "ready" | "failed";
+export type PublicationStatus = "drafting" | "drafted" | "compiling" | "ready" | "failed";
 
 /**
  * One owner-requested, post-terminal publication review. It is tied to an

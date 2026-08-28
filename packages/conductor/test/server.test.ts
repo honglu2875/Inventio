@@ -252,7 +252,7 @@ describe("diagnostics", () => {
 });
 
 describe("standalone publication HTTP", () => {
-  it("starts only after a stopping report and serves the locally compiled PDF", async () => {
+  it("saves and serves TeX before an explicit local PDF compilation", async () => {
     const h = harness(1, [
       plannerCall(DECISION_MATCH, terminate("the last implication remains open")),
       plannerCall(
@@ -298,6 +298,29 @@ describe("standalone publication HTTP", () => {
     });
     expect(started.statusCode).toBe(202);
     expect(started.json()).toMatchObject({ ok: true, publicationId: "P001" });
+    await waitFor(() => engine.state.publications[0]?.status === "drafted");
+
+    const tex = await h.app.inject({
+      method: "GET",
+      url: `/api/projects/${slug}/publications/P001/tex`,
+    });
+    expect(tex.statusCode).toBe(200);
+    expect(tex.headers["content-type"]).toContain("application/x-tex");
+    expect(tex.headers["content-disposition"]).toContain("research-report-publication-boundary.tex");
+    expect(tex.body).toContain("\\documentclass[11pt]{article}");
+    expect(h.publicationCompiler.compileCalls).toBe(0);
+
+    const notCompiled = await h.app.inject({
+      method: "GET",
+      url: `/api/projects/${slug}/publications/P001/pdf`,
+    });
+    expect(notCompiled.statusCode).toBe(409);
+
+    const compiling = await h.app.inject({
+      method: "POST",
+      url: `/api/projects/${slug}/publications/P001/compile`,
+    });
+    expect(compiling.statusCode).toBe(202);
     await waitFor(() => engine.state.publications[0]?.status === "ready");
 
     const pdf = await h.app.inject({

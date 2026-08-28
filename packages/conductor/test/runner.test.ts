@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { runCodex } from "../src/codex/runner.js";
+import { codexEventErrorMessage, runCodex } from "../src/codex/runner.js";
 import { runStructured } from "../src/codex/structured.js";
 import { workerLaunchPrompt } from "../src/prompts/operational.js";
 
@@ -69,6 +69,26 @@ function readLog(dir: string): { taskToken: string | null; index: number }[] {
 }
 
 describe("runCodex", () => {
+  it("extracts structured API failures from the JSONL event stream", () => {
+    const nested = JSON.stringify({
+      type: "error",
+      error: {
+        code: "invalid_json_schema",
+        message: "Invalid schema: oneOf is not permitted.",
+      },
+      status: 400,
+    });
+    expect(codexEventErrorMessage({ type: "error", message: nested })).toBe(
+      "Invalid schema: oneOf is not permitted.",
+    );
+    expect(
+      codexEventErrorMessage({
+        type: "turn.failed",
+        error: { message: nested },
+      }),
+    ).toBe("Invalid schema: oneOf is not permitted.");
+  });
+
   it("happy path: events parsed, usage captured, archive written", async () => {
     const { dir, baseOpts } = setup([
       {

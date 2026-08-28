@@ -178,10 +178,11 @@ allowed, writes `output-schema.json`, and invokes `codex/structured.ts`.
   final mathematical reading.
 - **Persistence and compilation:** the Conductor rejects file-I/O TeX,
   surviving internal labels, and references to Inventio; supplies a fixed
-  article preamble; writes `publications/P###/manuscript.tex`; then invokes
-  local Tectonic in untrusted mode. It records the compiler log and publishes
-  the PDF only after checking the PDF header. A compilation retry reuses the
-  accepted TeX and does not spend another Manager call.
+  article preamble; and writes `publications/P###/manuscript.tex`. This ends the
+  model-backed drafting stage. Only the owner's separate **Generate PDF**
+  action invokes local Tectonic in untrusted mode. It records the compiler log
+  and publishes the PDF only after checking the PDF header; a retry always
+  reuses the saved TeX and spends no further Manager tokens.
 - **Isolation:** no workers or delegation. This is the Research Manager's own
   final deduction and drafting pass.
 

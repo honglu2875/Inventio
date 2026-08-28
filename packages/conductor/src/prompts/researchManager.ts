@@ -567,8 +567,8 @@ heuristics or conjectures visibly separate. In either case, define notation
 before use and make the exposition concise without omitting a mathematical
 dependency.
 
-The program supplies a fixed article preamble and compiles the PDF locally.
-Return:
+The program supplies a fixed article preamble and saves the complete TeX
+manuscript. The owner may compile that saved source locally afterward. Return:
 
 - title: plain text;
 - abstractTex: the TeX contents of the abstract, without an abstract

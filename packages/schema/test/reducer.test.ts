@@ -327,6 +327,18 @@ describe("reducer", () => {
     ]);
   });
 
+  it("treats a saved TeX manuscript as complete before PDF compilation", () => {
+    const events = buildCanonicalEvents();
+    const draftIndex = events.findIndex((event) => event.type === "publication.drafted");
+    const state = replay(initialState(), events.slice(0, draftIndex + 1));
+    expect(state.publications[0]).toMatchObject({
+      status: "drafted",
+      texPath: "publications/P001/manuscript.tex",
+      pdfPath: null,
+      error: null,
+    });
+  });
+
   it("refuses to replay a research report with a definite publication result", () => {
     const events = buildCanonicalEvents();
     const draftIndex = events.findIndex((event) => event.type === "publication.drafted");

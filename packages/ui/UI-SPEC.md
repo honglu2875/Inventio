@@ -275,17 +275,19 @@ view; the unabridged owner direction remains model-visible until the next
 stopping report.
 
 At a stopping report, **Prepare paper** starts a separate final mathematical
-reading by the Research Manager. The control changes to “Preparing paper…” and
-then “Compiling PDF…” while active, and Continue research is disabled only for
-that interval. A full-width status row immediately below the navigation remains
-visible on every project tab. It explains whether the result became a preprint
-or a research report and gives the Manager's short private assessment. If the
-final reading cannot uphold an earlier PROVED or DISPROVED result, the row is a
-warning and says so directly; it never offers an unsupported preprint. Ready
-documents have **Download PDF**. A drafting/validation failure offers **Retry
-publication review**; a compiler failure offers **Retry PDF compilation** and
-does not imply another model call. The older stopping result remains visible as
-historical state rather than being silently rewritten.
+reading by the Research Manager and saves a standalone
+`publications/P###/manuscript.tex`. It does not compile automatically. The
+publication dialog opens immediately, follows drafting live, and then shows the
+document type, earlier and final assessments, the Manager's short overview,
+and **Download TeX**. **Generate PDF** is a separate deterministic action that
+invokes local Tectonic. Drafting and compiler errors remain in this dialog; a
+compiler error never removes or invalidates the saved TeX, and **Retry PDF**
+does not imply another model call. Once a manuscript exists, the top-strip
+button opens this same dialog directly instead of starting another draft. If
+the final reading cannot uphold an earlier PROVED or DISPROVED result, the
+dialog says so directly and never offers an unsupported preprint. The older
+stopping result remains visible as historical state rather than being silently
+rewritten.
 
 SettingsView reads one effective project-settings value from the shared
 snapshot and saves the token ceiling, maximum research rounds, autonomy, Web
@@ -485,6 +487,7 @@ blocking ones open a modal with answer textarea (answer/dismiss).
 - [ ] Both themes pass a visual check on every view; no unreadable text.
 - [ ] Deep link to a claim opens Evidence with the claim selected.
 - [ ] Gate flow (gated project): approve and reject-with-note both work.
-- [ ] At a stopping report, Prepare paper shows persistent progress, a changed
-      mathematical assessment is unmistakable, and the ready PDF downloads.
+- [ ] At a stopping report, Prepare paper saves TeX and opens its persistent
+      overview; Generate PDF is separate, errors retain the TeX, a changed
+      mathematical assessment is unmistakable, and both files download.
 - [ ] `vite build` succeeds; conductor serves `dist/` at `/`.
