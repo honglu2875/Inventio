@@ -15,7 +15,7 @@ function documentKind(publication: PublicationState): string {
 
 export function publicationStatusText(publication: PublicationState): string {
   if (publication.status === "drafting") {
-    return "The Research Manager is checking the mathematics and writing the standalone TeX manuscript.";
+    return "The final mathematical reader is checking the result and writing the standalone TeX manuscript.";
   }
   if (publication.status === "drafted") {
     return "The TeX manuscript is saved. PDF compilation has not been started.";
@@ -138,7 +138,7 @@ export default function PublicationDialog({
         <div className="modal-body publication-modal-body">
           {publication === null ? (
             <div className="publication-pending">
-              <strong>{starting ? "The Research Manager is starting the final reading." : "No manuscript is available."}</strong>
+              <strong>{starting ? "The final mathematical reading is starting." : "No manuscript is available."}</strong>
               <p className="muted">
                 The TeX source will be saved before any PDF compilation is attempted.
               </p>
@@ -178,7 +178,7 @@ export default function PublicationDialog({
 
               {publication.assessment ? (
                 <section className="publication-assessment">
-                  <strong>Research Manager’s overview</strong>
+                  <strong>Final mathematical overview</strong>
                   <p>{publication.assessment}</p>
                 </section>
               ) : null}

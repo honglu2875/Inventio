@@ -24,6 +24,7 @@ export default function TaskNode({ id, data }: NodeProps): JSX.Element {
   const preview = readString(data, "lastItemPreview");
   const budget = readNumber(data, "budgetTokens");
   const spend = readNumber(data, "spend");
+  const milestoneCount = readNumber(data, "milestoneCount");
   const { frac, color } = gauge(spend, budget);
   const ringColor = TASK_STATUS_COLOR[status];
 
@@ -63,6 +64,7 @@ export default function TaskNode({ id, data }: NodeProps): JSX.Element {
             {status} · {formatTokens(spend)}
           </span>
         )}
+        {milestoneCount > 0 ? <span className="mono muted preview">◇ {milestoneCount}</span> : null}
       </div>
       <NodeHandles />
     </div>

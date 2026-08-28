@@ -45,7 +45,11 @@ function BudgetBar({ state }: { state: ProjectState }): JSX.Element {
   const planner = state.budget.plannerSpentTokens;
   const workerPct = Math.min(100, (worker / total) * 100);
   const plannerPct = Math.min(100 - workerPct, (planner / total) * 100);
-  const title = `research workers ${formatExact(worker)} + Research Manager ${formatExact(planner)} of ${formatExact(total)} tokens`;
+  const readerLabel =
+    state.config.workflow === "trajectories-v2"
+      ? "summary and final readings"
+      : "Research Manager";
+  const title = `research workers ${formatExact(worker)} + ${readerLabel} ${formatExact(planner)} of ${formatExact(total)} tokens`;
   return (
     <div className="budget" title={title}>
       <div className="budget-bar" role="img" aria-label={title}>
@@ -281,18 +285,20 @@ export default function TopStrip({ slug, state }: { slug: string; state: Project
                 Fresh start
               </button>
             ) : null}
-            <button
-              type="button"
-              className={`toggle${state.config.autonomy === "gated" ? " on" : ""}`}
-              disabled={guard.disabled}
-              {...(guard.title === undefined ? {} : { title: guard.title })}
-              onClick={() => {
-                const mode = state.config.autonomy === "auto" ? "gated" : "auto";
-                void run(() => api.setAutonomy(slug, mode));
-              }}
-            >
-              {state.config.autonomy === "auto" ? "Auto" : "Gated"}
-            </button>
+            {state.config.workflow === "council-v1" ? (
+              <button
+                type="button"
+                className={`toggle${state.config.autonomy === "gated" ? " on" : ""}`}
+                disabled={guard.disabled}
+                {...(guard.title === undefined ? {} : { title: guard.title })}
+                onClick={() => {
+                  const mode = state.config.autonomy === "auto" ? "gated" : "auto";
+                  void run(() => api.setAutonomy(slug, mode));
+                }}
+              >
+                {state.config.autonomy === "auto" ? "Auto" : "Gated"}
+              </button>
+            ) : null}
             {state.terminal ? (
               <>
                 <button
@@ -301,7 +307,7 @@ export default function TopStrip({ slug, state }: { slug: string; state: Project
                   disabled={publicationStarting || (publication === null && guard.disabled)}
                   title={
                     publication === null
-                      ? guard.title ?? "Ask the Research Manager to prepare a standalone TeX manuscript"
+                      ? guard.title ?? "Prepare a standalone TeX manuscript from the complete record"
                       : "Open the standalone manuscript"
                   }
                   onClick={() => {

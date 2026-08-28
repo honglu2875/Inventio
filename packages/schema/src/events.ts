@@ -33,6 +33,12 @@ export type PublicationKind = z.infer<typeof PublicationKind>;
 export const ClaimStatus = z.enum(["UNVERIFIED", "VERIFIED", "REFUTED", "SUPERSEDED"]);
 export type ClaimStatus = z.infer<typeof ClaimStatus>;
 
+export const ClaimRelation = z.enum(["PROVES", "DISPROVES", "PARTIAL", "RELATED"]);
+export type ClaimRelation = z.infer<typeof ClaimRelation>;
+
+export const VerificationVerdict = z.enum(["PASS", "FAIL", "ERROR"]);
+export type VerificationVerdict = z.infer<typeof VerificationVerdict>;
+
 export const IssueSeverity = z.enum(["CRITICAL", "MAJOR", "MINOR"]);
 export type IssueSeverity = z.infer<typeof IssueSeverity>;
 
@@ -56,6 +62,9 @@ export const ArtifactKind = z.enum([
   "review",
   "candidate",
   "resolution",
+  "writeup",
+  "verification",
+  "fact",
   "final",
 ]);
 export type ArtifactKind = z.infer<typeof ArtifactKind>;
@@ -288,6 +297,14 @@ export const EventSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("task.extended"), taskId: z.string(), addTokens: z.number().int().positive(), by: Actor }),
   z.object({
     ...base,
+    type: z.literal("task.milestone"),
+    milestoneId: z.string(),
+    taskId: z.string(),
+    title: z.string().min(1).max(160),
+    markdown: z.string().min(1).max(4_000),
+  }),
+  z.object({
+    ...base,
     type: z.literal("task.dispositioned"),
     taskId: z.string(),
     waveId: z.string(),
@@ -305,8 +322,88 @@ export const EventSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("lineage.established"), lineageId: z.string(), candidateId: z.string() }),
   z.object({ ...base, type: z.literal("candidate.frozen"), candidateId: z.string(), lineageId: z.string(), version: z.number().int().positive(), fromArtifact: z.string(), obligations: z.array(z.string()), reviewQuestions: z.array(z.string()).default([]), usedClaimIds: z.array(z.string()), /** null = addresses problem.md in full; text = an explicitly narrower claim */ scopeMarkdown: z.string().nullable().default(null) }),
   z.object({ ...base, type: z.literal("review.recorded"), reviewId: z.string(), candidateId: z.string(), verdict: z.enum(["PASS", "FAIL"]), issueIds: z.array(z.string()), taskId: z.string() }),
-  z.object({ ...base, type: z.literal("claim.added"), claimId: z.string(), statement: z.string(), status: ClaimStatus, provenance: z.string(), sourceTaskId: z.string().nullable().default(null), dependsOn: z.array(z.string()) }),
+  z.object({
+    ...base,
+    type: z.literal("claim.added"),
+    claimId: z.string(),
+    title: z.string().optional(),
+    statement: z.string(),
+    proofMarkdown: z.string().optional(),
+    status: ClaimStatus,
+    provenance: z.string(),
+    sourceTaskId: z.string().nullable().default(null),
+    sourceWaveId: z.string().nullable().optional(),
+    path: z.string().nullable().optional(),
+    relationToGoal: ClaimRelation.optional(),
+    kind: z.enum(["mathematical", "correction"]).optional(),
+    targetFactId: z.string().nullable().optional(),
+    verificationPolicy: z
+      .object({
+        verifiersPerClaim: z.number().int().positive(),
+        passesRequired: z.number().int().positive(),
+      })
+      .optional(),
+    dependsOn: z.array(z.string()),
+  }),
   z.object({ ...base, type: z.literal("claim.status"), claimId: z.string(), from: ClaimStatus, to: ClaimStatus, justification: z.string(), by: Actor }),
+  z.object({
+    ...base,
+    type: z.literal("claim.equivalent"),
+    leftClaimId: z.string(),
+    rightClaimId: z.string(),
+    reason: z.string(),
+    by: Actor,
+  }),
+  z.object({
+    ...base,
+    type: z.literal("verification.requested"),
+    verificationId: z.string(),
+    claimId: z.string(),
+    ordinal: z.number().int().positive(),
+  }),
+  z.object({
+    ...base,
+    type: z.literal("verification.started"),
+    verificationId: z.string(),
+  }),
+  z.object({
+    ...base,
+    type: z.literal("verification.completed"),
+    verificationId: z.string(),
+    verdict: VerificationVerdict,
+    summaryMarkdown: z.string(),
+    artifactPath: z.string().nullable(),
+    usage: Usage.nullable(),
+  }),
+  z.object({
+    ...base,
+    type: z.literal("fact.recorded"),
+    factId: z.string(),
+    claimId: z.string(),
+    path: z.string(),
+  }),
+  z.object({
+    ...base,
+    type: z.literal("fact.suspicionRaised"),
+    factId: z.string(),
+    correctionClaimId: z.string(),
+    reason: z.string(),
+    by: Actor,
+  }),
+  z.object({
+    ...base,
+    type: z.literal("fact.retracted"),
+    factId: z.string(),
+    correctionClaimId: z.string(),
+    reason: z.string(),
+  }),
+  z.object({
+    ...base,
+    type: z.literal("fact.suspicionCleared"),
+    factId: z.string(),
+    correctionClaimId: z.string(),
+    reason: z.string(),
+  }),
   z.object({ ...base, type: z.literal("issue.raised"), issueId: z.string(), candidateId: z.string(), severity: IssueSeverity, location: z.string(), summary: z.string(), by: Actor }),
   z.object({ ...base, type: z.literal("issue.resolved"), issueId: z.string(), disposition: z.enum(["repaired", "rejected", "stale"]), reason: z.string(), by: Actor }),
   z.object({
@@ -321,6 +418,19 @@ export const EventSchema = z.discriminatedUnion("type", [
     exitCode: z.number().int().nullable().optional(),
     stderr: z.string().optional(),
   }),
+  z.object({
+    ...base,
+    type: z.literal("summary.recorded"),
+    waveId: z.string(),
+    path: z.string(),
+    markdown: z.string(),
+    abstract: z.string(),
+    changed: z.boolean(),
+    reason: z.string(),
+    source: z.enum(["intake", "summary_reader", "human_edited", "fallback"]),
+    usage: Usage.nullable(),
+  }),
+  z.object({ ...base, type: z.literal("wave.summaryReviewed"), waveId: z.string() }),
   z.object({
     ...base,
     type: z.literal("computation.baselineRepaired"),
@@ -346,7 +456,26 @@ export const EventSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("memory.cardProposed"), cardId: z.string(), by: Actor, card: ProposedCard }),
   z.object({ ...base, type: z.literal("memory.cardAdmitted"), cardId: z.string(), status: CardStatus, reason: z.string() }),
   z.object({ ...base, type: z.literal("memory.cardStatus"), cardId: z.string(), from: CardStatus, to: CardStatus, reason: z.string(), by: Actor }),
-  z.object({ ...base, type: z.literal("memory.recall"), taskId: z.string(), op: z.enum(["search", "expand", "source_list", "source_open"]), args: z.string(), returnedIds: z.array(z.string()), refusedIds: z.array(z.string()) }),
+  z.object({
+    ...base,
+    type: z.literal("memory.recall"),
+    taskId: z.string(),
+    op: z.enum([
+      "search",
+      "expand",
+      "source_list",
+      "source_open",
+      "knowledge_search",
+      "knowledge_open",
+      "writeup_search",
+      "writeup_open",
+      "mark_milestone",
+      "flag_fact",
+    ]),
+    args: z.string(),
+    returnedIds: z.array(z.string()),
+    refusedIds: z.array(z.string()),
+  }),
   z.object({ ...base, type: z.literal("capsule.updated"), role: z.enum(["solver", "explorer", "reviewer"]), waveId: z.string(), path: z.string() }),
   z.object({
     ...base,

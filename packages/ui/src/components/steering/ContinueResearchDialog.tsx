@@ -18,6 +18,7 @@ export default function ContinueResearchDialog({
 }): JSX.Element {
   const guard = useActionGuard(slug);
   const run = useApiAction();
+  const isTrajectory = state.config.workflow === "trajectories-v2";
   const remaining =
     state.budget.totalTokens - state.budget.spentTokens - state.budget.plannerSpentTokens;
   const roundsRemaining = Math.max(0, state.config.limits.maxWaves - state.waveOrder.length);
@@ -63,9 +64,11 @@ export default function ContinueResearchDialog({
           note.trim(),
           parsed.addTokens,
           parsed.addWaves,
-          useDirectView ? note.trim() : undefined,
+          !isTrajectory && useDirectView ? note.trim() : undefined,
         ),
-      useDirectView
+      isTrajectory
+        ? "Direction saved for the next independent research trajectories"
+        : useDirectView
         ? `${revisionId} was recorded before the next research round`
         : `${revisionId} is being prepared before the next research round`,
     )
@@ -96,7 +99,12 @@ export default function ContinueResearchDialog({
         <div className="modal-body">
           <p>
             The current <strong>{state.terminal?.result}</strong> report stays immutable and
-            readable. {useDirectView ? (
+            readable. {isTrajectory ? (
+              <>
+                Your direction below will be supplied verbatim to every Solver and Explorer in the
+                next research round, together with the current mathematical view and library.
+              </>
+            ) : useDirectView ? (
               <>
                 Your text will be recorded directly as <strong>{revisionId}</strong> before the
                 next research round is chosen.
@@ -127,7 +135,9 @@ export default function ContinueResearchDialog({
             <span className="field-label">
               {useDirectView
                 ? `Write the complete revised mathematical view for ${revisionId}`
-                : "What should the Research Manager reconsider or push further?"}
+                : isTrajectory
+                  ? "What should the next independent trajectories pursue or reconsider?"
+                  : "What should the Research Manager reconsider or push further?"}
             </span>
             <textarea
               className="textarea"
@@ -137,7 +147,7 @@ export default function ContinueResearchDialog({
               onChange={(event) => setNote(event.target.value)}
             />
           </label>
-          <label className="continuation-direct-view">
+          {!isTrajectory ? <label className="continuation-direct-view">
             <input
               type="checkbox"
               checked={useDirectView}
@@ -148,7 +158,7 @@ export default function ContinueResearchDialog({
               My text is already the complete revised mathematical view; record it directly
               instead of asking the Research Manager to rewrite it.
             </span>
-          </label>
+          </label> : null}
           <div className="continuation-fields">
             <label className="field">
               <span className="field-label">Add to token ceiling</span>
@@ -192,12 +202,14 @@ export default function ContinueResearchDialog({
             onClick={submit}
           >
             {busy
-              ? useDirectView
+              ? !isTrajectory && useDirectView
                 ? "Recording revision…"
-                : "Preparing revision…"
-              : useDirectView
+                : "Continuing…"
+              : !isTrajectory && useDirectView
                 ? `Record ${revisionId} and continue`
-                : `Prepare ${revisionId} and continue`}
+                : isTrajectory
+                  ? "Continue with this direction"
+                  : `Prepare ${revisionId} and continue`}
           </button>
         </footer>
       </section>

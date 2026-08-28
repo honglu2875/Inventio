@@ -1,5 +1,6 @@
 import {
   defaultConfig,
+  defaultTrajectoryConfig,
   type ActiveModelSettings,
   type ModelChoice,
   type ProjectModels,
@@ -14,7 +15,16 @@ export const ACTIVE_MODEL_ROLES = [
   "synthesizer",
 ] as const satisfies readonly (keyof ActiveModelSettings)[];
 
-export type ActiveModelRole = (typeof ACTIVE_MODEL_ROLES)[number];
+export const TRAJECTORY_MODEL_ROLES = [
+  "summaryReader",
+  "solver",
+  "explorer",
+  "verifier",
+] as const satisfies readonly (keyof ActiveModelSettings)[];
+
+export type ActiveModelRole =
+  | (typeof ACTIVE_MODEL_ROLES)[number]
+  | (typeof TRAJECTORY_MODEL_ROLES)[number];
 
 export const REASONING_EFFORTS = [
   "none",
@@ -43,6 +53,10 @@ export const MODEL_ROLE_INFO: Record<
     label: "Research Manager",
     description: "Chooses directions, assesses completed rounds, and maintains the current view.",
   },
+  summaryReader: {
+    label: "Summary reader",
+    description: "Makes at most a small end-of-round edit to the current mathematical view.",
+  },
   solver: {
     label: "Solver",
     description: "Develops an independent proof or counterexample attempt.",
@@ -50,6 +64,10 @@ export const MODEL_ROLE_INFO: Record<
   explorer: {
     label: "Explorer",
     description: "Tests examples, searches nearby ideas, and identifies obstructions.",
+  },
+  verifier: {
+    label: "Verifier",
+    description: "Independently checks one self-contained claim and alleged proof.",
   },
   reviewer: {
     label: "Reviewer",
@@ -72,19 +90,28 @@ export function activeModelSettings(
   const defaults = defaultConfig().models;
   return {
     researchManager: copyChoice(models?.researchManager ?? defaults.researchManager),
+    summaryReader: copyChoice(models?.summaryReader ?? defaults.summaryReader),
     solver: copyChoice(models?.solver ?? defaults.solver),
     explorer: copyChoice(models?.explorer ?? defaults.explorer),
+    verifier: copyChoice(models?.verifier ?? defaults.verifier),
     reviewer: copyChoice(models?.reviewer ?? defaults.reviewer),
     synthesizer: copyChoice(models?.synthesizer ?? defaults.synthesizer),
   };
 }
 
-export function defaultActiveModelSettings(): ActiveModelSettings {
-  return activeModelSettings(defaultConfig().models);
+export function defaultActiveModelSettings(
+  workflow: "council-v1" | "trajectories-v2" = "council-v1",
+): ActiveModelSettings {
+  const defaults = workflow === "trajectories-v2" ? defaultTrajectoryConfig() : defaultConfig();
+  return activeModelSettings(defaults.models);
 }
 
 export function sameModelSettings(a: ActiveModelSettings, b: ActiveModelSettings): boolean {
-  return ACTIVE_MODEL_ROLES.every(
-    (role) => a[role].model === b[role].model && a[role].effort === b[role].effort,
-  );
+  const roles = [...new Set([...ACTIVE_MODEL_ROLES, ...TRAJECTORY_MODEL_ROLES])];
+  const defaults = defaultConfig().models;
+  return roles.every((role) => {
+    const left = a[role] ?? defaults[role];
+    const right = b[role] ?? defaults[role];
+    return left.model === right.model && left.effort === right.effort;
+  });
 }

@@ -71,6 +71,7 @@ function opsExtras(state: ProjectState, collapsed: ReadonlySet<string>): ExtraDa
       methodTag: task.methodTag,
       spend: taskSpend(task),
       lastItemPreview: task.lastItem?.preview ?? "",
+      milestoneCount: task.milestoneIds.length,
     };
   }
 
@@ -148,7 +149,8 @@ function OpsCanvas({ slug, state }: { slug: string; state: ProjectState }): JSX.
         const carried = new URLSearchParams(params);
         carried.delete("sel");
         const query = carried.toString();
-        navigate(`/p/${slug}/library/memory${query === "" ? "" : `?${query}`}`);
+        const section = state.config.workflow === "trajectories-v2" ? "facts" : "memory";
+        navigate(`/p/${slug}/library/${section}${query === "" ? "" : `?${query}`}`);
         return;
       }
       setParams(
@@ -160,7 +162,7 @@ function OpsCanvas({ slug, state }: { slug: string; state: ProjectState }): JSX.
         { replace: false },
       );
     },
-    [setParams, navigate, slug, params],
+    [setParams, navigate, slug, params, state.config.workflow],
   );
 
   const onMove = useCallback((_event: unknown, viewport: Viewport) => {
@@ -240,7 +242,9 @@ export default function OpsView(): JSX.Element {
   if (state.phase === "CREATED" || state.phase === "AWAITING_CONFIRMATION") {
     return <IntakeConfirm slug={slug} state={state} />;
   }
-  if (state.phase === "INTAKE") return <Skeleton text="Research Manager is reading the submitted materials and drafting W000…" />;
+  if (state.phase === "INTAKE") {
+    return <Skeleton text="The submitted materials are being read and W000 is being drafted…" />;
+  }
 
   return (
     <ReactFlowProvider>

@@ -20,6 +20,9 @@ describe("classifyNodeId", () => {
     expect(classifyNodeId("R001")).toBe("review");
     expect(classifyNodeId("Q001")).toBe("question");
     expect(classifyNodeId("K002")).toBe("claim");
+    expect(classifyNodeId("F002")).toBe("fact");
+    expect(classifyNodeId("V002")).toBe("verification");
+    expect(classifyNodeId("MS002")).toBe("milestone");
     expect(classifyNodeId("I001")).toBe("issue");
     expect(classifyNodeId("M003")).toBe("card");
     expect(classifyNodeId("X001")).toBe("computation");
@@ -36,6 +39,9 @@ describe("viewForNodeId", () => {
     expect(viewForNodeId("C001.v1")).toBe("ops");
     expect(viewForNodeId("Q001")).toBe("ops");
     expect(viewForNodeId("K002")).toBe("evidence");
+    expect(viewForNodeId("F002")).toBe("evidence");
+    expect(viewForNodeId("V002")).toBe("evidence");
+    expect(viewForNodeId("MS002")).toBe("ops");
     expect(viewForNodeId("I001")).toBe("evidence");
     expect(viewForNodeId("C001.v1:ob3")).toBe("evidence");
     expect(viewForNodeId("M003")).toBe("library");

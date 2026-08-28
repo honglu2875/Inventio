@@ -18,22 +18,23 @@ export default function ManagerView(): JSX.Element {
   if (state === null) {
     return (
       <div className="manager-view">
-        <div className="skeleton-bar w90" aria-label="loading Research Manager notes" />
+        <div className="skeleton-bar w90" aria-label="loading mathematical summary" />
       </div>
     );
   }
 
-  const notes = state.researchManagerNotes ?? [];
+  const isTrajectory = state.config.workflow === "trajectories-v2";
+  const notes = isTrajectory ? state.mathematicalViews : state.researchManagerNotes;
   const latest = notes.at(-1);
   const previous = notes.slice(0, -1).reverse();
-  const pendingRevision = pendingContinuationRevision(state);
+  const pendingRevision = isTrajectory ? null : pendingContinuationRevision(state);
   const pendingRevisionId = pendingRevision ? nextContinuationRevisionId(state) : null;
 
   return (
     <div className="manager-view">
       <header className="manager-heading">
         <div>
-          <span className="eyebrow">Research Manager</span>
+          <span className="eyebrow">{isTrajectory ? "Summary" : "Research Manager"}</span>
           <h1>Current mathematical view</h1>
         </div>
         {pendingRevisionId ? (
@@ -57,17 +58,23 @@ export default function ManagerView(): JSX.Element {
         <article className={"manager-note latest" + (latest.source === "fallback" ? " fallback" : "")}>
           {latest.source === "fallback" ? (
             <p className="manager-note-warning">
-              The round summary did not return a new Manager judgment; the preceding view is
-              retained verbatim below.
+              {latest.waveId === "W000"
+                ? "The initial reading did not return a usable revision; the previous editable view is retained verbatim below."
+                : "The round summary did not return a usable revision; the preceding view is retained verbatim below."}
             </p>
           ) : null}
           {latest.abstract ? <p className="manager-note-abstract">{latest.abstract}</p> : null}
+          {"reason" in latest && latest.reason ? (
+            <p className="muted small">{latest.reason}</p>
+          ) : null}
           <Markdown>{latest.markdown}</Markdown>
         </article>
       ) : (
         <section className="manager-note empty">
           <p className="muted">
-            The first Research Manager view will appear after the first completed research round.
+            {isTrajectory
+              ? "W000 will appear after the initial materials have been read."
+              : "The first Research Manager view will appear after the first completed research round."}
           </p>
         </section>
       )}

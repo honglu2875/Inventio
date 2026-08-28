@@ -2,24 +2,25 @@
 
 [![CI](https://github.com/honglu2875/Inventio/actions/workflows/ci.yml/badge.svg)](https://github.com/honglu2875/Inventio/actions/workflows/ci.yml)
 
-Inventio is a local research environment for difficult mathematics. One
-recurrent Research Manager develops the mathematical direction and delegates
-bounded work to independent Codex solvers, explorers, reviewers, and
-synthesizers. A deterministic runtime preserves the research record, enforces
-isolation and budgets, and exposes the process through a live graph interface.
+Inventio is a local research environment for difficult mathematics. It gives
+strong Codex Solvers and Explorers long, independent sessions on one problem,
+checks every proposed result independently, and preserves the evolving
+mathematics through a live graph interface.
 
-The premise is simple: a proof is not a consensus. Independent attempts remain
-independent until completion, fixed candidate versions receive adversarial review,
-and a result is called **PROVED**
-only when a mechanical predicate — not a model's opinion — says every
-condition holds. `UNCERTAIN` is a valid and often correct outcome.
+The premise is simple: sustained research trajectories should have room to
+think, while a claimed proof should still survive independent scrutiny. A
+deterministic runtime handles scheduling, isolation, persistence, budgets, and
+state transitions; it does not tell the researchers which mathematics to try.
+New projects use this long-trajectory workflow. Projects made under the earlier
+Research Manager/council workflow remain fully replayable.
 
 ## Documents
 
 | file | what it is |
 |---|---|
-| `PROTOCOL.md` | The constitution: epistemic invariants, role contracts, acceptance rules. Read this first. |
-| `DESIGN.md` | The engineering spec: architecture, event model, state machine, packets, API. |
+| `TRAJECTORY-DESIGN.md` | The current default workflow: long trajectories, claims, facts, and independent checks. Read this first. |
+| `PROTOCOL.md` | The preserved rules for legacy `council-v1` projects. |
+| `DESIGN.md` | The compatible legacy architecture and shared event/runtime design. |
 | `packages/ui/UI-SPEC.md` | The binding UI design: views, node chrome, tokens, interactions. |
 | `packages/conductor/src/prompts/README.md` | Prompt architecture: every model-facing instruction, call site, and lifecycle condition. |
 | `PLAN.md` | Milestone tracker and deviation log — the recovery point if work is interrupted. |
@@ -27,44 +28,47 @@ condition holds. `UNCERTAIN` is a valid and often correct outcome.
 ## How it works
 
 ```text
-browser ── REST + SSE ──> conductor (Node) ── codex exec --json ──> workers
-                              │                (one process per task,
-                              │                 jailed in a packet dir)
-                              └── projects/<slug>/  (event log + artifacts)
+browser ── REST + SSE ──> deterministic runtime ──> long Solver/Explorer sessions
+                              │                         │
+                              │                         └── independent Verifiers
+                              └── projects/<slug>/ (events + Markdown + transcripts)
 ```
 
-- **The Conductor is code, not a prompt.** A deterministic state machine owns
-  phases, wave lifecycle, ledgers, candidate versioning, budgets, and the
-  acceptance predicate. Rules that used to be behavioral obligations on an
-  LLM are now `if` statements.
-- **One Research Manager owns the mathematics.** Its process calls are fresh,
-  but after every round it rewrites a persistent current view: what has been
-  learned, the real gap, its present intuition, and what is worth trying next.
-  It chooses assignments, interprets reviews, reorganizes the research
-  library, and may open older notes through read-only tools. The Conductor
-  validates and executes its structured choices; it is not another layer of
-  mathematical management.
+- **Research trajectories are the main thinkers.** Every round starts the
+  configured number of independent Solvers and Explorers (by default two of
+  each). Solvers attack the exact problem; Explorers may pursue special cases,
+  examples, computations, obstructions, neighboring theorems, or connections.
+  Their default session limit is two hours, and Web search is available when
+  the project permits it.
+- **There is no model middle-manager in the default workflow.** Each trajectory
+  starts from the same current mathematical view, active facts and claims,
+  retained source catalog, and current human guidance. It chooses and revises
+  its own strategy. Deterministic code starts the configured trajectories and
+  never invents a mathematical direction.
 - **Intake preserves the submission.** Your objective, long background notes,
-  and uploaded documents are stored before any model runs. The Research
-  Manager drafts `W000 · Current mathematical view`; before accepting it, you
+  and uploaded documents are stored before any model runs. A strong initial
+  reader drafts `W000 · Current mathematical view`; before accepting it, you
   may return to the raw input, revise text or files, and regenerate W000. The
   accepted files, hashes, abstracts, and excerpts remain available in Library
   throughout the project, while the event log retains the revision history.
-- **Workers are isolated by construction.** Each task runs in its own directory
-  containing only what it was granted. A peer's attempt isn't hidden from a
-  reviewer — it physically isn't there. Budgets are enforced by killing
-  processes, not by asking nicely. A schema-valid refusal or placeholder gets
-  one short correction request and then a fresh independent replacement; it never stalls
-  the round or becomes a question for you.
+- **Claims become facts only after independent checks.** A trajectory returns a
+  complete write-up and a small list of worthwhile new mathematical statements,
+  each with a self-contained alleged proof. The configured `V` Verifiers check
+  each claim independently; at least `W` passes are required to record it as a
+  fact. Failed and duplicate claims leave the active view but remain inspectable.
+  A later trajectory may raise one concrete correction to an accepted fact,
+  which goes through the same process.
+- **Long work stays inspectable.** Trajectories can mark sparse mathematical
+  milestones, use a private writable calculation directory, search or open the
+  project library and original sources, and leave both a readable final
+  write-up and their complete Codex event archive.
+- **The current view changes slowly.** After a round, a strong summary reader
+  may make a small edit to W000 only when the new results materially change the
+  mathematical picture. It cannot choose work or brief the next round.
 - **Everything is an event.** `projects/<slug>/events.jsonl` is the
   operational truth; Markdown artifacts are the mathematical evidence. The UI
   runs the same reducer as the backend, so the graph can't disagree with the
   state.
-- **Leads have a lifecycle.** Extracted claims begin as UNVERIFIED notes, not
-  facts. Claim-producing attempts must be carried, given one exact follow-up,
-  or set aside; concrete carried results are frozen and independently reviewed
-  before broad exploration continues. Recorded computations preserve process
-  diagnostics and must reproduce from a pristine packet-shaped snapshot.
 
 ## Quickstart
 
@@ -146,8 +150,9 @@ project directory, point Inventio at it explicitly:
 INVENTIO_ROOT=/absolute/path/to/projects npm run dev
 ```
 
-Source mounts configured inside a project are local inputs and are copied only
-into assignments that the Research Manager explicitly grants them to.
+Legacy projects may also contain configured source mounts. New projects retain
+their original objective, notes, and uploads directly in the project and expose
+them to trajectories through project-scoped read tools.
 
 ## Environment
 
@@ -159,39 +164,33 @@ into assignments that the Research Manager explicitly grants them to.
 | `INVENTIO_ROOT` | `./projects` | project data directory |
 | `INVENTIO_CODEX_BIN` | `codex` | codex binary (point at the sim for tests) |
 | `INVENTIO_TEX_BIN` | `tectonic` | local Tectonic executable used to compile standalone papers |
-| `INVENTIO_POOL` | `3` | max concurrent workers across all projects |
+| `INVENTIO_POOL` | `8` | max concurrent model processes across all projects |
 | `INVENTIO_DISABLE_MEMORY` | — | set to `1` to skip the memory service |
 
 ## Steering a running project
 
 The system runs to a terminal state on its own. You can always:
 
-- **send a directive** — picked up at the next decision point; mark it urgent
-  to stop new dispatch and reconvene the wave early;
-- **switch to gated mode** — every proposed action waits for approve/edit/reject;
-- **intervene in the ledger** — mark a claim verified or refuted, raise an
-  issue against a candidate, quarantine a memory card. Every intervention is
-  recorded with human provenance and shown to later agents as exactly what it
-  is: a domain expert's recorded judgment.
+- **send a direction** — supplied verbatim to every Solver and Explorer in the
+  next round; an urgent direction stops the current round first;
+- **pause and resume** — pausing prevents new work and does not silently resume
+  on restart;
 - **change project settings** — one saved form controls the token ceiling,
   maximum research rounds, autonomy, Web-search permission, and the
-  model/reasoning effort for Research Manager, Solver, Explorer, Reviewer, and
-  Synthesizer. It shows the effective values stored with that project,
-  including choices made at creation. W000 uses the Research Manager setting.
-  A save affects future process launches; a worker already in flight continues
-  with the settings it started with.
+  number and model/reasoning effort of Solvers, Explorers, Verifiers, and the
+  summary reader. It also controls `V`, the independent checks requested for
+  each claim, and `W`, the passes required. It shows the effective values stored
+  with that project, including choices made at creation. A save affects future
+  process launches; a process already in flight continues unchanged.
 - **allow or deny Web search** — the same Settings form controls whether the
-  Research Manager may grant native Web search to individual future worker
-  assignments. Turning it off also removes search from queued work; an
-  already-running worker is unchanged. W000 remains offline.
+  initial reader and future trajectories and Verifiers receive native Web
+  search. Turning it off affects future process launches; a process already
+  running is unchanged.
 - **continue from a stopping report** — the earlier report remains immutable.
-  Before any new assignment is chosen, Inventio combines the preceding
-  Research Manager view, that report, and your complete continuation direction
-  into a numbered revision such as `W020.2`. You may instead mark your text as
-  the complete revised view and record it directly. The full direction remains
-  available to later decisions throughout the continued run.
+  Your complete continuation direction is supplied to every trajectory in the
+  first added round, together with the current mathematical view and library.
 - **prepare a standalone paper** — after a stopping report, ask the Research
-  Manager to reread the complete mathematical record and draft TeX for the
+  final mathematical reader to reassess the complete record and draft TeX for the
   mathematical community. A complete proof or counterexample becomes a
   preprint; anything uncertain becomes a research report containing the sound
   partial results, calculations, precise gap, and next steps. This final reading
@@ -204,12 +203,11 @@ The system runs to a terminal state on its own. You can always:
 ## Safety notes
 
 Bind stays on loopback: the API can start processes and spend tokens, so treat
-port forwarding as privileged. Workers run hermetically
-(`--ignore-user-config`), sandboxed read-only (or workspace-write confined to
-their own packet when a computation needs scratch space), with no approval
-prompts. Network access is absent by default; a worker gets the native Web
-search tool only when both the project setting and its individual assignment
-permit it. Shell/network escalation remains impossible rather than deniable.
+port forwarding as privileged. Research processes ignore user-level Codex
+configuration and can write only within their own working directory. New
+projects enable native Web search by default because literature access is part
+of the long-trajectory design; disable it per project when the submission must
+remain offline. Shell escalation remains unavailable.
 
 ## License
 

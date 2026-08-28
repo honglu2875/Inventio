@@ -1,5 +1,11 @@
 # Inventio protocol — the constitution
 
+> **Compatibility document.** This protocol governs projects whose saved
+> workflow is `council-v1`. New projects use the simpler long-trajectory
+> workflow specified in `TRAJECTORY-DESIGN.md`; the shared requirements of
+> statement fidelity, honest uncertainty, and independent checking still
+> apply there through its own event model.
+
 This document is the epistemic constitution of Inventio, a system for
 attacking difficult mathematics with a council of independent model agents.
 It defines what counts as evidence, how roles may interact, and when a result

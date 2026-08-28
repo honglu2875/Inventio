@@ -18,6 +18,9 @@ export type NodeKind =
   | "review"
   | "question"
   | "claim"
+  | "fact"
+  | "verification"
+  | "milestone"
   | "issue"
   | "card"
   | "artifact"
@@ -43,7 +46,10 @@ export function classifyNodeId(id: string): NodeKind {
   if (/^C\d{3}$/.test(id)) return "lineage";
   if (/^R\d{3}$/.test(id)) return "review";
   if (/^Q\d{3}$/.test(id)) return "question";
+  if (/^MS\d{3}$/.test(id)) return "milestone";
   if (/^K\d{3}$/.test(id)) return "claim";
+  if (/^F\d{3}$/.test(id)) return "fact";
+  if (/^V\d{3}$/.test(id)) return "verification";
   if (/^I\d{3}$/.test(id)) return "issue";
   if (/^M\d{3}$/.test(id)) return "card";
   if (/^X\d{3}$/.test(id)) return "computation";
@@ -66,6 +72,8 @@ export interface ResolvedTarget {
 export function viewForNodeId(id: string): ViewName {
   switch (classifyNodeId(id)) {
     case "claim":
+    case "fact":
+    case "verification":
     case "issue":
     case "obligation":
       return "evidence";

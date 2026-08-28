@@ -3,6 +3,7 @@ import type { IssueSeverity, ProjectState } from "@inventio/schema";
 import { api } from "../../lib/api";
 import { formatExact, formatTokens, truncate } from "../../lib/format";
 import { classifyNodeId, permalinkFor, type NodeKind } from "../../lib/selection";
+import { verificationDisplayStatus } from "../../lib/visual";
 import { useActionGuard, useApiAction, useProjectState } from "../../store/hooks";
 import RenderBoundary from "../RenderBoundary";
 import ArtifactTab from "./ArtifactTab";
@@ -44,6 +45,9 @@ const KIND_ICON: Record<NodeKind, string> = {
   review: "▣",
   question: "?",
   claim: "✓",
+  fact: "■",
+  verification: "◉",
+  milestone: "◇",
   issue: "▲",
   card: "▢",
   artifact: "▤",
@@ -92,6 +96,14 @@ function titleFor(state: ProjectState | null, kind: NodeKind, nodeId: string): s
       return truncate(state.questions[nodeId]?.text ?? "", 60);
     case "claim":
       return truncate(state.claims[nodeId]?.statement ?? "", 60);
+    case "fact":
+      return truncate(state.facts[nodeId]?.statement ?? "", 60);
+    case "verification": {
+      const verification = state.verifications[nodeId];
+      return verification ? `${verificationDisplayStatus(verification)} · ${verification.claimId}` : "";
+    }
+    case "milestone":
+      return state.milestones[nodeId]?.title ?? "";
     case "issue":
       return truncate(state.issues[nodeId]?.summary ?? "", 60);
     case "card":

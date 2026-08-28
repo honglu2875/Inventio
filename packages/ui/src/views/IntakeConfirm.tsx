@@ -93,7 +93,7 @@ function RawIntakeEditor({
           return isFirstReading ? api.start(slug) : api.regenerateIntake(slug);
         },
         isFirstReading
-          ? "Raw intake saved — Research Manager is drafting W000"
+          ? "Raw intake saved — drafting W000"
           : "Raw intake saved — W000 regenerated from the revised materials",
       );
       if (result !== null) onGenerated?.();
@@ -112,8 +112,8 @@ function RawIntakeEditor({
           </h1>
           <p>
             {isFirstReading
-              ? "Everything here is stored before the Research Manager reads it. Revise the text or files, then generate W000."
-              : "Revise what the Research Manager should treat as the original submission, then generate a fresh W000."}
+              ? "Everything here is stored before the initial mathematical reading. Revise the text or files, then generate W000."
+              : "Revise the original submission, then generate a fresh W000 from it."}
           </p>
         </div>
       </header>
@@ -203,9 +203,12 @@ function DraftIntake(props: { slug: string; state: ProjectState }): JSX.Element 
   return <RawIntakeEditor {...props} />;
 }
 
-/** One Research Manager draft, directly editable before discovery begins. */
+/** One initial mathematical reading, directly editable before discovery begins. */
 function W000Review({ slug, state }: { slug: string; state: ProjectState }): JSX.Element {
-  const w000 = state.researchManagerNotes.find((note) => note.waveId === "W000");
+  const isTrajectory = state.config.workflow === "trajectories-v2";
+  const w000 = isTrajectory
+    ? state.mathematicalViews.find((note) => note.waveId === "W000")
+    : state.researchManagerNotes.find((note) => note.waveId === "W000");
   const legacyView = state.problem.contextDigestMarkdown.trim() || state.problem.normalizedMarkdown || state.statement;
   const initialAbstract = w000?.abstract ?? "";
   const initialMarkdown = w000?.markdown.trim() || legacyView;
@@ -217,8 +220,10 @@ function W000Review({ slug, state }: { slug: string; state: ProjectState }): JSX
   const [editingRaw, setEditingRaw] = useState(false);
   const guard = useActionGuard(slug);
   const run = useApiAction();
-  const managerModel = state.config.models.researchManager;
-  const modelLabel = `${managerModel.model ?? "account default"} · ${managerModel.effort}`;
+  const readingModel = isTrajectory
+    ? state.config.models.summaryReader
+    : state.config.models.researchManager;
+  const modelLabel = `${readingModel.model ?? "account default"} · ${readingModel.effort}`;
   const sourceCount = state.problem.sources.length;
   const problemMarkdown = state.problem.normalizedMarkdown ?? state.statement;
   const dirty = abstract.trim() !== initialAbstract.trim() || markdown.trim() !== initialMarkdown.trim();
@@ -282,11 +287,14 @@ function W000Review({ slug, state }: { slug: string; state: ProjectState }): JSX
     <section className="intake-confirm w000-review" aria-labelledby="w000-title">
       <header className="section-header intake-header">
         <div>
-          <span className="eyebrow">Research Manager · W000</span>
+          <span className="eyebrow">Initial mathematical reading · W000</span>
           <h1 id="w000-title">Current mathematical view</h1>
-          <p>Edit this reading directly. It becomes the Manager's starting point for choosing and briefing researchers.</p>
+          <p>
+            Edit this reading directly. It becomes the shared starting point cloned into the first
+            independent research trajectories.
+          </p>
         </div>
-        <span className="chip ok" title="One Research Manager reading; no workers have been dispatched">{modelLabel}</span>
+        <span className="chip ok" title="One initial reading; no research trajectories have been dispatched">{modelLabel}</span>
       </header>
 
       <div className="w000-editor-grid">
@@ -350,7 +358,8 @@ function W000Review({ slug, state }: { slug: string; state: ProjectState }): JSX
 
       {regenerationPending ? (
         <div className="banner info w000-regenerating" role="status">
-          The Research Manager is reading the original materials and regenerating W000. You can leave this page; these controls will unlock when the new reading is ready.
+          The original materials are being read again to regenerate W000. You can leave this page;
+          these controls will unlock when the new reading is ready.
         </div>
       ) : null}
 

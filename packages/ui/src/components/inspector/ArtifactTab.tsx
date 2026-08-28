@@ -13,6 +13,8 @@ import {
   candidateStageColor,
   claimStatusMeaning,
   conclusionColor,
+  verificationDisplayStatus,
+  trajectoryClaimStatusLabel,
 } from "../../lib/visual";
 import { useActionGuard, useApiAction, useProjectState } from "../../store/hooks";
 
@@ -198,6 +200,36 @@ function ClaimBody({ slug, nodeId }: { slug: string; nodeId: string }): JSX.Elem
   const color = CLAIM_STATUS_COLOR[claim.status];
   const latestChange = claim.history.at(-1);
 
+  if (state?.config.workflow === "trajectories-v2") {
+    const policy = claim.verificationPolicy ?? state.config.trajectory;
+    const checks = claim.verificationIds
+      .map((id) => state.verifications[id])
+      .filter((value) => value !== undefined);
+    const passes = checks.filter((check) => check?.verdict === "PASS").length;
+    return (
+      <div className="detail">
+        <div className="detail-row">
+          <span className="chip" style={{ color, borderColor: color }}>{trajectoryClaimStatusLabel(claim.status)}</span>
+          <span className="chip">{claim.relationToGoal}</span>
+          <span className="muted small">{claim.provenance}</span>
+        </div>
+        <h3 className="section-head">Statement</h3>
+        <Markdown>{claim.statement}</Markdown>
+        <h3 className="section-head">Alleged proof</h3>
+        <Markdown>{claim.proofMarkdown}</Markdown>
+        <h3 className="section-head">Independent checks</h3>
+        <p className="small muted">{passes}/{policy.passesRequired} required passes · {checks.length}/{policy.verifiersPerClaim} requested</p>
+        {checks.map((check) => (
+          <div className="detail-row" key={check!.id}>
+            <span className="mono">{check!.id}</span>
+            <span className="chip">{verificationDisplayStatus(check!)}</span>
+            <span className="small muted">{check!.summaryMarkdown}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className="detail">
       <div className="detail-row">
@@ -279,6 +311,38 @@ function ClaimBody({ slug, nodeId }: { slug: string; nodeId: string }): JSX.Elem
       </div>
     </div>
   );
+}
+
+function MilestoneBody({ slug, nodeId }: { slug: string; nodeId: string }): JSX.Element {
+  const state = useProjectState(slug);
+  const milestone = state?.milestones[nodeId];
+  if (!milestone) return <p className="muted">Unknown milestone.</p>;
+  return <div className="detail"><div className="detail-row"><span className="chip">milestone</span><span className="mono small muted">{milestone.taskId}</span></div><h3>{milestone.title}</h3><Markdown>{milestone.markdown}</Markdown></div>;
+}
+
+function FactBody({ slug, nodeId }: { slug: string; nodeId: string }): JSX.Element {
+  const state = useProjectState(slug);
+  const fact = state?.facts[nodeId];
+  if (!fact) return <p className="muted">Unknown fact.</p>;
+  return <div className="detail"><div className="detail-row"><span className="chip">{fact.status}</span><span className="mono small muted">from {fact.claimId}</span></div><h3 className="section-head">Statement</h3><Markdown>{fact.statement}</Markdown><h3 className="section-head">Verified proof</h3><Markdown>{fact.proofMarkdown}</Markdown></div>;
+}
+
+function VerificationBody({ slug, nodeId }: { slug: string; nodeId: string }): JSX.Element {
+  const state = useProjectState(slug);
+  const verification = state?.verifications[nodeId];
+  if (!verification) return <p className="muted">Unknown independent check.</p>;
+  if (verification.artifactPath === null || verification.completedAtSeq === null) {
+    return <div className="detail"><div className="detail-row"><span className="chip">{verificationDisplayStatus(verification)}</span><span className="mono small muted">claim {verification.claimId}</span></div><Markdown>{verification.summaryMarkdown || (verification.status === "running" ? "This independent check is running." : "This independent check is waiting to run.")}</Markdown></div>;
+  }
+  const meta: ArtifactMeta = {
+    id: verification.id,
+    kind: "verification",
+    taskId: null,
+    path: verification.artifactPath,
+    conclusion: verification.verdict,
+    recordedAtSeq: verification.completedAtSeq,
+  };
+  return <ArtifactBodyView slug={slug} meta={meta} />;
 }
 
 function CardBody({ slug, nodeId }: { slug: string; nodeId: string }): JSX.Element {
@@ -399,6 +463,9 @@ export default function ArtifactTab({
 
   if (kind === "question") return <QuestionBody slug={slug} nodeId={nodeId} />;
   if (kind === "claim") return <ClaimBody slug={slug} nodeId={nodeId} />;
+  if (kind === "fact") return <FactBody slug={slug} nodeId={nodeId} />;
+  if (kind === "verification") return <VerificationBody slug={slug} nodeId={nodeId} />;
+  if (kind === "milestone") return <MilestoneBody slug={slug} nodeId={nodeId} />;
   if (kind === "issue") return <IssueBody slug={slug} nodeId={nodeId} />;
   if (kind === "obligation") return <ObligationBody slug={slug} nodeId={nodeId} />;
   if (kind === "card") return <CardBody slug={slug} nodeId={nodeId} />;

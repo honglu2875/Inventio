@@ -48,6 +48,12 @@ Your note's first line after any title must be
 CONCLUSION: UNCERTAIN unless you actually proved or disproved the main
 statement.`,
 
+  verifier: `Independently check one self-contained mathematical claim and its proof.
+Try to falsify it, check every hypothesis and imported result, and do not
+silently repair a missing step. This role is used by the trajectories-v2
+engine; its dedicated assignment supplies the exact structured response
+contract.`,
+
   reviewer: `Act as an independent referee for exactly one fixed candidate version. Check
 only the problem, the candidate, the relevant recorded claims, and its cited
 sources in this directory. You have deliberately not been shown other referee

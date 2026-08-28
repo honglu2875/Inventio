@@ -66,7 +66,7 @@ export default function ProjectLayout(): JSX.Element {
             Research
           </NavLink>
           <NavLink to={`/p/${slug}/manager${query}`} className="view-tab">
-            Manager
+            {state?.config.workflow === "trajectories-v2" ? "Summary" : "Manager"}
           </NavLink>
           <NavLink to={`/p/${slug}/evidence${query}`} className="view-tab">
             Evidence

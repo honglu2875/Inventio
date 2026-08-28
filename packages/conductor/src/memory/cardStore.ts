@@ -9,8 +9,18 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
-import { CardStatus, CardType } from "@inventio/schema";
-import type { CardRow, MemoryBackend, MemoryCard, RecallRecord, SearchQuery } from "./types.js";
+import { CardStatus, CardType, type ProjectState } from "@inventio/schema";
+import type {
+  CardRow,
+  KnowledgeDocument,
+  KnowledgeRow,
+  MemoryBackend,
+  MemoryCard,
+  RecallRecord,
+  SearchQuery,
+  WriteupDocument,
+  WriteupRow,
+} from "./types.js";
 import {
   openIntakeSource as openRawIntakeSource,
   readIntakeSources,
@@ -255,6 +265,11 @@ export class FileMemoryBackend implements MemoryBackend {
   constructor(
     private readonly projectDir: string,
     private readonly onRecall: (rec: RecallRecord) => void,
+    private readonly trajectory?: {
+      getState: () => ProjectState;
+      recordMilestone: (taskId: string, title: string, markdown: string) => { milestoneId: string };
+      flagFact: (taskId: string, factId: string, reason: string) => { correctionClaimId: string };
+    },
   ) {
     this.store = new CardStore(path.join(projectDir, "memory", "cards"));
   }
@@ -345,5 +360,160 @@ export class FileMemoryBackend implements MemoryBackend {
 
   recordRecall(rec: RecallRecord): void {
     this.onRecall(rec);
+  }
+
+  searchKnowledge(query: string, limit = 12): KnowledgeRow[] {
+    const state = this.trajectory?.getState();
+    if (!state) return [];
+    const needle = query.trim().toLowerCase();
+    const rows: KnowledgeRow[] = [];
+    for (const id of state.factOrder) {
+      const fact = state.facts[id]!;
+      if (fact.status !== "ACTIVE" && fact.status !== "SUSPICIOUS") continue;
+      const haystack = `${fact.id}\n${fact.title}\n${fact.statement}`.toLowerCase();
+      if (needle && !haystack.includes(needle)) continue;
+      rows.push({
+        id: fact.id,
+        kind: "fact",
+        status: fact.status,
+        title: fact.title,
+        statement: fact.statement,
+      });
+    }
+    for (const id of state.claimOrder) {
+      const claim = state.claims[id]!;
+      if (claim.status !== "UNVERIFIED") continue;
+      const haystack = `${claim.id}\n${claim.title}\n${claim.statement}`.toLowerCase();
+      if (needle && !haystack.includes(needle)) continue;
+      rows.push({
+        id: claim.id,
+        kind: "claim",
+        status: claim.status,
+        title: claim.title,
+        statement: claim.statement,
+      });
+    }
+    return rows.slice(0, Math.max(1, Math.min(30, Math.floor(limit))));
+  }
+
+  openKnowledge(ids: string[]): KnowledgeDocument[] {
+    const state = this.trajectory?.getState();
+    if (!state) return [];
+    const out: KnowledgeDocument[] = [];
+    for (const id of ids) {
+      const fact = state.facts[id];
+      if (fact && (fact.status === "ACTIVE" || fact.status === "SUSPICIOUS")) {
+        const base = readTextOr(
+          path.join(this.projectDir, fact.path),
+          `# ${fact.title}\n\n${fact.statement}\n\n## Proof\n\n${fact.proofMarkdown}`,
+        );
+        const challenges = fact.correctionClaimIds
+          .map((claimId) => state.claims[claimId])
+          .filter((claim) => claim !== undefined)
+          .map(
+            (claim) =>
+              `### ${claim!.id} [${claim!.status}]\n\n${claim!.proofMarkdown}`,
+          )
+          .join("\n\n");
+        out.push({
+          id,
+          kind: "fact",
+          status: fact.status,
+          title: fact.title,
+          statement: fact.statement,
+          markdown:
+            fact.status === "SUSPICIOUS"
+              ? `${base}\n\n## Unresolved challenge\n\nThis fact is not currently settled.\n\n${challenges || "A concrete correction is awaiting independent checking."}`
+              : base,
+        });
+        continue;
+      }
+      const claim = state.claims[id];
+      if (!claim || claim.status !== "UNVERIFIED") continue;
+      out.push({
+        id,
+        kind: "claim",
+        status: claim.status,
+        title: claim.title,
+        statement: claim.statement,
+        markdown: claim.path
+          ? readTextOr(
+              path.join(this.projectDir, claim.path),
+              `# ${claim.title}\n\n${claim.statement}\n\n## Alleged proof\n\n${claim.proofMarkdown}`,
+            )
+          : `# ${claim.title}\n\n${claim.statement}\n\n## Alleged proof\n\n${claim.proofMarkdown}`,
+      });
+    }
+    return out;
+  }
+
+  searchWriteups(query: string, limit = 12): WriteupRow[] {
+    const state = this.trajectory?.getState();
+    if (!state) return [];
+    const needle = query.trim().toLowerCase();
+    const rows: WriteupRow[] = [];
+    for (const artifact of Object.values(state.artifacts)) {
+      if (!artifact.taskId || !["writeup", "attempt", "exploration"].includes(artifact.kind)) continue;
+      const task = state.tasks[artifact.taskId];
+      if (!task) continue;
+      const summary = readTextOr(path.join(this.projectDir, artifact.path), "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 600);
+      const haystack = `${artifact.id}\n${task.role}\n${task.direction}\n${summary}`.toLowerCase();
+      if (needle && !haystack.includes(needle)) continue;
+      rows.push({
+        id: artifact.id,
+        role: task.role,
+        status: task.status,
+        summary: summary || task.direction,
+      });
+    }
+    rows.sort((a, b) => a.id.localeCompare(b.id));
+    return rows.slice(0, Math.max(1, Math.min(30, Math.floor(limit))));
+  }
+
+  openWriteups(ids: string[], maxCharacters = 40_000): WriteupDocument[] {
+    const state = this.trajectory?.getState();
+    if (!state) return [];
+    const cap = Math.max(1_000, Math.min(80_000, Math.floor(maxCharacters)));
+    const out: WriteupDocument[] = [];
+    for (const id of ids) {
+      const artifact = state.artifacts[id];
+      if (!artifact?.taskId || !["writeup", "attempt", "exploration"].includes(artifact.kind)) continue;
+      const task = state.tasks[artifact.taskId];
+      if (!task) continue;
+      const markdown = readTextOr(path.join(this.projectDir, artifact.path), "").slice(0, cap);
+      out.push({
+        id,
+        role: task.role,
+        status: task.status,
+        summary: markdown.replace(/\s+/g, " ").trim().slice(0, 600) || task.direction,
+        markdown,
+      });
+    }
+    return out;
+  }
+
+  recordMilestone(taskId: string, title: string, markdown: string): { milestoneId: string } {
+    if (!this.trajectory) throw new Error("trajectory tools are unavailable for this project");
+    return this.trajectory.recordMilestone(taskId, title, markdown);
+  }
+
+  flagFact(taskId: string, factId: string, reason: string): { correctionClaimId: string } {
+    if (!this.trajectory) throw new Error("trajectory tools are unavailable for this project");
+    return this.trajectory.flagFact(taskId, factId, reason);
+  }
+
+  supportsTrajectoryTools(): boolean {
+    return this.trajectory !== undefined;
+  }
+}
+
+function readTextOr(file: string, fallback: string): string {
+  try {
+    return readFileSync(file, "utf8");
+  } catch {
+    return fallback;
   }
 }

@@ -7,6 +7,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { CardStore, FileMemoryBackend } from "../src/memory/cardStore.js";
 import { MemoryService } from "../src/memory/service.js";
 import type { MemoryCard, RecallRecord } from "../src/memory/types.js";
+import { defaultTrajectoryConfig, initialState } from "@inventio/schema";
 
 function card(partial: Partial<MemoryCard> & { id: string }): MemoryCard {
   return {
@@ -236,14 +237,28 @@ describe("MemoryService over HTTP", () => {
   let solverToken = "";
   let reviewerToken = "";
   let managerToken = "";
+  let trajectorySolverToken = "";
   const clients: Client[] = [];
 
   beforeAll(async () => {
     await service.start();
     service.registerProject("proj", backend);
+    const trajectoryState = initialState();
+    trajectoryState.config = defaultTrajectoryConfig();
+    const trajectoryBackend = new FileMemoryBackend(
+      dir,
+      (r) => recalls.push(r),
+      {
+        getState: () => trajectoryState,
+        recordMilestone: () => ({ milestoneId: "MS001" }),
+        flagFact: () => ({ correctionClaimId: "K001" }),
+      },
+    );
+    service.registerProject("trajectory-proj", trajectoryBackend);
     solverToken = service.mintToken({ slug: "proj", taskId: "T001", role: "solver", waveId: "W001" });
     reviewerToken = service.mintToken({ slug: "proj", taskId: "T002", role: "reviewer", waveId: "W001" });
     managerToken = service.mintToken({ slug: "proj", taskId: "DEC001", role: "research_manager", waveId: "between-rounds" });
+    trajectorySolverToken = service.mintToken({ slug: "trajectory-proj", taskId: "T101", role: "solver", waveId: "W001" });
   });
 
   afterAll(async () => {
@@ -291,6 +306,37 @@ describe("MemoryService over HTTP", () => {
     expect(recalls.at(-1)).toMatchObject({
       taskId: "DEC001",
       role: "research_manager",
+      op: "source_open",
+      returnedIds: ["S001"],
+    });
+  });
+
+  it("gives v2 trajectories the research-library tools and retained intake sources", async () => {
+    const solver = await connect(trajectorySolverToken);
+    const { tools } = await solver.listTools();
+    expect(tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
+      "knowledge_search",
+      "knowledge_open",
+      "writeup_search",
+      "writeup_open",
+      "mark_milestone",
+      "flag_fact",
+      "source_list",
+      "source_open",
+    ]));
+    const listed = textOf(await solver.callTool({
+      name: "source_list",
+      arguments: { query: "DNC" },
+    }));
+    expect(listed).toContain("S001 [objective]");
+    const opened = textOf(await solver.callTool({
+      name: "source_open",
+      arguments: { sourceId: "S001", reason: "recover the owner's precise meaning of DNC" },
+    }));
+    expect(opened).toContain("Use DNC master-space localization.");
+    expect(recalls.at(-1)).toMatchObject({
+      taskId: "T101",
+      role: "solver",
       op: "source_open",
       returnedIds: ["S001"],
     });

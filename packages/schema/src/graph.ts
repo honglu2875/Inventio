@@ -21,6 +21,9 @@ export interface GraphNode {
     | "question"
     | "final"
     | "claim"
+    | "fact"
+    | "verification"
+    | "milestone"
     | "issue"
     | "obligation";
   parentId?: string;
@@ -32,7 +35,19 @@ export interface GraphEdge {
   id: string;
   source: string;
   target: string;
-  type: "sequence" | "produced" | "frozen-from" | "reviews" | "revision" | "uses" | "depends-on" | "attacks";
+  type:
+    | "sequence"
+    | "produced"
+    | "frozen-from"
+    | "reviews"
+    | "revision"
+    | "uses"
+    | "depends-on"
+    | "attacks"
+    | "verifies"
+    | "promotes"
+    | "equivalent"
+    | "relation";
   label?: string;
 }
 
@@ -87,6 +102,28 @@ export function deriveOpsGraph(state: ProjectState): Graph {
           conclusion: firstConclusion(state, t.artifactIds),
         },
       });
+      for (const milestoneId of t.milestoneIds) {
+        const milestone = state.milestones[milestoneId];
+        if (!milestone) continue;
+        nodes.push({
+          id: milestone.id,
+          type: "milestone",
+          parentId: waveId,
+          label: milestone.title,
+          data: {
+            taskId: t.id,
+            title: milestone.title,
+            markdown: milestone.markdown,
+            recordedAt: milestone.recordedAt,
+          },
+        });
+        edges.push({
+          id: `milestone:${t.id}:${milestone.id}`,
+          source: t.id,
+          target: milestone.id,
+          type: "produced",
+        });
+      }
     }
 
     if (wave.resolutionPath !== null) {
@@ -166,7 +203,21 @@ export function deriveOpsGraph(state: ProjectState): Graph {
   for (const card of Object.values(state.cards)) {
     cardCounts[card.status] = (cardCounts[card.status] ?? 0) + 1;
   }
-  nodes.push({ id: "memory", type: "memoryHub", label: "Memory", data: { counts: cardCounts } });
+  if (state.config.workflow === "trajectories-v2") {
+    nodes.push({
+      id: "memory",
+      type: "memoryHub",
+      label: "Research library",
+      data: {
+        counts: {
+          FACTS: state.factOrder.filter((id) => state.facts[id]?.status === "ACTIVE").length,
+          CLAIMS: state.claimOrder.filter((id) => state.claims[id]?.status === "UNVERIFIED").length,
+        },
+      },
+    });
+  } else {
+    nodes.push({ id: "memory", type: "memoryHub", label: "Memory", data: { counts: cardCounts } });
+  }
 
   for (const q of Object.values(state.questions)) {
     if (q.status === "open") {
@@ -265,6 +316,128 @@ export function deriveEvidenceGraph(state: ProjectState, candidateIdArg?: string
     edges.push({ id: `atk:${iid}`, source: iid, target, type: "attacks" });
   }
 
+  return { nodes, edges };
+}
+
+/**
+ * Active mathematical evidence for trajectories-v2. The projection omits
+ * failed and duplicate claims from the working graph; their complete history
+ * remains in the Library.
+ */
+export function deriveTrajectoryEvidenceGraph(state: ProjectState): Graph {
+  const nodes: GraphNode[] = [
+    {
+      id: "problem",
+      type: "problem",
+      label: state.title || "Problem",
+      data: { phase: state.phase, confirmed: state.problem.confirmedMarkdown !== null },
+    },
+  ];
+  const edges: GraphEdge[] = [];
+  const activeFactIds = state.factOrder.filter((factId) => {
+    const status = state.facts[factId]?.status;
+    return status === "ACTIVE" || status === "SUSPICIOUS";
+  });
+  const includedClaims = new Set<string>();
+  for (const claimId of state.claimOrder) {
+    if (state.claims[claimId]?.status === "UNVERIFIED") includedClaims.add(claimId);
+  }
+  for (const factId of activeFactIds) includedClaims.add(state.facts[factId]!.claimId);
+
+  for (const claimId of state.claimOrder) {
+    if (!includedClaims.has(claimId)) continue;
+    const claim = state.claims[claimId]!;
+    const checks = claim.verificationIds
+      .map((id) => state.verifications[id])
+      .filter((value) => value !== undefined);
+    nodes.push({
+      id: claim.id,
+      type: "claim",
+      label: claim.title || claim.id,
+      data: {
+        title: claim.title,
+        statement: claim.statement,
+        status: claim.status,
+        relationToGoal: claim.relationToGoal,
+        passCount: checks.filter((check) => check.verdict === "PASS").length,
+        checkCount: checks.length,
+        passesRequired:
+          claim.verificationPolicy?.passesRequired ?? state.config.trajectory.passesRequired,
+      },
+    });
+    edges.push({
+      id: `relation:problem:${claim.id}`,
+      source: "problem",
+      target: claim.id,
+      type: "relation",
+      label: claim.relationToGoal,
+    });
+    for (const verification of checks) {
+      const checkLabel = verification.verdict ?? (verification.status === "running" ? "RUNNING" : "QUEUED");
+      nodes.push({
+        id: verification.id,
+        type: "verification",
+        label: `${verification.id} ${checkLabel}`,
+        data: {
+          claimId: claim.id,
+          ordinal: verification.ordinal,
+          status: verification.status,
+          verdict: verification.verdict,
+          summary: verification.summaryMarkdown,
+        },
+      });
+      edges.push({
+        id: `check:${claim.id}:${verification.id}`,
+        source: claim.id,
+        target: verification.id,
+        type: "verifies",
+        label: checkLabel,
+      });
+    }
+    if (claim.targetFactId && activeFactIds.includes(claim.targetFactId)) {
+      edges.push({
+        id: `correction:${claim.id}:${claim.targetFactId}`,
+        source: claim.id,
+        target: claim.targetFactId,
+        type: "attacks",
+        label: "CORRECTION",
+      });
+    }
+    for (const otherId of claim.equivalentIds) {
+      if (!includedClaims.has(otherId) || claim.id.localeCompare(otherId) >= 0) continue;
+      edges.push({
+        id: `equivalent:${claim.id}:${otherId}`,
+        source: claim.id,
+        target: otherId,
+        type: "equivalent",
+        label: "same statement",
+      });
+    }
+  }
+
+  for (const factId of activeFactIds) {
+    const fact = state.facts[factId]!;
+    const claim = state.claims[fact.claimId];
+    nodes.push({
+      id: fact.id,
+      type: "fact",
+      label: fact.title || fact.id,
+      data: {
+        title: fact.title,
+        statement: fact.statement,
+        status: fact.status,
+        claimId: fact.claimId,
+        relationToGoal: claim?.relationToGoal ?? "RELATED",
+      },
+    });
+    edges.push({
+      id: `promotes:${fact.claimId}:${fact.id}`,
+      source: fact.claimId,
+      target: fact.id,
+      type: "promotes",
+      label: "established",
+    });
+  }
   return { nodes, edges };
 }
 

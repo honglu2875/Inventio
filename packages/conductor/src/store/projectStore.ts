@@ -22,6 +22,11 @@ export interface ProjectPaths {
   cardsDir: string;
   capsulesDir: string;
   managerNotesDir: string;
+  mathematicalViewsDir: string;
+  writeupsDir: string;
+  claimsDir: string;
+  factsDir: string;
+  verificationsDir: string;
   computationsDir: string;
   publicationsDir: string;
 }
@@ -45,6 +50,11 @@ export function projectPaths(root: string, slug: string): ProjectPaths {
     cardsDir: path.join(dir, "memory", "cards"),
     capsulesDir: path.join(dir, "memory", "capsules"),
     managerNotesDir: path.join(dir, "artifacts", "manager-notes"),
+    mathematicalViewsDir: path.join(dir, "artifacts", "mathematical-view"),
+    writeupsDir: path.join(dir, "writeups"),
+    claimsDir: path.join(dir, "claims"),
+    factsDir: path.join(dir, "facts"),
+    verificationsDir: path.join(dir, "verifications"),
     computationsDir: path.join(dir, "computations"),
     publicationsDir: path.join(dir, "publications"),
   };
@@ -65,6 +75,11 @@ export function createProjectDirs(p: ProjectPaths): void {
     p.cardsDir,
     p.capsulesDir,
     p.managerNotesDir,
+    p.mathematicalViewsDir,
+    p.writeupsDir,
+    p.claimsDir,
+    p.factsDir,
+    p.verificationsDir,
     p.computationsDir,
     p.publicationsDir,
   ]) {

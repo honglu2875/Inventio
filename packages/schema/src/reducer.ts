@@ -4,6 +4,45 @@ import type { ProjectState, TaskState } from "./state.js";
 import { idNumber, parseCandidateId, type IdKind } from "./ids.js";
 
 /**
+ * Equivalence is transitive. If independently checked proofs have already
+ * produced duplicate facts before that relation is recognized, keep the first
+ * fact authoritative and retain the others as inspectable, superseded records.
+ */
+function reconcileEquivalentFacts(state: ProjectState, seedClaimId: string): void {
+  const component = new Set<string>();
+  const pending = [seedClaimId];
+  while (pending.length > 0) {
+    const claimId = pending.pop()!;
+    if (component.has(claimId)) continue;
+    const claim = state.claims[claimId];
+    if (!claim) continue;
+    component.add(claimId);
+    pending.push(...claim.equivalentIds);
+  }
+  const facts = state.factOrder
+    .map((factId) => state.facts[factId]!)
+    .filter(
+      (fact) =>
+        component.has(fact.claimId) &&
+        fact.status !== "RETRACTED" &&
+        fact.status !== "SUPERSEDED",
+    )
+    .sort((left, right) => left.recordedAtSeq - right.recordedAtSeq || left.id.localeCompare(right.id));
+  const primary = facts[0];
+  if (!primary) return;
+  for (const duplicate of facts.slice(1)) {
+    duplicate.status = "SUPERSEDED";
+    duplicate.supersededByFactId = primary.id;
+  }
+  for (const claimId of component) {
+    const claim = state.claims[claimId]!;
+    if (claim.status === "VERIFIED" || claim.promotedFactId !== null) {
+      claim.promotedFactId = primary.id;
+    }
+  }
+}
+
+/**
  * The pure fold: applyEvent mutates `state` in place and returns it.
  * Callers own copying semantics (the conductor folds its single instance;
  * the UI wraps application in an immer produce). Replay of the same log
@@ -176,18 +215,32 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
       state.autonomy = event.mode;
       return state;
     case "models.changed":
-      state.config.models = { ...state.config.models, ...event.models };
+      state.config.models = {
+        ...state.config.models,
+        ...event.models,
+        summaryReader: event.models.summaryReader ?? state.config.models.summaryReader,
+        verifier: event.models.verifier ?? state.config.models.verifier,
+      };
       return state;
     case "webSearch.changed":
       state.config.allowWebSearch = event.enabled;
       return state;
     case "project.settingsChanged":
-      state.config.models = { ...state.config.models, ...event.settings.models };
+      state.config.models = {
+        ...state.config.models,
+        ...event.settings.models,
+        summaryReader:
+          event.settings.models.summaryReader ?? state.config.models.summaryReader,
+        verifier: event.settings.models.verifier ?? state.config.models.verifier,
+      };
       state.config.autonomy = event.settings.autonomy;
       state.config.allowWebSearch = event.settings.allowWebSearch;
       state.config.budget.totalTokens = event.settings.totalTokens;
       state.budget.totalTokens = event.settings.totalTokens;
       state.config.limits.maxWaves = event.settings.maxWaves;
+      if (event.settings.trajectory) {
+        state.config.trajectory = { ...event.settings.trajectory };
+      }
       // Compatibility projection retained for old UI snapshots. Runtime code
       // reads config.autonomy, so config remains the sole effective setting.
       state.autonomy = event.settings.autonomy;
@@ -336,7 +389,7 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
       state.waves[event.waveId] = {
         id: event.waveId,
         plannedAtSeq: event.seq,
-        title: event.title,
+        title: event.title ?? "",
         status: "open",
         decisionId: event.decisionId,
         roster: event.roster,
@@ -345,6 +398,7 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
         taskIds: event.roster.map((r) => r.taskId),
         docketMarkdown: null,
         resolutionPath: null,
+        summaryReviewed: false,
       };
       state.waveOrder.push(event.waveId);
       for (const entry of event.roster) {
@@ -372,6 +426,7 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
           disposition: null,
           dispositionReason: null,
           preciseUnblock: null,
+          milestoneIds: [],
         };
         state.tasks[entry.taskId] = task;
       }
@@ -437,6 +492,24 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
     case "task.extended": {
       const t = must(state.tasks[event.taskId], `task ${event.taskId}`);
       t.budgetTokens += event.addTokens;
+      return state;
+    }
+    case "task.milestone": {
+      bump(state, "milestone", event.milestoneId);
+      const task = must(state.tasks[event.taskId], `task ${event.taskId}`);
+      if (state.milestones[event.milestoneId]) {
+        throw new Error(`duplicate milestone ${event.milestoneId}`);
+      }
+      state.milestones[event.milestoneId] = {
+        id: event.milestoneId,
+        taskId: event.taskId,
+        title: event.title ?? "",
+        markdown: event.markdown,
+        recordedAtSeq: event.seq,
+        recordedAt: event.ts,
+      };
+      state.milestoneOrder.push(event.milestoneId);
+      task.milestoneIds.push(event.milestoneId);
       return state;
     }
     case "task.dispositioned": {
@@ -556,11 +629,22 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
       bump(state, "claim", event.claimId);
       state.claims[event.claimId] = {
         id: event.claimId,
+        title: event.title ?? "",
         statement: event.statement,
+        proofMarkdown: event.proofMarkdown ?? "",
         status: event.status,
         provenance: event.provenance,
         sourceTaskId: event.sourceTaskId ?? event.provenance.match(/\(from (T\d+)\)/)?.[1] ?? null,
+        sourceWaveId: event.sourceWaveId ?? null,
+        path: event.path ?? null,
+        relationToGoal: event.relationToGoal ?? "RELATED",
+        kind: event.kind ?? "mathematical",
+        targetFactId: event.targetFactId ?? null,
+        verificationPolicy: event.verificationPolicy ?? null,
         dependsOn: event.dependsOn,
+        equivalentIds: [],
+        verificationIds: [],
+        promotedFactId: null,
         history: [],
       };
       state.claimOrder.push(event.claimId);
@@ -575,6 +659,114 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
         by: event.by,
         seq: event.seq,
       });
+      if (event.to === "VERIFIED") reconcileEquivalentFacts(state, k.id);
+      return state;
+    }
+    case "claim.equivalent": {
+      if (event.leftClaimId === event.rightClaimId) {
+        throw new Error(`claim ${event.leftClaimId} cannot be equivalent to itself`);
+      }
+      const left = must(state.claims[event.leftClaimId], `claim ${event.leftClaimId}`);
+      const right = must(state.claims[event.rightClaimId], `claim ${event.rightClaimId}`);
+      if (!left.equivalentIds.includes(right.id)) left.equivalentIds.push(right.id);
+      if (!right.equivalentIds.includes(left.id)) right.equivalentIds.push(left.id);
+      reconcileEquivalentFacts(state, left.id);
+      return state;
+    }
+    case "verification.requested": {
+      bump(state, "verification", event.verificationId);
+      const claim = must(state.claims[event.claimId], `claim ${event.claimId}`);
+      state.verifications[event.verificationId] = {
+        id: event.verificationId,
+        claimId: event.claimId,
+        ordinal: event.ordinal,
+        status: "queued",
+        verdict: null,
+        summaryMarkdown: "",
+        artifactPath: null,
+        usage: null,
+        requestedAtSeq: event.seq,
+        completedAtSeq: null,
+      };
+      state.verificationOrder.push(event.verificationId);
+      claim.verificationIds.push(event.verificationId);
+      return state;
+    }
+    case "verification.started": {
+      const verification = must(
+        state.verifications[event.verificationId],
+        `verification ${event.verificationId}`,
+      );
+      if (verification.status !== "completed") verification.status = "running";
+      return state;
+    }
+    case "verification.completed": {
+      const verification = must(
+        state.verifications[event.verificationId],
+        `verification ${event.verificationId}`,
+      );
+      verification.status = "completed";
+      verification.verdict = event.verdict;
+      verification.summaryMarkdown = event.summaryMarkdown;
+      verification.artifactPath = event.artifactPath;
+      verification.usage = event.usage;
+      verification.completedAtSeq = event.seq;
+      if (event.usage) state.budget.spentTokens += usageSpend(event.usage);
+      return state;
+    }
+    case "fact.recorded": {
+      bump(state, "fact", event.factId);
+      const claim = must(state.claims[event.claimId], `claim ${event.claimId}`);
+      state.facts[event.factId] = {
+        id: event.factId,
+        claimId: claim.id,
+        title: claim.title,
+        statement: claim.statement,
+        proofMarkdown: claim.proofMarkdown,
+        path: event.path,
+        status: "ACTIVE",
+        correctionClaimIds: [],
+        retractedByClaimId: null,
+        supersededByFactId: null,
+        recordedAtSeq: event.seq,
+      };
+      state.factOrder.push(event.factId);
+      claim.promotedFactId = event.factId;
+      reconcileEquivalentFacts(state, claim.id);
+      return state;
+    }
+    case "fact.suspicionRaised": {
+      const fact = must(state.facts[event.factId], `fact ${event.factId}`);
+      const correction = must(
+        state.claims[event.correctionClaimId],
+        `claim ${event.correctionClaimId}`,
+      );
+      if (correction.kind !== "correction" || correction.targetFactId !== fact.id) {
+        throw new Error(`claim ${correction.id} is not a correction of ${fact.id}`);
+      }
+      if (!fact.correctionClaimIds.includes(correction.id)) {
+        fact.correctionClaimIds.push(correction.id);
+      }
+      if (fact.status === "ACTIVE") fact.status = "SUSPICIOUS";
+      return state;
+    }
+    case "fact.retracted": {
+      const fact = must(state.facts[event.factId], `fact ${event.factId}`);
+      must(state.claims[event.correctionClaimId], `claim ${event.correctionClaimId}`);
+      fact.status = "RETRACTED";
+      fact.retractedByClaimId = event.correctionClaimId;
+      return state;
+    }
+    case "fact.suspicionCleared": {
+      const fact = must(state.facts[event.factId], `fact ${event.factId}`);
+      must(state.claims[event.correctionClaimId], `claim ${event.correctionClaimId}`);
+      if (fact.status === "SUSPICIOUS") {
+        const stillOpen = fact.correctionClaimIds.some((claimId) => {
+          if (claimId === event.correctionClaimId) return false;
+          return state.claims[claimId]?.status === "UNVERIFIED";
+        });
+        fact.status = stillOpen ? "SUSPICIOUS" : "ACTIVE";
+      }
       return state;
     }
     case "issue.raised": {
@@ -683,6 +875,29 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
       const existing = state.researchManagerNotes.findIndex((entry) => entry.waveId === event.waveId);
       if (existing === -1) state.researchManagerNotes.push(note);
       else state.researchManagerNotes[existing] = note;
+      return state;
+    }
+    case "summary.recorded": {
+      const view = {
+        waveId: event.waveId,
+        path: event.path,
+        abstract: event.abstract,
+        markdown: event.markdown,
+        changed: event.changed,
+        reason: event.reason,
+        source: event.source,
+        recordedAtSeq: event.seq,
+        recordedAt: event.ts,
+      };
+      const existing = state.mathematicalViews.findIndex((entry) => entry.waveId === event.waveId);
+      if (existing === -1) state.mathematicalViews.push(view);
+      else state.mathematicalViews[existing] = view;
+      if (event.usage) state.budget.plannerSpentTokens += usageSpend(event.usage);
+      return state;
+    }
+    case "wave.summaryReviewed": {
+      const wave = must(state.waves[event.waveId], `wave ${event.waveId}`);
+      wave.summaryReviewed = true;
       return state;
     }
     case "resolution.recorded": {

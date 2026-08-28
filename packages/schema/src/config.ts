@@ -1,14 +1,23 @@
 import { z } from "zod";
 import { SLUG_RE } from "./ids.js";
 
-export const WorkerRole = z.enum(["solver", "explorer", "reviewer", "synthesizer"]);
+export const WorkerRole = z.enum(["solver", "explorer", "verifier", "reviewer", "synthesizer"]);
 export type WorkerRole = z.infer<typeof WorkerRole>;
+
+/**
+ * Workflow is explicit so an old event log is never reinterpreted by a newer
+ * engine. Configurations written before this field existed parse as council-v1.
+ */
+export const WorkflowVersion = z.enum(["council-v1", "trajectories-v2"]);
+export type WorkflowVersion = z.infer<typeof WorkflowVersion>;
 
 export const RoleName = z.enum([
   "planner",
   "research_manager",
+  "summary_reader",
   "solver",
   "explorer",
+  "verifier",
   "reviewer",
   "synthesizer",
 ]);
@@ -30,10 +39,13 @@ export const ProjectModels = z.object({
   intake: ModelChoice.default({ model: "gpt-5.6-sol", effort: "max" }),
   /** The single intellectual controller. */
   researchManager: ModelChoice.default({ model: "gpt-5.6-sol", effort: "max" }),
+  /** End-of-round editor in trajectories-v2; it does not choose research work. */
+  summaryReader: ModelChoice.default({ model: "gpt-5.6-sol", effort: "max" }),
   /** Retained so project logs created before the Research Manager rename replay. */
   planner: ModelChoice,
   solver: ModelChoice,
   explorer: ModelChoice,
+  verifier: ModelChoice.default({ model: "gpt-5.6-sol", effort: "max" }),
   reviewer: ModelChoice,
   synthesizer: ModelChoice,
 });
@@ -46,6 +58,10 @@ export const ActiveModelSettings = ProjectModels.pick({
   explorer: true,
   reviewer: true,
   synthesizer: true,
+}).extend({
+  /** Optional on the wire so settings events written before v2 remain valid. */
+  summaryReader: ModelChoice.optional(),
+  verifier: ModelChoice.optional(),
 });
 export type ActiveModelSettings = z.infer<typeof ActiveModelSettings>;
 
@@ -63,6 +79,25 @@ export const ProjectSettings = z.object({
   allowWebSearch: z.boolean(),
   totalTokens: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   maxWaves: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  trajectory: z
+    .object({
+      solversPerWave: z.number().int().min(0).max(8),
+      explorersPerWave: z.number().int().min(0).max(8),
+      verifiersPerClaim: z.number().int().min(1).max(8),
+      passesRequired: z.number().int().min(1).max(8),
+    })
+    .superRefine((value, ctx) => {
+      if (value.solversPerWave + value.explorersPerWave < 1) {
+        ctx.addIssue({ code: "custom", message: "at least one Solver or Explorer is required" });
+      }
+      if (value.solversPerWave + value.explorersPerWave > 8) {
+        ctx.addIssue({ code: "custom", message: "at most eight research trajectories may start per round" });
+      }
+      if (value.passesRequired > value.verifiersPerClaim) {
+        ctx.addIssue({ code: "custom", message: "passesRequired cannot exceed verifiersPerClaim" });
+      }
+    })
+    .optional(),
 });
 export type ProjectSettings = z.infer<typeof ProjectSettings>;
 
@@ -74,6 +109,7 @@ export const SourceMount = z.object({
 export type SourceMount = z.infer<typeof SourceMount>;
 
 export const ProjectConfig = z.object({
+  workflow: WorkflowVersion.default("council-v1"),
   budget: z.object({
     totalTokens: z.number().int().positive(),
     defaultTaskTokens: z.number().int().positive(),
@@ -100,6 +136,30 @@ export const ProjectConfig = z.object({
     maxRepairRounds: z.number().int().min(0),
     maxConcurrentWorkers: z.number().int().positive(),
   }),
+  trajectory: z
+    .object({
+      solversPerWave: z.number().int().min(0).max(8),
+      explorersPerWave: z.number().int().min(0).max(8),
+      verifiersPerClaim: z.number().int().min(1).max(8),
+      passesRequired: z.number().int().min(1).max(8),
+    })
+    .superRefine((value, ctx) => {
+      if (value.solversPerWave + value.explorersPerWave < 1) {
+        ctx.addIssue({ code: "custom", message: "at least one Solver or Explorer is required" });
+      }
+      if (value.solversPerWave + value.explorersPerWave > 8) {
+        ctx.addIssue({ code: "custom", message: "at most eight research trajectories may start per round" });
+      }
+      if (value.passesRequired > value.verifiersPerClaim) {
+        ctx.addIssue({ code: "custom", message: "passesRequired cannot exceed verifiersPerClaim" });
+      }
+    })
+    .default({
+      solversPerWave: 2,
+      explorersPerWave: 2,
+      verifiersPerClaim: 2,
+      passesRequired: 2,
+    }),
   sourceMounts: z.array(SourceMount),
 });
 export type ProjectConfig = z.infer<typeof ProjectConfig>;
@@ -112,11 +172,13 @@ export function projectSettingsFromConfig(config: ProjectConfig): ProjectSetting
     allowWebSearch: config.allowWebSearch,
     totalTokens: config.budget.totalTokens,
     maxWaves: config.limits.maxWaves,
+    trajectory: config.trajectory,
   });
 }
 
 export function defaultConfig(): ProjectConfig {
   return {
+    workflow: "council-v1",
     budget: {
       totalTokens: 40_000_000,
       defaultTaskTokens: 1_500_000,
@@ -126,17 +188,52 @@ export function defaultConfig(): ProjectConfig {
     models: {
       intake: { model: "gpt-5.6-sol", effort: "max" },
       researchManager: { model: "gpt-5.6-sol", effort: "max" },
+      summaryReader: { model: "gpt-5.6-sol", effort: "max" },
       planner: { model: null, effort: "high" },
       solver: { model: null, effort: "high" },
       explorer: { model: null, effort: "medium" },
+      verifier: { model: "gpt-5.6-sol", effort: "max" },
       reviewer: { model: null, effort: "high" },
       synthesizer: { model: "gpt-5.6-terra", effort: "high" },
     },
     autonomy: "auto",
     allowWebSearch: false,
     limits: { maxWaves: 20, maxRepairRounds: 2, maxConcurrentWorkers: 3 },
+    trajectory: {
+      solversPerWave: 2,
+      explorersPerWave: 2,
+      verifiersPerClaim: 2,
+      passesRequired: 2,
+    },
     sourceMounts: [],
   };
+}
+
+/** Defaults for newly-created projects. `defaultConfig` remains the legacy
+ * fixture/default so old tests and imported project files retain their exact
+ * execution semantics. */
+export function defaultTrajectoryConfig(): ProjectConfig {
+  const legacy = defaultConfig();
+  return ProjectConfig.parse({
+    ...legacy,
+    workflow: "trajectories-v2",
+    budget: {
+      ...legacy.budget,
+      totalTokens: 80_000_000,
+      defaultTaskTokens: 2_000_000,
+      taskWallClockMinutes: 120,
+      reserveFraction: 0.1,
+    },
+    models: {
+      ...legacy.models,
+      solver: { model: "gpt-5.6-sol", effort: "max" },
+      explorer: { model: "gpt-5.6-sol", effort: "max" },
+      verifier: { model: "gpt-5.6-sol", effort: "max" },
+      summaryReader: { model: "gpt-5.6-sol", effort: "max" },
+    },
+    allowWebSearch: true,
+    limits: { ...legacy.limits, maxWaves: 5, maxConcurrentWorkers: 8 },
+  });
 }
 
 export const ProjectIdentity = z.object({

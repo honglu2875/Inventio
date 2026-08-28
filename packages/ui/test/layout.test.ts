@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Graph, GraphEdge, GraphNode } from "@inventio/schema";
 import { OPS, expandedWaveHeight, layoutOps } from "../src/lib/layout.js";
 import { EVD, layoutEvidence } from "../src/lib/evidenceLayout.js";
+import { layoutTrajectoryEvidence } from "../src/lib/trajectoryEvidenceLayout.js";
 
 function n(id: string, type: GraphNode["type"], parentId?: string, data: Record<string, unknown> = {}): GraphNode {
   return { id, type, label: id, data, ...(parentId ? { parentId } : {}) };
@@ -113,6 +114,20 @@ describe("layoutOps", () => {
     expect(w1closed.get("W002")!.y).toBe(open.get("W002")!.y);
     expect(w1closed.get("T003")!.y).toBe(open.get("T003")!.y);
   });
+
+  it("places trajectory milestones directly below the task that recorded them", () => {
+    const graph = opsGraph();
+    graph.nodes.push(n("MS001", "milestone", "W001", { taskId: "T001" }));
+    graph.edges.push(e("ms1", "T001", "MS001", "produced"));
+    const expanded = byId(layoutOps(graph, new Set()));
+    expect(expanded.get("W001")!.h).toBe(expandedWaveHeight(2, true, 1));
+    expect(expanded.get("MS001")!.parentId).toBe("W001");
+    expect(expanded.get("MS001")!.y).toBeGreaterThan(expanded.get("T001")!.y);
+    expect(expanded.get("MS001")!.y).toBeLessThan(expanded.get("T002")!.y);
+
+    const collapsed = byId(layoutOps(graph, new Set(["W001"])));
+    expect(collapsed.get("MS001")!.hidden).toBe(true);
+  });
 });
 
 function evidenceGraph(): Graph {
@@ -156,5 +171,28 @@ describe("layoutEvidence", () => {
     expect(layoutEvidence({ nodes: [], edges: [] }).nodes).toEqual([]);
     const g = evidenceGraph();
     expect(layoutEvidence(g)).toEqual(layoutEvidence(g));
+  });
+});
+
+describe("layoutTrajectoryEvidence", () => {
+  it("lays out the v2 mathematical record as problem, claims, checks, then facts", () => {
+    const graph: Graph = {
+      nodes: [
+        n("problem", "problem"),
+        n("K001", "claim"),
+        n("V001", "verification"),
+        n("F001", "fact"),
+      ],
+      edges: [
+        e("r", "problem", "K001", "relation"),
+        e("v", "K001", "V001", "verifies"),
+        e("p", "K001", "F001", "promotes"),
+      ],
+    };
+    const placed = byId(layoutTrajectoryEvidence(graph));
+    expect(placed.get("problem")!.x).toBeLessThan(placed.get("K001")!.x);
+    expect(placed.get("K001")!.x).toBeLessThan(placed.get("V001")!.x);
+    expect(placed.get("V001")!.x).toBeLessThan(placed.get("F001")!.x);
+    expect(layoutTrajectoryEvidence(graph)).toEqual(layoutTrajectoryEvidence(graph));
   });
 });

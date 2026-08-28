@@ -1,5 +1,10 @@
 # Inventio — system and interface design
 
+> **Compatibility document.** This is the complete design of the preserved
+> `council-v1` workflow and shared runtime. New projects use
+> `trajectories-v2`, specified in `TRAJECTORY-DESIGN.md`. Event replay and the
+> HTTP/UI surface continue to support both workflows.
+
 Inventio is a local system that attacks difficult mathematics problems
 with a council of Codex agents under the constitution in `PROTOCOL.md`.
 This document is the complete engineering specification: architecture,

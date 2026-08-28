@@ -44,7 +44,17 @@ export interface SearchQuery {
 export interface RecallRecord {
   taskId: string;
   role: WorkerRole | "research_manager";
-  op: "search" | "expand" | "source_list" | "source_open";
+  op:
+    | "search"
+    | "expand"
+    | "source_list"
+    | "source_open"
+    | "knowledge_search"
+    | "knowledge_open"
+    | "writeup_search"
+    | "writeup_open"
+    | "mark_milestone"
+    | "flag_fact";
   args: string; // JSON.stringify of the tool arguments
   returnedIds: string[];
   refusedIds: string[];
@@ -58,6 +68,37 @@ export interface MemoryBackend {
   listIntakeSources(query: string): IntakeSource[];
   openIntakeSource(id: string, start?: number, maxCharacters?: number): OpenedIntakeSource | null;
   recordRecall(rec: RecallRecord): void;
+  /** trajectories-v2 methods are optional so legacy/test backends stay valid. */
+  searchKnowledge?(query: string, limit?: number): KnowledgeRow[];
+  openKnowledge?(ids: string[]): KnowledgeDocument[];
+  searchWriteups?(query: string, limit?: number): WriteupRow[];
+  openWriteups?(ids: string[], maxCharacters?: number): WriteupDocument[];
+  recordMilestone?(taskId: string, title: string, markdown: string): { milestoneId: string };
+  flagFact?(taskId: string, factId: string, reason: string): { correctionClaimId: string };
+  supportsTrajectoryTools?(): boolean;
+}
+
+export interface KnowledgeRow {
+  id: string;
+  kind: "fact" | "claim";
+  status: string;
+  title: string;
+  statement: string;
+}
+
+export interface KnowledgeDocument extends KnowledgeRow {
+  markdown: string;
+}
+
+export interface WriteupRow {
+  id: string;
+  role: string;
+  status: string;
+  summary: string;
+}
+
+export interface WriteupDocument extends WriteupRow {
+  markdown: string;
 }
 
 /** What a bearer token stands for: never taken from tool arguments. */

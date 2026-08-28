@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   applyEvent,
   defaultConfig,
+  defaultTrajectoryConfig,
   initialState,
   type ActionEnvelope,
   type ContinuationRevisionOutput,
@@ -18,6 +19,9 @@ import {
   type ProjectState,
   type PublicationOutput,
   type ReviewerOutput,
+  type SummaryRevisionOutput,
+  type TrajectoryOutput,
+  type VerificationOutput,
   type WorkerOutput,
 } from "@inventio/schema";
 import {
@@ -56,6 +60,10 @@ export const CURATION_MATCH = "Assess the completed research round";
 export const FINAL_MATCH = "Compose the final report";
 export const PUBLICATION_MATCH = "Reassess the concluded mathematics";
 export const WORKER_MATCH = "Work on the question in research-question.md";
+export const TRAJECTORY_WORKER_MATCH = "Work on the original problem in problem.md";
+export const VERIFICATION_MATCH = "Independently check claim.md";
+export const SUMMARY_REVIEW_MATCH = "Consider whether the completed round materially changes";
+export const TRAJECTORY_FINAL_MATCH = "Compose the self-contained final mathematical report";
 
 export const USAGE = {
   input_tokens: 1000,
@@ -313,6 +321,43 @@ export function reviewerOutput(
   return { verdict, artifactMarkdown: substantialTestArtifact(artifactMarkdown), memo: m, recallLog: [] };
 }
 
+export function trajectoryOutput(
+  over: Partial<TrajectoryOutput> = {},
+): TrajectoryOutput {
+  return {
+    conclusion: "UNCERTAIN",
+    summaryMarkdown: "The trajectory established one useful reduction.",
+    writeupMarkdown:
+      "# Independent investigation\n\nA complete mathematical argument is recorded here.",
+    claims: [],
+    ...over,
+  };
+}
+
+export function verificationOutput(
+  verdict: VerificationOutput["verdict"],
+  summaryMarkdown = "The supplied statement and proof are correct.",
+): VerificationOutput {
+  return {
+    verdict,
+    summaryMarkdown,
+    reportMarkdown: `# Independent verification\n\nVERDICT: ${verdict}\n\n${summaryMarkdown}`,
+  };
+}
+
+export function summaryRevisionOutput(
+  over: Partial<SummaryRevisionOutput> = {},
+): SummaryRevisionOutput {
+  return {
+    changed: false,
+    abstract: "The objective is to show that the widget is round.",
+    markdown: "# Current mathematical view\n\nThe stated objective is to prove that the widget is round.",
+    reason: "The round does not yet require an editorial change.",
+    equivalentClaimGroups: [],
+    ...over,
+  };
+}
+
 function substantialTestArtifact(markdown: string): string {
   if (markdown.trim().length >= 240) return markdown;
   return (
@@ -326,6 +371,24 @@ export function testConfig(over: (c: ProjectConfig) => void = () => undefined): 
   const c = defaultConfig();
   c.budget.totalTokens = 10_000_000;
   c.limits.maxConcurrentWorkers = 1;
+  over(c);
+  return c;
+}
+
+export function trajectoryTestConfig(
+  over: (c: ProjectConfig) => void = () => undefined,
+): ProjectConfig {
+  const c = defaultTrajectoryConfig();
+  c.budget.totalTokens = 10_000_000;
+  c.budget.defaultTaskTokens = 500_000;
+  c.limits.maxWaves = 1;
+  c.limits.maxConcurrentWorkers = 1;
+  c.trajectory = {
+    solversPerWave: 1,
+    explorersPerWave: 0,
+    verifiersPerClaim: 2,
+    passesRequired: 2,
+  };
   over(c);
   return c;
 }

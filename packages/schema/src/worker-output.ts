@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CardType, IssueSeverity } from "./events.js";
+import { CardType, ClaimRelation, IssueSeverity } from "./events.js";
 import type { WorkerRole } from "./config.js";
 
 /**
@@ -81,6 +81,46 @@ export type ReviewerOutput = z.infer<typeof ReviewerOutput>;
 
 export type AnyWorkerOutput = WorkerOutput | ReviewerOutput;
 
+/** One high-value result handed from a long trajectory to later researchers. */
+export const TrajectoryClaim = z.object({
+  title: z.string().min(1).max(160),
+  statementMarkdown: z.string().min(1),
+  proofMarkdown: z.string().min(1),
+  relationToGoal: ClaimRelation,
+});
+export type TrajectoryClaim = z.infer<typeof TrajectoryClaim>;
+
+/**
+ * The small structured tail of a long Solver or Explorer session. The full
+ * trajectory remains in Codex's event archive; writeupMarkdown is the readable
+ * mathematical handoff, while claims are the only entries sent to verification.
+ */
+export const TrajectoryOutput = z.object({
+  conclusion: z.enum(["PROVED", "DISPROVED", "UNCERTAIN"]),
+  summaryMarkdown: z.string().min(1).max(4_000),
+  writeupMarkdown: z.string().min(1),
+  claims: z.array(TrajectoryClaim).max(8),
+});
+export type TrajectoryOutput = z.infer<typeof TrajectoryOutput>;
+
+/** Independent assessment of exactly one self-contained claim. */
+export const VerificationOutput = z.object({
+  verdict: z.enum(["PASS", "FAIL"]),
+  summaryMarkdown: z.string().min(1).max(2_000),
+  reportMarkdown: z.string().min(1),
+});
+export type VerificationOutput = z.infer<typeof VerificationOutput>;
+
+/** A deliberately small editorial reconsideration after one research round. */
+export const SummaryRevisionOutput = z.object({
+  changed: z.boolean(),
+  abstract: z.string().min(1).max(480),
+  markdown: z.string().min(1),
+  reason: z.string().max(1_000),
+  equivalentClaimGroups: z.array(z.array(z.string()).min(2)).max(20),
+});
+export type SummaryRevisionOutput = z.infer<typeof SummaryRevisionOutput>;
+
 export function workerOutputSchema(role: WorkerRole): z.ZodType<AnyWorkerOutput> {
   return role === "reviewer" ? ReviewerOutput : WorkerOutput;
 }
@@ -88,6 +128,14 @@ export function workerOutputSchema(role: WorkerRole): z.ZodType<AnyWorkerOutput>
 /** JSON Schema (draft 2020-12) for `codex exec --output-schema`. */
 export function workerOutputJsonSchema(role: WorkerRole): Record<string, unknown> {
   return z.toJSONSchema(workerOutputSchema(role) as z.ZodType) as Record<string, unknown>;
+}
+
+export function trajectoryOutputJsonSchema(): Record<string, unknown> {
+  return z.toJSONSchema(TrajectoryOutput) as Record<string, unknown>;
+}
+
+export function verificationOutputJsonSchema(): Record<string, unknown> {
+  return z.toJSONSchema(VerificationOutput) as Record<string, unknown>;
 }
 
 export function toJsonSchema(schema: z.ZodType): Record<string, unknown> {

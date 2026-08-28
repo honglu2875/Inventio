@@ -133,6 +133,12 @@ export function buildCanonicalEvents(): Event[] {
   ev("task.dispatched", { taskId: "T001", waveId: "W001", role: "solver", methodTag: "induction", direction: "Direct proof by induction", packetManifest: ["AGENTS.md", "problem.md", "assignment.md"], budgetTokens: 1_000_000 });
   ev("task.session", { taskId: "T001", threadId: "thr-001" });
   ev("task.progress", { taskId: "T001", estimatedTokens: 1234, lastItem: { type: "reasoning", preview: "…" } });
+  ev("task.milestone", {
+    milestoneId: "MS001",
+    taskId: "T001",
+    title: "Inductive reduction",
+    markdown: "The argument reduces to the even case.",
+  });
   ev("task.extended", { taskId: "T001", addTokens: 200_000, by: "human" });
   ev("task.completed", { taskId: "T001", usage });
   ev("artifact.recorded", { artifactId: "A001", kind: "attempt", taskId: "T001", path: "artifacts/attempts/A001.md", conclusion: "UNCERTAIN" });
@@ -148,7 +154,65 @@ export function buildCanonicalEvents(): Event[] {
 
   ev("claim.added", { claimId: "K001", statement: "P holds for n=1.", status: "UNVERIFIED", provenance: "A001 §2", sourceTaskId: "T001", dependsOn: [] });
   ev("claim.added", { claimId: "K002", statement: "P(n) implies P(n+1).", status: "UNVERIFIED", provenance: "A001 §3", sourceTaskId: "T001", dependsOn: ["K001"] });
+  ev("claim.equivalent", {
+    leftClaimId: "K001",
+    rightClaimId: "K002",
+    reason: "fixture exercises the equivalence relation",
+    by: "conductor",
+  });
   ev("claim.status", { claimId: "K001", from: "UNVERIFIED", to: "VERIFIED", justification: "checked by hand", by: "human" });
+  ev("fact.recorded", {
+    factId: "F001",
+    claimId: "K001",
+    path: "facts/F001.md",
+  });
+  ev("claim.added", {
+    claimId: "K003",
+    title: "Correction to the base case",
+    statement: "The recorded base case omits a boundary hypothesis.",
+    proofMarkdown: "At the omitted boundary the displayed expression is undefined.",
+    status: "UNVERIFIED",
+    provenance: "T001",
+    sourceTaskId: "T001",
+    sourceWaveId: "W001",
+    path: "claims/K003.md",
+    relationToGoal: "RELATED",
+    kind: "correction",
+    targetFactId: "F001",
+    dependsOn: [],
+  });
+  ev("fact.suspicionRaised", {
+    factId: "F001",
+    correctionClaimId: "K003",
+    reason: "A concrete omitted boundary case was supplied.",
+    by: "T001",
+  });
+  ev("verification.requested", { verificationId: "V001", claimId: "K003", ordinal: 1 });
+  ev("verification.started", { verificationId: "V001" });
+  ev("verification.completed", {
+    verificationId: "V001",
+    verdict: "PASS",
+    summaryMarkdown: "The boundary objection is correct.",
+    artifactPath: "verifications/V001.md",
+    usage: null,
+  });
+  ev("claim.status", {
+    claimId: "K003",
+    from: "UNVERIFIED",
+    to: "VERIFIED",
+    justification: "independent verification passed",
+    by: "conductor",
+  });
+  ev("fact.suspicionCleared", {
+    factId: "F001",
+    correctionClaimId: "K003",
+    reason: "fixture exercises clearing a warning before the final correction disposition",
+  });
+  ev("fact.retracted", {
+    factId: "F001",
+    correctionClaimId: "K003",
+    reason: "The correction passed independent verification.",
+  });
 
   ev("memory.cardProposed", { cardId: "M001", by: "T001", card: { type: "LEMMA", title: "Base case", content: "P(1) holds.", abstract: "Base case verified.", tags: ["induction"], provenance: "A001 §2", sourceArtifact: "A001", dependsOn: [] } });
   ev("memory.cardAdmitted", { cardId: "M001", status: "PROPOSED", reason: "new claim, not self-verified" });
@@ -168,6 +232,17 @@ export function buildCanonicalEvents(): Event[] {
     markdown: "The induction route has reduced the problem to the even case.",
     source: "research_manager",
   });
+  ev("summary.recorded", {
+    waveId: "W001",
+    path: "artifacts/mathematical-view/W001.md",
+    markdown: "The induction route now depends on a corrected boundary statement.",
+    abstract: "The boundary case requires correction.",
+    changed: true,
+    reason: "The verified correction changes the current picture.",
+    source: "summary_reader",
+    usage: null,
+  });
+  ev("wave.summaryReviewed", { waveId: "W001" });
   ev("resolution.recorded", { waveId: "W001", path: "artifacts/resolutions/W001.md" });
   ev("capsule.updated", { role: "solver", waveId: "W001", path: "memory/capsules/solver.md" });
   ev("digest.updated", {});

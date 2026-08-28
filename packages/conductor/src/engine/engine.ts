@@ -12,6 +12,10 @@ import {
   IntakeRevision,
   PublicationOutput,
   ProjectSettings,
+  SummaryRevisionOutput,
+  TrajectoryOutput,
+  Usage as UsageSchema,
+  VerificationOutput,
   applyEvent,
   candidateId as makeCandidateId,
   initialState,
@@ -24,6 +28,7 @@ import {
   validateActionEnvelope,
   workerOutputSchema,
   type CardStatus,
+  type ClaimState,
   type Event,
   type IdKind,
   type IntakeMemory,
@@ -38,6 +43,7 @@ import {
   type TaskState,
   type Usage,
   type WorkerRole,
+  type TrajectoryOutput as TrajectoryOutputT,
   repairLegacyArtifactControls,
   usageSpend,
 } from "@inventio/schema";
@@ -89,6 +95,20 @@ import {
   revisionPacketFiles,
   REVISION_PROMPT,
 } from "../prompts/researchManager.js";
+import {
+  SUMMARY_REVIEW_PROMPT,
+  TRAJECTORY_FINAL_PROMPT,
+  TRAJECTORY_INTAKE_PROMPT,
+  TRAJECTORY_RESTART_PROMPT,
+  TRAJECTORY_WORKER_PROMPT,
+  VERIFICATION_PROMPT,
+  latestMathematicalView,
+  summaryReviewFiles,
+  trajectoryFinalFiles,
+  trajectoryIntakeFiles,
+  trajectoryWorkerFiles,
+  verificationFiles,
+} from "../prompts/trajectories.js";
 import {
   curationRetryNote,
   focusedFollowUpPrompt,
@@ -165,6 +185,7 @@ function validateTaskDispositions(out: CurationResult, outcomes: TaskOutcome[]):
       violations.push(`${item.taskId} must set the internal unblock field to null for ${item.disposition}`);
     }
   }
+
   for (const taskId of expected) {
     if (!seen.has(taskId)) violations.push(`taskDispositions is missing ${taskId}`);
   }
@@ -387,12 +408,15 @@ export class ProjectEngine extends EventEmitter {
   private wakeWaiters: (() => void)[] = [];
   private killHandles = new Map<string, (reason: InterruptReason) => void>();
   private taskOutputs = new Map<string, AnyWorkerOutput>();
+  private trajectoryOutputs = new Map<string, TrajectoryOutputT>();
   private lastProgressAt = new Map<string, number>();
   private intakeRefreshInFlight = false;
   private interruptedIntakeChecked = false;
   private interruptedPublicationChecked = false;
   private legacyComputationsChecked = false;
   private publicationPromise: Promise<void> | null = null;
+  /** In-flight v2 verification calls; durable queued/completed state lives in events. */
+  private verificationPromises = new Map<string, Promise<void>>();
 
   private constructor(slug: string, deps: EngineDeps, log: EventLog, state: ProjectState) {
     super();
@@ -511,6 +535,9 @@ export class ProjectEngine extends EventEmitter {
     await Promise.all([
       this.loopPromise?.catch(() => undefined),
       this.publicationPromise?.catch(() => undefined),
+      ...[...this.verificationPromises.values()].map((promise) =>
+        promise.catch(() => undefined),
+      ),
     ]);
     this.log.close();
   }
@@ -610,7 +637,7 @@ export class ProjectEngine extends EventEmitter {
         error:
           publication.status === "compiling"
             ? "PDF compilation was interrupted when the server stopped; the accepted TeX can be compiled again."
-            : "The Research Manager's publication pass was interrupted when the server stopped; retry to draft it again.",
+            : "The final mathematical reading was interrupted when the server stopped; retry to draft it again.",
       });
     }
   }
@@ -636,6 +663,10 @@ export class ProjectEngine extends EventEmitter {
     if (!this.legacyComputationsChecked) {
       this.legacyComputationsChecked = true;
       this.repairLegacyComputationBaselines();
+    }
+    if (this.state.config.workflow === "trajectories-v2") {
+      await this.trajectoryLoop();
+      return;
     }
     while (!this.stopped) {
       if (this.state.terminal) return;
@@ -677,6 +708,1120 @@ export class ProjectEngine extends EventEmitter {
       await this.decisionPoint();
     }
   }
+
+  // ---------------------------------------------------- trajectories-v2 loop
+
+  /**
+   * Single-controller execution: code fixes the number of independent long
+   * trajectories, while no model sits between the problem and those workers.
+   */
+  private async trajectoryLoop(): Promise<void> {
+    while (!this.stopped) {
+      if (this.state.terminal) return;
+      if (this.blocked()) {
+        await this.wake();
+        continue;
+      }
+
+      const phase = this.state.phase;
+      if (phase === "CREATED" || phase === "INTAKE") {
+        await this.runIntake();
+        continue;
+      }
+      if (phase === "AWAITING_CONFIRMATION") {
+        if (this.state.problem.confirmedMarkdown !== null) {
+          this.phaseTo("DISCOVERY", "recovered confirmed problem");
+          continue;
+        }
+        await this.wake();
+        continue;
+      }
+
+      this.repairTrajectoryInvariants();
+      this.launchPendingVerifications();
+
+      const openWave = this.openWaveId();
+      if (openWave) {
+        await this.runTrajectoryWave(openWave);
+        continue;
+      }
+
+      const needsSummary = this.state.waveOrder.find((waveId) => {
+        const wave = this.state.waves[waveId]!;
+        return wave.status === "closed" && !wave.summaryReviewed;
+      });
+      if (needsSummary) {
+        await this.reviewTrajectorySummary(needsSummary);
+        continue;
+      }
+
+      const decisive = this.trajectoryDecisiveResult();
+      if (decisive !== null) {
+        await this.drainVerifications();
+        const confirmed = this.trajectoryDecisiveResult();
+        if (confirmed !== null) {
+          await this.finalizeTrajectory(
+            confirmed,
+            `an independently verified result ${confirmed === "PROVED" ? "proves" : "disproves"} the stated problem`,
+          );
+          continue;
+        }
+      }
+
+      if (this.state.waveOrder.length >= this.state.config.limits.maxWaves) {
+        await this.drainVerifications();
+        const result = this.trajectoryDecisiveResult() ?? "UNCERTAIN";
+        await this.finalizeTrajectory(
+          result,
+          result === "UNCERTAIN"
+            ? `completed ${this.state.waveOrder.length} research rounds without a verified proof or disproof of the whole problem`
+            : `independent verification established a ${result.toLowerCase()} result`,
+        );
+        continue;
+      }
+
+      if (!this.planTrajectoryWave()) {
+        await this.drainVerifications();
+        await this.finalizeTrajectory(
+          this.trajectoryDecisiveResult() ?? "UNCERTAIN",
+          "the remaining token allowance is too small for another long research round",
+        );
+      }
+    }
+  }
+
+  /**
+   * Guidance accepted for one particular round. Directives are consumed as
+   * soon as the round is planned, so packet construction must follow the
+   * decision that consumed them rather than looking only for pending entries.
+   * A continuation note belongs to the first round planned after that note.
+   */
+  private trajectoryOwnerGuidance(waveId: string): string {
+    const parts: string[] = [];
+    const wave = this.state.waves[waveId];
+    if (!wave) return "";
+    for (const id of this.state.directiveOrder) {
+      const directive = this.state.directives[id]!;
+      if (directive.consumedByDecision === wave.decisionId) parts.push(directive.text);
+    }
+    const continuation = this.state.continuations.at(-1);
+    const waveIndex = this.state.waveOrder.indexOf(waveId);
+    const previousPlannedAt =
+      waveIndex > 0
+        ? this.state.waves[this.state.waveOrder[waveIndex - 1]!]!.plannedAtSeq
+        : 0;
+    if (
+      continuation &&
+      continuation.atSeq > previousPlannedAt &&
+      continuation.atSeq < wave.plannedAtSeq
+    ) {
+      parts.push(continuation.note);
+    }
+    return parts.join("\n\n");
+  }
+
+  /** Deterministically create N Solver and M Explorer trajectories. */
+  private planTrajectoryWave(): boolean {
+    const settings = this.state.config.trajectory;
+    const count = settings.solversPerWave + settings.explorersPerWave;
+    if (count < 1) return false;
+    const availableForResearch = Math.floor(
+      this.remainingBudget() * (1 - this.state.config.budget.reserveFraction),
+    );
+    const tokenBudget = Math.min(
+      this.state.config.budget.defaultTaskTokens,
+      Math.floor(availableForResearch / count),
+    );
+    if (tokenBudget < 60_000) return false;
+
+    const waveId = this.allocId("wave");
+    const decisionId = this.allocId("decision");
+    const roster: RosterEntry[] = [];
+    const add = (role: "solver" | "explorer", ordinal: number): void => {
+      const taskId = this.allocId("task");
+      roster.push({
+        taskId,
+        role,
+        methodTag: `${role}-trajectory-${ordinal}`,
+        direction:
+          role === "solver"
+            ? `Independent sustained attack on the original problem (${ordinal})`
+            : `Independent sustained exploration around the original problem (${ordinal})`,
+        briefMarkdown:
+          role === "solver"
+            ? "Develop the strongest rigorous attack you can on the original problem, choosing and revising your own strategy."
+            : "Explore mathematically useful nearby results, special cases, examples, computations, obstructions, or methods, following the most informative route you find.",
+        tokenBudget,
+        computation: true,
+        webSearch: this.state.config.allowWebSearch,
+        reviewOf: null,
+        grants: { artifactIds: [], cardIds: [], sourceMounts: [] },
+      });
+    };
+    for (let i = 1; i <= settings.solversPerWave; i += 1) add("solver", i);
+    for (let i = 1; i <= settings.explorersPerWave; i += 1) add("explorer", i);
+
+    this.emitEvent({ type: "decision.requested", decisionId, kind: "next_move", waveId: null });
+    const action = {
+      workflow: "trajectories-v2",
+      round: waveId,
+      solvers: settings.solversPerWave,
+      explorers: settings.explorersPerWave,
+    };
+    this.emitEvent({ type: "decision.proposed", decisionId, action, usage: null });
+    this.emitEvent({ type: "decision.accepted", decisionId, action });
+    this.emitEvent({
+      type: "wave.planned",
+      waveId,
+      title: `Research round ${this.state.waveOrder.length + 1}`,
+      decisionId,
+      roster,
+      reserveTokens: Math.max(0, this.remainingBudget() - tokenBudget * count),
+      rationale: "The configured independent Solver and Explorer trajectories begin from the shared current mathematical view.",
+    });
+    for (const id of this.state.directiveOrder) {
+      if (this.state.directives[id]!.status === "pending") {
+        this.emitEvent({ type: "directive.consumed", id, decisionId });
+      }
+    }
+    return true;
+  }
+
+  private readTrajectoryOutput(taskId: string): TrajectoryOutputT | null {
+    const cached = this.trajectoryOutputs.get(taskId);
+    if (cached) return cached;
+    const file = path.join(this.paths.tasksDir, taskId, "output.json");
+    if (!existsSync(file)) return null;
+    try {
+      const parsed = TrajectoryOutput.safeParse(JSON.parse(readFileSync(file, "utf8")));
+      if (!parsed.success) return null;
+      this.trajectoryOutputs.set(taskId, parsed.data);
+      return parsed.data;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Recover usage written immediately before a valid trajectory output. */
+  private readTrajectoryMetaUsage(taskId: string): Usage {
+    const file = path.join(this.paths.tasksDir, taskId, "meta.json");
+    if (!existsSync(file)) return ZERO_USAGE;
+    try {
+      const value = JSON.parse(readFileSync(file, "utf8")) as { usage?: unknown };
+      const parsed = UsageSchema.safeParse(value.usage);
+      return parsed.success ? parsed.data : ZERO_USAGE;
+    } catch {
+      return ZERO_USAGE;
+    }
+  }
+
+  private async runTrajectoryWave(waveId: string): Promise<void> {
+    const wave = this.state.waves[waveId]!;
+    const jobs = wave.roster.map((entry) =>
+      this.deps.pool.run(() => this.executeTrajectoryTask(waveId, entry)),
+    );
+    await Promise.all(jobs);
+    if (this.stopped || this.state.waves[waveId]!.status === "closed") return;
+    const lines = [`# Research round ${waveId}`, ""];
+    for (const entry of wave.roster) {
+      const task = this.state.tasks[entry.taskId]!;
+      const output = this.readTrajectoryOutput(entry.taskId);
+      lines.push(
+        `## ${entry.taskId} — ${entry.role} (${task.status})`,
+        "",
+        output?.summaryMarkdown ?? task.error ?? task.interruptReason ?? "No mathematical return was completed.",
+        "",
+      );
+    }
+    this.emitEvent({ type: "wave.closed", waveId, docketMarkdown: lines.join("\n") });
+    this.launchPendingVerifications();
+  }
+
+  private async executeTrajectoryTask(waveId: string, entry: RosterEntry): Promise<void> {
+    if (this.stopped || (entry.role !== "solver" && entry.role !== "explorer")) return;
+    const task = this.state.tasks[entry.taskId]!;
+    if (task.status === "completed") {
+      const output = this.readTrajectoryOutput(task.id);
+      if (output) this.materializeTrajectoryReturn(waveId, entry, output);
+      return;
+    }
+    if (task.status === "failed" || task.status === "interrupted") return;
+
+    // output.json is written before task.completed. If the server stopped in
+    // that narrow interval, the validated mathematical return is already the
+    // durable source of truth and must not be recomputed by resuming the model.
+    const recoveredOutput = this.readTrajectoryOutput(task.id);
+    if (recoveredOutput) {
+      this.emitEvent({
+        type: "task.completed",
+        taskId: task.id,
+        usage: this.readTrajectoryMetaUsage(task.id),
+      });
+      this.materializeTrajectoryReturn(waveId, entry, recoveredOutput);
+      return;
+    }
+
+    const wave = this.state.waves[waveId]!;
+    const resuming = task.status === "running";
+    if (resuming && task.threadId === null) {
+      this.emitEvent({
+        type: "task.interrupted",
+        taskId: task.id,
+        reason: "conductor-restart",
+        usage: null,
+      });
+      return;
+    }
+    if (!resuming && wave.status === "softInterrupted") {
+      this.emitEvent({
+        type: "task.interrupted",
+        taskId: task.id,
+        reason: "round-soft-interrupt",
+        usage: null,
+      });
+      return;
+    }
+
+    const taskDir = path.join(this.paths.tasksDir, task.id);
+    const packetDir = path.join(taskDir, "packet");
+    let manifest = task.packetManifest;
+    if (!resuming) {
+      try {
+        mkdirSync(packetDir, { recursive: true });
+        mkdirSync(path.join(packetDir, "scratch"), { recursive: true });
+        const sameRole = wave.roster.filter((candidate) => candidate.role === entry.role);
+        const ordinal = sameRole.findIndex((candidate) => candidate.taskId === entry.taskId) + 1;
+        const files = trajectoryWorkerFiles(
+          this.state,
+          waveId,
+          entry.taskId,
+          entry.role,
+          ordinal,
+          this.trajectoryOwnerGuidance(waveId),
+          this.deps.memory !== null,
+        );
+        for (const [name, content] of Object.entries(files)) {
+          writeFileAtomic(path.join(packetDir, name), content);
+        }
+        manifest = [...Object.keys(files), "scratch/"].sort();
+        this.emitEvent({
+          type: "task.dispatched",
+          taskId: entry.taskId,
+          waveId,
+          role: entry.role,
+          methodTag: entry.methodTag,
+          direction: entry.direction,
+          packetManifest: manifest,
+          budgetTokens: entry.tokenBudget,
+        });
+      } catch (error) {
+        this.emitEvent({
+          type: "task.failed",
+          taskId: entry.taskId,
+          error: `research context could not be prepared: ${String(error)}`,
+        });
+        return;
+      }
+    }
+
+    const token = this.deps.memory?.mintToken({
+      slug: this.slug,
+      taskId: entry.taskId,
+      role: entry.role,
+      waveId,
+    });
+    const model = effectiveWorkerModel(this.state.config, entry.role);
+    const packetSize = manifest.reduce((total, relative) => {
+      try {
+        return total + statSync(path.join(packetDir, relative)).size;
+      } catch {
+        return total;
+      }
+    }, 0);
+
+    try {
+      const result = await runStructured(
+        {
+          bin: this.deps.codexBin,
+          cwd: packetDir,
+          prompt: resuming ? TRAJECTORY_RESTART_PROMPT : TRAJECTORY_WORKER_PROMPT,
+          sandbox: "workspace-write",
+          webSearch: this.state.config.allowWebSearch,
+          // Do not inherit the repository's legacy council AGENTS.md. The
+          // trajectory reads its deliberately composed packet/AGENTS.md and
+          // retains shell, scratch-space, memory, and Web-search access.
+          isolatedTask: true,
+          eventsArchiveFile: path.join(taskDir, "codex-events.jsonl"),
+          model: model.model,
+          effort: model.effort,
+          outputSchemaFile: path.join(taskDir, "output-schema.json"),
+          outputLastMessageFile: path.join(taskDir, "last-message.json"),
+          ...(resuming ? { resumeThreadId: task.threadId! } : {}),
+          ...(this.deps.memory && token
+            ? {
+                mcp: {
+                  serverName: "memory",
+                  url: this.deps.memory.url,
+                  tokenEnvVar: "INVENTIO_TASK_TOKEN",
+                  token,
+                },
+              }
+            : {}),
+          maxEstimatedTokens: () => this.state.tasks[entry.taskId]!.budgetTokens * 1.1,
+          baseEstimatedTokens: CODEX_TURN_BASE_TOKENS + Math.ceil(packetSize / 4),
+          wallClockMs:
+            this.deps.taskWallClockMsOverride ??
+            this.state.config.budget.taskWallClockMinutes * 60_000,
+          killGraceMs: this.deps.killGraceMs ?? 10_000,
+          onThread: (threadId) => {
+            if (this.state.tasks[entry.taskId]!.threadId !== threadId) {
+              this.emitEvent({ type: "task.session", taskId: entry.taskId, threadId });
+            }
+          },
+          registerKill: (kill) => this.killHandles.set(entry.taskId, kill),
+          onProgress: ({ estimatedTokens, lastItem }) => {
+            const now = Date.now();
+            const last = this.lastProgressAt.get(entry.taskId) ?? 0;
+            if (now - last >= (this.deps.progressThrottleMs ?? 2_000)) {
+              this.lastProgressAt.set(entry.taskId, now);
+              this.emitEvent({
+                type: "task.progress",
+                taskId: entry.taskId,
+                estimatedTokens,
+                lastItem,
+              });
+            }
+          },
+        },
+        TrajectoryOutput,
+        {
+          onInvalidOutput: (errors) =>
+            this.emitEvent({ type: "task.outputInvalid", taskId: entry.taskId, errors }),
+        },
+      );
+
+      writeFileAtomic(
+        path.join(taskDir, "meta.json"),
+        JSON.stringify(
+          {
+            workflow: "trajectories-v2",
+            threadId: result.threadId,
+            status: result.status,
+            model: model.model,
+            effort: model.effort,
+            usage: result.usage,
+            finishedAt: new Date().toISOString(),
+          },
+          null,
+          2,
+        ),
+      );
+
+      if (result.status === "completed" && result.output) {
+        writeFileAtomic(path.join(taskDir, "output.json"), JSON.stringify(result.output, null, 2));
+        this.trajectoryOutputs.set(entry.taskId, result.output);
+        this.emitEvent({ type: "task.completed", taskId: entry.taskId, usage: result.usage });
+        this.materializeTrajectoryReturn(waveId, entry, result.output);
+      } else if (result.status === "interrupted") {
+        if (result.lastAgentMessage) {
+          writeFileAtomic(path.join(taskDir, "salvage.md"), result.lastAgentMessage);
+        }
+        this.emitEvent({
+          type: "task.interrupted",
+          taskId: entry.taskId,
+          reason: result.interruptReason ?? "interrupted",
+          usage: result.usage,
+        });
+      } else {
+        this.emitEvent({
+          type: "task.failed",
+          taskId: entry.taskId,
+          error:
+            (result.validationErrors
+              ? `output invalid after repair: ${result.validationErrors.join("; ")}`
+              : null) ??
+            result.errorDetail ??
+            "research process failed",
+        });
+      }
+    } finally {
+      this.killHandles.delete(entry.taskId);
+      if (token) this.deps.memory?.revokeToken(token);
+    }
+  }
+
+  private materializeTrajectoryReturn(
+    waveId: string,
+    entry: RosterEntry,
+    output: TrajectoryOutputT,
+  ): void {
+    let artifact = Object.values(this.state.artifacts).find(
+      (candidate) => candidate.taskId === entry.taskId && candidate.kind === "writeup",
+    );
+    if (!artifact) {
+      const artifactId = this.allocId(entry.role === "explorer" ? "exploration" : "attempt");
+      const relPath = path.join("writeups", `${artifactId}.md`);
+      writeFileAtomic(path.join(this.paths.dir, relPath), output.writeupMarkdown.trim() + "\n");
+      this.emitEvent({
+        type: "artifact.recorded",
+        artifactId,
+        kind: "writeup",
+        taskId: entry.taskId,
+        path: relPath,
+        conclusion: output.conclusion,
+      });
+      artifact = this.state.artifacts[artifactId]!;
+    }
+
+    for (const [index, proposed] of output.claims.entries()) {
+      const provenance = `${artifact.id} (from ${entry.taskId}), result ${index + 1}`;
+      let claim = Object.values(this.state.claims).find(
+        (candidate) =>
+          candidate.sourceTaskId === entry.taskId && candidate.provenance === provenance,
+      );
+      if (!claim) {
+        const claimId = this.allocId("claim");
+        const relPath = path.join("claims", `${claimId}.md`);
+        const markdown = [
+          `# ${proposed.title}`,
+          "",
+          `Relation to the original problem: **${proposed.relationToGoal}**`,
+          "",
+          "## Statement",
+          "",
+          proposed.statementMarkdown.trim(),
+          "",
+          "## Alleged proof",
+          "",
+          proposed.proofMarkdown.trim(),
+          "",
+        ].join("\n");
+        writeFileAtomic(path.join(this.paths.dir, relPath), markdown);
+        this.emitEvent({
+          type: "claim.added",
+          claimId,
+          title: proposed.title.trim(),
+          statement: proposed.statementMarkdown.trim(),
+          proofMarkdown: proposed.proofMarkdown.trim(),
+          status: "UNVERIFIED",
+          provenance,
+          sourceTaskId: entry.taskId,
+          sourceWaveId: waveId,
+          path: relPath,
+          relationToGoal: proposed.relationToGoal,
+          kind: "mathematical",
+          targetFactId: null,
+          verificationPolicy: {
+            verifiersPerClaim: this.state.config.trajectory.verifiersPerClaim,
+            passesRequired: this.state.config.trajectory.passesRequired,
+          },
+          dependsOn: [],
+        });
+        claim = this.state.claims[claimId]!;
+        const normalized = normalizeClaimStatement(claim.statement);
+        for (const olderId of this.state.claimOrder) {
+          if (olderId === claim.id) continue;
+          const older = this.state.claims[olderId]!;
+          if (
+            normalizeClaimStatement(older.statement) === normalized &&
+            !older.equivalentIds.includes(claim.id)
+          ) {
+            this.emitEvent({
+              type: "claim.equivalent",
+              leftClaimId: older.id,
+              rightClaimId: claim.id,
+              reason: "The normalized mathematical statements are identical.",
+              by: "conductor",
+            });
+          }
+        }
+      }
+      this.ensureClaimVerifications(claim.id);
+    }
+    this.launchPendingVerifications();
+  }
+
+  private ensureClaimVerifications(claimId: string): void {
+    const claim = this.state.claims[claimId];
+    if (!claim || claim.status !== "UNVERIFIED") return;
+    const target =
+      claim.verificationPolicy?.verifiersPerClaim ??
+      this.state.config.trajectory.verifiersPerClaim;
+    for (let ordinal = claim.verificationIds.length + 1; ordinal <= target; ordinal += 1) {
+      this.emitEvent({
+        type: "verification.requested",
+        verificationId: this.allocId("verification"),
+        claimId,
+        ordinal,
+      });
+    }
+  }
+
+  private launchPendingVerifications(): void {
+    for (const verificationId of this.state.verificationOrder) {
+      const verification = this.state.verifications[verificationId]!;
+      if (
+        verification.status === "completed" ||
+        this.verificationPromises.has(verificationId)
+      ) {
+        continue;
+      }
+      const promise = this.deps.pool
+        .run(() => this.executeVerification(verificationId))
+        .catch((error) => {
+          if (this.stopped || this.state.verifications[verificationId]?.status === "completed") return;
+          this.emitEvent({
+            type: "verification.completed",
+            verificationId,
+            verdict: "ERROR",
+            summaryMarkdown: `The verification process failed: ${String(error).slice(0, 1_500)}`,
+            artifactPath: null,
+            usage: null,
+          });
+        })
+        .finally(() => {
+          this.verificationPromises.delete(verificationId);
+          this.wakeWaiters.splice(0).forEach((wake) => wake());
+        });
+      this.verificationPromises.set(verificationId, promise);
+    }
+  }
+
+  private async executeVerification(verificationId: string): Promise<void> {
+    const verification = this.state.verifications[verificationId];
+    if (!verification || verification.status === "completed" || this.stopped) return;
+    const claim = this.state.claims[verification.claimId];
+    if (!claim) return;
+    if (verification.status === "queued") {
+      this.emitEvent({ type: "verification.started", verificationId });
+    }
+
+    const dir = path.join(this.paths.verificationsDir, verificationId);
+    const packetDir = path.join(dir, "packet");
+    const outputFile = path.join(dir, "output.json");
+    if (existsSync(outputFile)) {
+      try {
+        const recovered = VerificationOutput.safeParse(
+          JSON.parse(readFileSync(outputFile, "utf8")),
+        );
+        if (recovered.success) {
+          const relPath = path.join("verifications", verificationId, "report.md");
+          writeFileAtomic(
+            path.join(this.paths.dir, relPath),
+            recovered.data.reportMarkdown.trim() + "\n",
+          );
+          this.emitEvent({
+            type: "verification.completed",
+            verificationId,
+            verdict: recovered.data.verdict,
+            summaryMarkdown: recovered.data.summaryMarkdown,
+            artifactPath: relPath,
+            usage: this.readVerificationMetaUsage(dir),
+          });
+          this.evaluateTrajectoryClaim(claim.id);
+          return;
+        }
+      } catch {
+        // A partial or corrupt file is not durable evidence; run the check.
+      }
+    }
+    mkdirSync(path.join(packetDir, "scratch"), { recursive: true });
+    const claimMarkdown = claim.path && existsSync(path.join(this.paths.dir, claim.path))
+      ? readFileSync(path.join(this.paths.dir, claim.path), "utf8")
+      : [
+          `# ${claim.title}`,
+          "",
+          `Relation to the original problem: **${claim.relationToGoal}**`,
+          "",
+          "## Statement",
+          "",
+          claim.statement,
+          "",
+          "## Alleged proof",
+          "",
+          claim.proofMarkdown,
+        ].join("\n");
+    const files = verificationFiles(
+      this.state.problem.confirmedMarkdown ?? this.state.statement,
+      claim.id,
+      claimMarkdown,
+    );
+    for (const [name, content] of Object.entries(files)) {
+      writeFileAtomic(path.join(packetDir, name), content);
+    }
+    const packetSize = Object.keys(files).reduce((total, name) => {
+      try {
+        return total + statSync(path.join(packetDir, name)).size;
+      } catch {
+        return total;
+      }
+    }, 0);
+    const model = this.state.config.models.verifier;
+    const killKey = `verification:${verificationId}`;
+    const result = await runStructured(
+      {
+        bin: this.deps.codexBin,
+        cwd: packetDir,
+        prompt: VERIFICATION_PROMPT,
+        sandbox: "workspace-write",
+        webSearch: this.state.config.allowWebSearch,
+        isolatedTask: true,
+        eventsArchiveFile: path.join(dir, "codex-events.jsonl"),
+        model: model.model,
+        effort: model.effort,
+        outputSchemaFile: path.join(dir, "output-schema.json"),
+        outputLastMessageFile: path.join(dir, "last-message.json"),
+        maxEstimatedTokens: Math.min(750_000, this.state.config.budget.defaultTaskTokens),
+        baseEstimatedTokens: CODEX_TURN_BASE_TOKENS + Math.ceil(packetSize / 4),
+        wallClockMs: this.deps.taskWallClockMsOverride ?? 60 * 60_000,
+        killGraceMs: this.deps.killGraceMs ?? 10_000,
+        registerKill: (kill) => this.killHandles.set(killKey, kill),
+      },
+      VerificationOutput,
+    ).finally(() => this.killHandles.delete(killKey));
+    if (this.stopped || this.state.verifications[verificationId]?.status === "completed") return;
+
+    if (result.status === "completed" && result.output) {
+      const relPath = path.join("verifications", verificationId, "report.md");
+      writeFileAtomic(path.join(this.paths.dir, relPath), result.output.reportMarkdown.trim() + "\n");
+      writeFileAtomic(
+        path.join(dir, "meta.json"),
+        JSON.stringify(
+          {
+            workflow: "trajectories-v2",
+            status: result.status,
+            model: model.model,
+            effort: model.effort,
+            usage: result.usage,
+            finishedAt: new Date().toISOString(),
+          },
+          null,
+          2,
+        ),
+      );
+      writeFileAtomic(
+        outputFile,
+        JSON.stringify(result.output, null, 2),
+      );
+      this.emitEvent({
+        type: "verification.completed",
+        verificationId,
+        verdict: result.output.verdict,
+        summaryMarkdown: result.output.summaryMarkdown,
+        artifactPath: relPath,
+        usage: result.usage,
+      });
+    } else {
+      this.emitEvent({
+        type: "verification.completed",
+        verificationId,
+        verdict: "ERROR",
+        summaryMarkdown:
+          result.errorDetail ??
+          result.validationErrors?.join("; ") ??
+          result.interruptReason ??
+          "The verification process did not return a verdict.",
+        artifactPath: null,
+        usage: result.usage,
+      });
+    }
+    this.evaluateTrajectoryClaim(claim.id);
+  }
+
+  private readVerificationMetaUsage(dir: string): Usage {
+    const file = path.join(dir, "meta.json");
+    if (!existsSync(file)) return ZERO_USAGE;
+    try {
+      const value = JSON.parse(readFileSync(file, "utf8")) as { usage?: unknown };
+      const parsed = UsageSchema.safeParse(value.usage);
+      return parsed.success ? parsed.data : ZERO_USAGE;
+    } catch {
+      return ZERO_USAGE;
+    }
+  }
+
+  private evaluateTrajectoryClaim(claimId: string): void {
+    const claim = this.state.claims[claimId];
+    if (!claim || claim.status !== "UNVERIFIED") return;
+    const results = claim.verificationIds
+      .map((id) => this.state.verifications[id]!)
+      .filter((verification) => verification.status === "completed");
+    const passes = results.filter((verification) => verification.verdict === "PASS").length;
+    const failures = results.filter((verification) => verification.verdict === "FAIL").length;
+    const errors = results.filter((verification) => verification.verdict === "ERROR").length;
+    const { passesRequired, verifiersPerClaim } =
+      claim.verificationPolicy ?? this.state.config.trajectory;
+    if (passes >= passesRequired) {
+      this.promoteTrajectoryClaim(claim.id);
+      return;
+    }
+    const remainingChecks = Math.max(0, verifiersPerClaim - results.length);
+    if (passes + remainingChecks < passesRequired) {
+      const detail = [
+        `${passes} PASS`,
+        `${failures} FAIL`,
+        ...(errors > 0 ? [`${errors} process error${errors === 1 ? "" : "s"}`] : []),
+      ].join(", ");
+      this.emitEvent({
+        type: "claim.status",
+        claimId: claim.id,
+        from: "UNVERIFIED",
+        to: "REFUTED",
+        justification: `received ${detail}; ${passesRequired} passes out of ${verifiersPerClaim} checks are no longer possible`,
+        by: "conductor",
+      });
+      if (claim.kind === "correction" && claim.targetFactId) {
+        this.emitEvent({
+          type: "fact.suspicionCleared",
+          factId: claim.targetFactId,
+          correctionClaimId: claim.id,
+          reason: "The proposed correction did not pass independent verification.",
+        });
+      }
+    }
+  }
+
+  /**
+   * Complete the second half of any multi-event mathematical transition that
+   * was interrupted by a process crash. Files are written before their event,
+   * and event IDs are allocated from replayed counters, so every repair is
+   * idempotent across repeated restarts.
+   */
+  private repairTrajectoryInvariants(): void {
+    for (const claimId of this.state.claimOrder) {
+      const claim = this.state.claims[claimId]!;
+      if (claim.status === "VERIFIED") {
+        let factId = claim.promotedFactId;
+        if (!factId || !this.state.facts[factId]) {
+          const existing = this.equivalentClaimComponent(claim.id)
+            .map((id) => this.state.claims[id]?.promotedFactId)
+            .find((id): id is string => Boolean(id && this.state.facts[id]));
+          factId = existing ?? this.recordTrajectoryFact(claim);
+        }
+        if (
+          claim.kind === "correction" &&
+          claim.targetFactId &&
+          (this.state.facts[claim.targetFactId]?.status === "ACTIVE" ||
+            this.state.facts[claim.targetFactId]?.status === "SUSPICIOUS")
+        ) {
+          this.emitEvent({
+            type: "fact.retracted",
+            factId: claim.targetFactId,
+            correctionClaimId: claim.id,
+            reason: "The concrete correction passed independent verification.",
+          });
+        }
+        for (const siblingId of this.equivalentClaimComponent(claim.id)) {
+          if (siblingId === claim.id) continue;
+          const sibling = this.state.claims[siblingId]!;
+          if (sibling.status !== "UNVERIFIED") continue;
+          this.emitEvent({
+            type: "claim.status",
+            claimId: sibling.id,
+            from: "UNVERIFIED",
+            to: "SUPERSEDED",
+            justification: `the identical statement was established as ${factId}; its distinct proof remains in ${sibling.path ?? sibling.provenance}`,
+            by: "conductor",
+          });
+        }
+      } else if (
+        claim.status === "REFUTED" &&
+        claim.kind === "correction" &&
+        claim.targetFactId &&
+        this.state.facts[claim.targetFactId]?.status === "SUSPICIOUS"
+      ) {
+        this.emitEvent({
+          type: "fact.suspicionCleared",
+          factId: claim.targetFactId,
+          correctionClaimId: claim.id,
+          reason: "The proposed correction did not pass independent verification.",
+        });
+      }
+    }
+  }
+
+  private equivalentClaimComponent(claimId: string): string[] {
+    const seen = new Set<string>();
+    const pending = [claimId];
+    while (pending.length > 0) {
+      const next = pending.pop()!;
+      if (seen.has(next) || !this.state.claims[next]) continue;
+      seen.add(next);
+      pending.push(...this.state.claims[next]!.equivalentIds);
+    }
+    return [...seen];
+  }
+
+  private recordTrajectoryFact(claim: ClaimState): string {
+    const factId = this.allocId("fact");
+    const relPath = path.join("facts", `${factId}.md`);
+    writeFileAtomic(
+      path.join(this.paths.dir, relPath),
+      [
+        `# ${claim.title}`,
+        "",
+        "## Statement",
+        "",
+        claim.statement,
+        "",
+        "## Proof",
+        "",
+        claim.proofMarkdown,
+        "",
+      ].join("\n"),
+    );
+    this.emitEvent({ type: "fact.recorded", factId, claimId: claim.id, path: relPath });
+    return factId;
+  }
+
+  private promoteTrajectoryClaim(claimId: string): void {
+    const claim = this.state.claims[claimId];
+    if (!claim || claim.status !== "UNVERIFIED") return;
+    const component = this.equivalentClaimComponent(claimId);
+    const existingFact = component
+      .map((id) => this.state.claims[id]?.promotedFactId)
+      .find((id): id is string =>
+        Boolean(
+          id &&
+            (this.state.facts[id]?.status === "ACTIVE" ||
+              this.state.facts[id]?.status === "SUSPICIOUS"),
+        ),
+      );
+
+    this.emitEvent({
+      type: "claim.status",
+      claimId: claim.id,
+      from: "UNVERIFIED",
+      to: "VERIFIED",
+      justification: `received at least ${
+        claim.verificationPolicy?.passesRequired ?? this.state.config.trajectory.passesRequired
+      } independent PASS verdicts`,
+      by: "conductor",
+    });
+
+    let factId = existingFact;
+    if (!factId) {
+      factId = this.recordTrajectoryFact(claim);
+    }
+
+    if (claim.kind === "correction" && claim.targetFactId) {
+      this.emitEvent({
+        type: "fact.retracted",
+        factId: claim.targetFactId,
+        correctionClaimId: claim.id,
+        reason: "The concrete correction passed independent verification.",
+      });
+    }
+
+    for (const siblingId of component) {
+      if (siblingId === claim.id) continue;
+      const sibling = this.state.claims[siblingId]!;
+      if (sibling.status !== "UNVERIFIED") continue;
+      this.emitEvent({
+        type: "claim.status",
+        claimId: sibling.id,
+        from: "UNVERIFIED",
+        to: "SUPERSEDED",
+        justification: `the identical statement was established as ${factId}; its distinct proof remains in ${sibling.path ?? sibling.provenance}`,
+        by: "conductor",
+      });
+    }
+  }
+
+  private async drainVerifications(): Promise<void> {
+    for (const claimId of this.state.claimOrder) this.ensureClaimVerifications(claimId);
+    while (!this.stopped) {
+      this.launchPendingVerifications();
+      const active = [...this.verificationPromises.values()];
+      if (active.length === 0) return;
+      await Promise.allSettled(active);
+      for (const claimId of this.state.claimOrder) this.evaluateTrajectoryClaim(claimId);
+    }
+  }
+
+  private trajectoryDecisiveResult(): "PROVED" | "DISPROVED" | null {
+    let proves = false;
+    let disproves = false;
+    for (const factId of this.state.factOrder) {
+      const fact = this.state.facts[factId]!;
+      if (fact.status !== "ACTIVE") continue;
+      const relation = this.state.claims[fact.claimId]?.relationToGoal;
+      if (relation === "PROVES") proves = true;
+      if (relation === "DISPROVES") disproves = true;
+    }
+    if (proves === disproves) return null;
+    return proves ? "PROVED" : "DISPROVED";
+  }
+
+  private async reviewTrajectorySummary(waveId: string): Promise<void> {
+    const wave = this.state.waves[waveId]!;
+    if (wave.summaryReviewed) return;
+    const current = latestMathematicalView(this.state);
+    const decisionId = this.allocId("decision");
+    this.emitEvent({ type: "decision.requested", decisionId, kind: "curation", waveId });
+    const call = await this.runResearchManagerCall(
+      decisionId,
+      summaryReviewFiles(
+        this.state,
+        waveId,
+        wave.docketMarkdown ?? "No research summary was recovered.",
+      ),
+      SUMMARY_REVIEW_PROMPT,
+      SummaryRevisionOutput,
+      {
+        model: this.state.config.models.summaryReader,
+        isolatedTask: true,
+        memoryAccess: false,
+        webSearch: false,
+      },
+    );
+    if (this.stopped) return;
+    this.emitEvent({
+      type: "decision.proposed",
+      decisionId,
+      action: call.output,
+      usage: call.usage,
+    });
+
+    let markdown = current.markdown;
+    let abstract = current.abstract;
+    let changed = false;
+    let reason = call.error ?? "The summary reader returned no revision; the preceding view is retained.";
+    let source: "summary_reader" | "fallback" = "fallback";
+    if (call.output) {
+      const validRevision =
+        !call.output.changed ||
+        (call.output.markdown.length <= 16_000 &&
+          abstractSentenceCount(call.output.abstract) <= 4);
+      if (validRevision) {
+        this.emitEvent({ type: "decision.accepted", decisionId, action: call.output });
+        source = "summary_reader";
+        changed = call.output.changed;
+        reason = call.output.reason || (changed ? "The mathematical picture changed." : "No material change.");
+        if (changed) {
+          markdown = call.output.markdown;
+          abstract = call.output.abstract;
+        }
+        for (const group of call.output.equivalentClaimGroups) {
+          const ids = [...new Set(group)].filter((id) => this.state.claims[id] !== undefined);
+          for (let i = 0; i < ids.length; i += 1) {
+            for (let j = i + 1; j < ids.length; j += 1) {
+              const left = this.state.claims[ids[i]!]!;
+              const right = this.state.claims[ids[j]!]!;
+              if (left.equivalentIds.includes(right.id)) continue;
+              this.emitEvent({
+                type: "claim.equivalent",
+                leftClaimId: left.id,
+                rightClaimId: right.id,
+                reason: `The end-of-round mathematical reading identified the statements as identical (${waveId}).`,
+                by: "summary_reader",
+              });
+            }
+          }
+        }
+      } else {
+        reason =
+          "The proposed edit exceeded the concise W000 limits, so the preceding mathematical view was retained.";
+        this.emitEvent({ type: "decision.rejected", decisionId, violations: [reason] });
+      }
+    } else {
+      this.emitEvent({
+        type: "decision.rejected",
+        decisionId,
+        violations: [call.error ?? "summary review failed"],
+      });
+    }
+
+    this.recordMathematicalView(
+      waveId,
+      markdown,
+      abstract,
+      source,
+      changed,
+      reason,
+      null,
+    );
+    this.emitEvent({ type: "wave.summaryReviewed", waveId });
+    for (const claimId of this.state.claimOrder) this.evaluateTrajectoryClaim(claimId);
+  }
+
+  private async finalizeTrajectory(result: Result, reason: string): Promise<void> {
+    if (this.state.terminal) return;
+    let body: string | null = null;
+    if (this.remainingBudget() > 0) {
+      const decisionId = this.allocId("decision");
+      this.emitEvent({ type: "decision.requested", decisionId, kind: "final", waveId: null });
+      const call = await this.runResearchManagerCall(
+        decisionId,
+        trajectoryFinalFiles(this.state, result, reason),
+        TRAJECTORY_FINAL_PROMPT,
+        FinalOutput,
+        {
+          model: this.state.config.models.summaryReader,
+          isolatedTask: true,
+          memoryAccess: false,
+          webSearch: false,
+        },
+      );
+      this.emitEvent({
+        type: "decision.proposed",
+        decisionId,
+        action: call.output,
+        usage: call.usage,
+      });
+      if (call.output) {
+        this.emitEvent({ type: "decision.accepted", decisionId, action: call.output });
+        body = call.output.finalMarkdown;
+      } else {
+        this.emitEvent({
+          type: "decision.rejected",
+          decisionId,
+          violations: [call.error ?? "final report call failed"],
+        });
+      }
+    }
+    if (body === null) {
+      const facts = this.state.factOrder
+        .map((id) => this.state.facts[id]!)
+        .filter((fact) => fact.status === "ACTIVE")
+        .map((fact) => `## ${fact.title || fact.id}\n\n${fact.statement}\n\n### Proof\n\n${fact.proofMarkdown}`)
+        .join("\n\n");
+      const unsettled = this.state.factOrder
+        .map((id) => this.state.facts[id]!)
+        .filter((fact) => fact.status === "SUSPICIOUS")
+        .map((fact) => `- ${fact.title || fact.id}: a concrete correction is still unresolved`)
+        .join("\n");
+      body = [
+        "# Research report",
+        "",
+        `Research stopped because ${reason}.`,
+        "",
+        facts || "No new claim completed the configured independent verification process.",
+        ...(unsettled ? ["", "## Results with unresolved challenges", "", unsettled] : []),
+      ].join("\n");
+    }
+    body = body.replace(/^RESULT:.*\n+/i, "");
+    const reportNumber = this.state.terminalHistory.length + 1;
+    const firstReport = reportNumber === 1 && this.state.artifacts["final"] === undefined;
+    const artifactId = firstReport ? "final" : `final-${reportNumber}`;
+    const relPath = firstReport
+      ? path.join("artifacts", "final.md")
+      : path.join("artifacts", "finals", `${artifactId}.md`);
+    writeFileAtomic(path.join(this.paths.dir, relPath), `RESULT: ${result}\n\n${body}`);
+    this.emitEvent({
+      type: "artifact.recorded",
+      artifactId,
+      kind: "final",
+      taskId: null,
+      path: relPath,
+      conclusion: result,
+    });
+    this.phaseTo("TERMINAL", reason);
+    this.emitEvent({ type: "terminal.reached", result, finalPath: relPath });
+  }
+
+
+
 
   // ----------------------------------------------- Research Manager process
 
@@ -758,6 +1903,10 @@ export class ProjectEngine extends EventEmitter {
       if (token) this.deps.memory?.revokeToken(token);
     }
     const usage = result.usage;
+    const processLabel =
+      this.state.config.workflow === "trajectories-v2"
+        ? "mathematical reader"
+        : "Research Manager";
     if (result.status === "completed" && result.output !== null) {
       return {
         output: result.output,
@@ -770,10 +1919,10 @@ export class ProjectEngine extends EventEmitter {
     const interruption =
       result.status === "interrupted"
         ? result.interruptReason === "timeout"
-          ? "Research Manager timed out"
+          ? `${processLabel} timed out`
           : result.interruptReason === "killed"
-            ? "Research Manager was stopped"
-            : `Research Manager interrupted${result.interruptReason ? ` (${result.interruptReason})` : ""}`
+            ? `${processLabel} was stopped`
+            : `${processLabel} interrupted${result.interruptReason ? ` (${result.interruptReason})` : ""}`
         : null;
     return {
       output: null,
@@ -781,8 +1930,8 @@ export class ProjectEngine extends EventEmitter {
       error:
         result.errorDetail ??
         (result.validationErrors
-          ? `invalid Research Manager output: ${result.validationErrors.join("; ")}`
-          : interruption ?? `Research Manager ${result.status}`),
+          ? `invalid ${processLabel} output: ${result.validationErrors.join("; ")}`
+          : interruption ?? `${processLabel} ${result.status}`),
       status: result.status,
       interruptReason: result.interruptReason,
     };
@@ -943,16 +2092,26 @@ export class ProjectEngine extends EventEmitter {
     this.emitEvent({ type: "intake.sourcesUpdated", sources: indexedSources });
     const decisionId = this.allocId("decision");
     this.emitEvent({ type: "decision.requested", decisionId, kind: "intake", waveId: null });
+    const trajectoryWorkflow = this.state.config.workflow === "trajectories-v2";
     const call = await this.runResearchManagerCall(
       decisionId,
-      intakePacketFiles(this.state.statement, this.state.contextMarkdown),
-      intakePrompt(false),
+      trajectoryWorkflow
+        ? trajectoryIntakeFiles(this.state.statement, this.state.contextMarkdown)
+        : intakePacketFiles(this.state.statement, this.state.contextMarkdown),
+      trajectoryWorkflow
+        ? TRAJECTORY_INTAKE_PROMPT
+        : intakePrompt(false),
       IntakeOutput,
       {
-        model: this.state.config.models.researchManager,
+        model:
+          trajectoryWorkflow
+            ? this.state.config.models.summaryReader
+            : this.state.config.models.researchManager,
         isolatedTask: true,
         memoryAccess: true,
         intakeSources: indexedSources,
+        webSearch:
+          trajectoryWorkflow && this.state.config.allowWebSearch,
       },
     );
     if (this.stopped) return { ok: false, error: "conductor stopping" };
@@ -974,12 +2133,24 @@ export class ProjectEngine extends EventEmitter {
         clarifications: call.output.clarifications,
       });
       const managerNote = call.output.managerNoteMarkdown.trim();
-      this.recordResearchManagerNote(
-        "W000",
-        managerNote || this.fallbackInitialView(),
-        managerNote ? "research_manager" : "fallback",
-        call.output.managerAbstract.trim() || this.fallbackInitialAbstract(),
-      );
+      if (this.state.config.workflow === "trajectories-v2") {
+        this.recordMathematicalView(
+          "W000",
+          managerNote || this.fallbackInitialView(),
+          call.output.managerAbstract.trim() || this.fallbackInitialAbstract(),
+          managerNote ? "intake" : "fallback",
+          true,
+          "Initial reading of the retained intake materials.",
+          null,
+        );
+      } else {
+        this.recordResearchManagerNote(
+          "W000",
+          managerNote || this.fallbackInitialView(),
+          managerNote ? "research_manager" : "fallback",
+          call.output.managerAbstract.trim() || this.fallbackInitialAbstract(),
+        );
+      }
       return { ok: true, error: null };
     }
     const error = call.error ?? "intake failed";
@@ -1011,25 +2182,37 @@ export class ProjectEngine extends EventEmitter {
         ],
         clarifications: [],
       });
-      this.recordResearchManagerNote(
-        "W000",
-        this.fallbackInitialView(),
-        "fallback",
-        this.fallbackInitialAbstract(),
-      );
+      if (this.state.config.workflow === "trajectories-v2") {
+        this.recordMathematicalView(
+          "W000",
+          this.fallbackInitialView(),
+          this.fallbackInitialAbstract(),
+          "fallback",
+          true,
+          "The automatic initial reading did not complete.",
+          null,
+        );
+      } else {
+        this.recordResearchManagerNote(
+          "W000",
+          this.fallbackInitialView(),
+          "fallback",
+          this.fallbackInitialAbstract(),
+        );
+      }
     }
     this.phaseTo("AWAITING_CONFIRMATION", "intake complete");
   }
 
   private fallbackInitialAbstract(): string {
-    return "The Research Manager's initial reading did not complete; the original objective and materials remain available for another attempt.";
+    return "The initial mathematical reading did not complete; the original objective and materials remain available for another attempt.";
   }
 
   private fallbackInitialView(): string {
     return [
       "# Current mathematical view",
       "",
-      "The initial Research Manager reading did not complete. No interpretation has been substituted for the owner's submission.",
+      "The initial mathematical reading did not complete. No interpretation has been substituted for the owner's submission.",
       "",
       "Use the original objective and materials below, then regenerate or edit W000 before beginning research.",
     ].join("\n");
@@ -1090,9 +2273,12 @@ export class ProjectEngine extends EventEmitter {
       throw new Error(`cannot confirm problem in phase ${this.state.phase}`);
     }
     if (this.intakeRefreshInFlight || pendingIntakeDecision(this.state)) {
-      throw new Error("W000 is still being regenerated; wait for the Research Manager reading to finish");
+      throw new Error("W000 is still being regenerated; wait for the mathematical reading to finish");
     }
-    const currentW000 = this.state.researchManagerNotes.find((entry) => entry.waveId === "W000");
+    const currentW000 =
+      this.state.config.workflow === "trajectories-v2"
+        ? this.state.mathematicalViews.find((entry) => entry.waveId === "W000")
+        : this.state.researchManagerNotes.find((entry) => entry.waveId === "W000");
     if (
       this.state.problem.rawUpdatedAtSeq > 0 &&
       (!currentW000 || currentW000.recordedAtSeq < this.state.problem.rawUpdatedAtSeq)
@@ -1109,9 +2295,24 @@ export class ProjectEngine extends EventEmitter {
       const note = managerNoteMarkdown.trim();
       if (note === "") throw new Error("W000 cannot be empty");
       const abstract = managerAbstract?.trim() ?? "";
-      const current = this.state.researchManagerNotes.find((entry) => entry.waveId === "W000");
+      const current =
+        this.state.config.workflow === "trajectories-v2"
+          ? this.state.mathematicalViews.find((entry) => entry.waveId === "W000")
+          : this.state.researchManagerNotes.find((entry) => entry.waveId === "W000");
       if (!current || current.markdown.trim() !== note || current.abstract.trim() !== abstract) {
-        this.recordResearchManagerNote("W000", note, "human_edited", abstract);
+        if (this.state.config.workflow === "trajectories-v2") {
+          this.recordMathematicalView(
+            "W000",
+            note,
+            abstract,
+            "human_edited",
+            true,
+            "Edited by the owner before research began.",
+            null,
+          );
+        } else {
+          this.recordResearchManagerNote("W000", note, "human_edited", abstract);
+        }
       }
     }
     this.emitEvent({
@@ -1120,7 +2321,9 @@ export class ProjectEngine extends EventEmitter {
       contextDigestMarkdown: confirmedDigest,
       rawMemories: confirmedMemories,
     });
-    this.seedIntakeMemories(confirmedMemories);
+    if (this.state.config.workflow !== "trajectories-v2") {
+      this.seedIntakeMemories(confirmedMemories);
+    }
     this.phaseTo("DISCOVERY", "problem confirmed by human");
   }
 
@@ -1199,12 +2402,24 @@ export class ProjectEngine extends EventEmitter {
       ambiguities: [],
       clarifications: [],
     });
-    this.recordResearchManagerNote(
-      "W000",
-      managerNoteMarkdown,
-      "human_edited",
-      managerAbstract,
-    );
+    if (this.state.config.workflow === "trajectories-v2") {
+      this.recordMathematicalView(
+        "W000",
+        managerNoteMarkdown,
+        managerAbstract,
+        "human_edited",
+        true,
+        "Copied from the owner-reviewed intake of the source project.",
+        null,
+      );
+    } else {
+      this.recordResearchManagerNote(
+        "W000",
+        managerNoteMarkdown,
+        "human_edited",
+        managerAbstract,
+      );
+    }
     this.phaseTo("AWAITING_CONFIRMATION", "copied W000 ready for owner review");
   }
 
@@ -2213,6 +3428,31 @@ export class ProjectEngine extends EventEmitter {
     });
   }
 
+  private recordMathematicalView(
+    waveId: string,
+    markdown: string,
+    abstract: string,
+    source: "intake" | "summary_reader" | "human_edited" | "fallback",
+    changed: boolean,
+    reason: string,
+    usage: Usage | null,
+  ): void {
+    const relPath = path.join("artifacts", "mathematical-view", `${waveId}.md`);
+    const text = markdown.trim() + "\n";
+    writeFileAtomic(path.join(this.paths.mathematicalViewsDir, `${waveId}.md`), text);
+    this.emitEvent({
+      type: "summary.recorded",
+      waveId,
+      path: relPath,
+      abstract: abstract.trim(),
+      markdown: text,
+      changed,
+      reason,
+      source,
+      usage,
+    });
+  }
+
   private fallbackResearchManagerNote(waveId: string, reason: string): string {
     const previous = this.state.researchManagerNotes.at(-1)?.markdown.trim();
     return [
@@ -2824,7 +4064,9 @@ export class ProjectEngine extends EventEmitter {
       this.emitEvent({
         type: "publication.failed",
         publicationId,
-        stage: failure.startsWith("invalid Research Manager output") ? "validation" : "drafting",
+        stage: /^invalid (?:Research Manager|mathematical reader) output:/.test(failure)
+          ? "validation"
+          : "drafting",
         error: failure.slice(0, 2_000),
       });
       return;
@@ -3043,11 +4285,23 @@ export class ProjectEngine extends EventEmitter {
     });
     this.phaseTo("DISCOVERY", "owner continued research after a stopping report");
     if (humanRevisionMarkdown !== undefined) {
-      this.recordResearchManagerNote(
-        nextContinuationRevisionId(this.state),
-        humanRevisionMarkdown,
-        "human_edited",
-      );
+      if (this.state.config.workflow === "trajectories-v2") {
+        this.recordMathematicalView(
+          nextContinuationRevisionId(this.state),
+          humanRevisionMarkdown,
+          this.state.mathematicalViews.at(-1)?.abstract ?? "",
+          "human_edited",
+          true,
+          "The owner directly revised the current mathematical view when continuing research.",
+          null,
+        );
+      } else {
+        this.recordResearchManagerNote(
+          nextContinuationRevisionId(this.state),
+          humanRevisionMarkdown,
+          "human_edited",
+        );
+      }
     }
     this.start();
   }
@@ -3093,8 +4347,12 @@ export class ProjectEngine extends EventEmitter {
     };
     const models: ActiveModelSettings = {
       researchManager: clean(parsed.models.researchManager),
+      summaryReader: clean(
+        parsed.models.summaryReader ?? this.state.config.models.summaryReader,
+      ),
       solver: clean(parsed.models.solver),
       explorer: clean(parsed.models.explorer),
+      verifier: clean(parsed.models.verifier ?? this.state.config.models.verifier),
       reviewer: clean(parsed.models.reviewer),
       synthesizer: clean(parsed.models.synthesizer),
     };
@@ -3104,6 +4362,7 @@ export class ProjectEngine extends EventEmitter {
       allowWebSearch: parsed.allowWebSearch,
       totalTokens: parsed.totalTokens,
       maxWaves: parsed.maxWaves,
+      trajectory: parsed.trajectory ?? this.state.config.trajectory,
     };
     const current = this.getProjectSettings();
     const spent = this.state.budget.spentTokens + this.state.budget.plannerSpentTokens;
@@ -3121,17 +4380,34 @@ export class ProjectEngine extends EventEmitter {
     ) {
       throw new Error("resource ceilings cannot be lowered while a research round is open");
     }
-    const modelsUnchanged = (Object.keys(models) as (keyof ActiveModelSettings)[]).every(
-      (role) =>
-        current.models[role].model === models[role].model &&
-        current.models[role].effort === models[role].effort,
-    );
+    const modelRoles = [
+      "researchManager",
+      "summaryReader",
+      "solver",
+      "explorer",
+      "verifier",
+      "reviewer",
+      "synthesizer",
+    ] as const;
+    const modelsUnchanged = modelRoles.every((role) => {
+      const before = current.models[role] ?? this.state.config.models[role];
+      const after = models[role] ?? this.state.config.models[role];
+      return before.model === after.model && before.effort === after.effort;
+    });
+    const currentTrajectory = current.trajectory ?? this.state.config.trajectory;
+    const nextTrajectory = next.trajectory ?? this.state.config.trajectory;
+    const trajectoryUnchanged =
+      currentTrajectory.solversPerWave === nextTrajectory.solversPerWave &&
+      currentTrajectory.explorersPerWave === nextTrajectory.explorersPerWave &&
+      currentTrajectory.verifiersPerClaim === nextTrajectory.verifiersPerClaim &&
+      currentTrajectory.passesRequired === nextTrajectory.passesRequired;
     if (
       modelsUnchanged &&
       current.autonomy === next.autonomy &&
       current.allowWebSearch === next.allowWebSearch &&
       current.totalTokens === next.totalTokens &&
-      current.maxWaves === next.maxWaves
+      current.maxWaves === next.maxWaves &&
+      trajectoryUnchanged
     ) {
       return;
     }
@@ -3243,6 +4519,116 @@ export class ProjectEngine extends EventEmitter {
       returnedIds: rec.returnedIds,
       refusedIds: rec.refusedIds,
     });
+  }
+
+  /** Project-scoped MCP callback for a sparse human-readable trajectory marker. */
+  recordTrajectoryMilestone(
+    taskId: string,
+    title: string,
+    markdown: string,
+  ): { milestoneId: string } {
+    if (this.state.config.workflow !== "trajectories-v2") {
+      throw new Error("milestones are available only in trajectories-v2 projects");
+    }
+    const task = this.state.tasks[taskId];
+    if (!task || task.status !== "running") throw new Error(`task ${taskId} is not running`);
+    if (task.role !== "solver" && task.role !== "explorer") {
+      throw new Error("only Solver and Explorer trajectories may record milestones");
+    }
+    if (task.milestoneIds.length >= 12) {
+      throw new Error("this trajectory already has twelve milestones; reserve further detail for the final write-up");
+    }
+    const cleanTitle = title.trim();
+    const cleanMarkdown = markdown.trim();
+    if (!cleanTitle || !cleanMarkdown) throw new Error("milestone title and mathematics are required");
+    const milestoneId = this.allocId("milestone");
+    this.emitEvent({
+      type: "task.milestone",
+      milestoneId,
+      taskId,
+      title: cleanTitle.slice(0, 160),
+      markdown: cleanMarkdown.slice(0, 4_000),
+    });
+    return { milestoneId };
+  }
+
+  /** Turn one concrete fact contradiction into a self-contained correction claim. */
+  flagTrajectoryFact(
+    taskId: string,
+    factId: string,
+    reason: string,
+  ): { correctionClaimId: string } {
+    if (this.state.config.workflow !== "trajectories-v2") {
+      throw new Error("fact corrections are available only in trajectories-v2 projects");
+    }
+    const task = this.state.tasks[taskId];
+    if (!task || task.status !== "running") throw new Error(`task ${taskId} is not running`);
+    if (task.role !== "solver" && task.role !== "explorer") {
+      throw new Error("only Solver and Explorer trajectories may flag a fact");
+    }
+    if (
+      Object.values(this.state.claims).some(
+        (claim) => claim.kind === "correction" && claim.sourceTaskId === taskId,
+      )
+    ) {
+      throw new Error("this trajectory has already submitted its one fact correction");
+    }
+    const fact = this.state.facts[factId];
+    if (!fact || (fact.status !== "ACTIVE" && fact.status !== "SUSPICIOUS")) {
+      throw new Error(`active fact ${factId} does not exist`);
+    }
+    const cleanReason = reason.trim();
+    if (cleanReason.length < 20 || cleanReason.length > 2_000) {
+      throw new Error("a concrete 20–2000 character mathematical reason is required");
+    }
+
+    const correctionClaimId = this.allocId("claim");
+    const title = `Correction to ${factId}`;
+    const statement = `The following recorded statement is false or incomplete as stated:\n\n${fact.statement}`;
+    const relPath = path.join("claims", `${correctionClaimId}.md`);
+    const claimMarkdown = [
+      `# ${title}`,
+      "",
+      "## Statement under challenge",
+      "",
+      fact.statement,
+      "",
+      "## Concrete contradiction or disproof",
+      "",
+      cleanReason,
+      "",
+    ].join("\n");
+    writeFileAtomic(path.join(this.paths.dir, relPath), claimMarkdown);
+    this.emitEvent({
+      type: "claim.added",
+      claimId: correctionClaimId,
+      title,
+      statement,
+      proofMarkdown: cleanReason,
+      status: "UNVERIFIED",
+      provenance: `${taskId} correction of ${factId}`,
+      sourceTaskId: taskId,
+      sourceWaveId: task.waveId,
+      path: relPath,
+      relationToGoal: "RELATED",
+      kind: "correction",
+      targetFactId: factId,
+      verificationPolicy: {
+        verifiersPerClaim: this.state.config.trajectory.verifiersPerClaim,
+        passesRequired: this.state.config.trajectory.passesRequired,
+      },
+      dependsOn: [],
+    });
+    this.emitEvent({
+      type: "fact.suspicionRaised",
+      factId,
+      correctionClaimId,
+      reason: cleanReason,
+      by: taskId,
+    });
+    this.ensureClaimVerifications(correctionClaimId);
+    this.launchPendingVerifications();
+    return { correctionClaimId };
   }
 
   /** Convenience for HTTP/tests: expose one task's execution surfaces. */
