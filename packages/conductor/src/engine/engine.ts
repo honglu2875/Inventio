@@ -109,6 +109,7 @@ import {
   trajectoryWorkerFiles,
   verificationFiles,
 } from "../prompts/trajectories.js";
+import { MODEL_TOOL_NAMES } from "../prompts/tools.js";
 import {
   curationRetryNote,
   focusedFollowUpPrompt,
@@ -837,8 +838,15 @@ export class ProjectEngine extends EventEmitter {
     const waveId = this.allocId("wave");
     const decisionId = this.allocId("decision");
     const roster: RosterEntry[] = [];
+    // allocId() derives its answer from replayed state. That state does not
+    // advance until wave.planned is emitted, so calling allocId("task") several
+    // times while constructing one event would repeat the same ID. Reserve the
+    // whole contiguous range locally and let the event advance the counter.
+    const firstTaskNumber = (this.state.counters.task ?? 0) + 1;
+    let taskOffset = 0;
     const add = (role: "solver" | "explorer", ordinal: number): void => {
-      const taskId = this.allocId("task");
+      const taskId = makeId("task", firstTaskNumber + taskOffset);
+      taskOffset += 1;
       roster.push({
         taskId,
         role,
@@ -860,6 +868,9 @@ export class ProjectEngine extends EventEmitter {
     };
     for (let i = 1; i <= settings.solversPerWave; i += 1) add("solver", i);
     for (let i = 1; i <= settings.explorersPerWave; i += 1) add("explorer", i);
+    if (new Set(roster.map((entry) => entry.taskId)).size !== roster.length) {
+      throw new Error("internal error: a trajectory round contains duplicate task IDs");
+    }
 
     this.emitEvent({ type: "decision.requested", decisionId, kind: "next_move", waveId: null });
     const action = {
@@ -1064,6 +1075,7 @@ export class ProjectEngine extends EventEmitter {
                   url: this.deps.memory.url,
                   tokenEnvVar: "INVENTIO_TASK_TOKEN",
                   token,
+                  enabledTools: MODEL_TOOL_NAMES,
                 },
               }
             : {}),
@@ -1887,6 +1899,7 @@ export class ProjectEngine extends EventEmitter {
                   url: this.deps.memory.url,
                   tokenEnvVar: "INVENTIO_TASK_TOKEN",
                   token,
+                  enabledTools: MODEL_TOOL_NAMES,
                 },
               }
             : {}),
@@ -2962,6 +2975,7 @@ export class ProjectEngine extends EventEmitter {
                 url: this.deps.memory.url,
                 tokenEnvVar: "INVENTIO_TASK_TOKEN",
                 token,
+                enabledTools: MODEL_TOOL_NAMES,
               },
             }
           : {}),

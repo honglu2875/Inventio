@@ -47,6 +47,7 @@ Parsed correctly, mostly ignored semantically. Only `-C`, `--json` and
 | --- | --- | --- |
 | `--json` | — | emit the JSONL event stream. Without it, only the final message text is printed. |
 | `--ignore-user-config` | — | accepted, ignored |
+| `--strict-config` | — | accepted, ignored; production Codex validates Inventio's generated settings |
 | `--skip-git-repo-check` | — | accepted, ignored |
 | `--ephemeral` | — | accepted, ignored |
 | `-C <dir>` | dir | `chdir` before anything else observable happens |

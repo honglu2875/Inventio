@@ -18,6 +18,7 @@ export class UsageError extends Error {
 const BOOL_FLAGS = new Map([
   ['--json', 'json'],
   ['--ignore-user-config', 'ignoreUserConfig'],
+  ['--strict-config', 'strictConfig'],
   ['--skip-git-repo-check', 'skipGitRepoCheck'],
   ['--ephemeral', 'ephemeral'],
 ]);
@@ -50,6 +51,7 @@ function emptyOptions() {
     promptFromStdinArg: false,
     json: false,
     ignoreUserConfig: false,
+    strictConfig: false,
     skipGitRepoCheck: false,
     ephemeral: false,
     cd: null,

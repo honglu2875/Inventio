@@ -14,7 +14,7 @@ Rules for whoever (human or agent) picks this up:
 - Record every deliberate divergence from DESIGN.md in the deviation log
   at the bottom, with a reason.
 
-**Status: M0–M26 preserve the released `council-v1` implementation. M27 implements the new `trajectories-v2` workflow on the `long-trajectories` branch and makes it the default for new projects, while old projects remain replay-compatible. Long independent Solver and Explorer sessions now drive each round directly; proposed results become self-contained claims, independent Verifiers apply the configured V/W threshold, accepted claims become facts, later concrete challenges can reopen facts, sparse milestones expose progress, and a strong end-of-round reader may make only a small revision to the common mathematical view. The complete suite passes: 325 tests (schema 34, conductor 164, UI 106, codex-sim 21), all TypeScript packages typecheck, and the production UI builds.**
+**Status: M0–M26 preserve the released `council-v1` implementation. M27 implements the new `trajectories-v2` workflow on the `long-trajectories` branch and makes it the default for new projects, while old projects remain replay-compatible. Long independent Solver and Explorer sessions now drive each round directly; proposed results become self-contained claims, independent Verifiers apply the configured V/W threshold, accepted claims become facts, later concrete challenges can reopen facts, sparse milestones expose progress, and a strong end-of-round reader may make only a small revision to the common mathematical view. The first live N=2/M=2 smoke test exposed and fixed duplicate trajectory IDs and noninteractive MCP approval; the real-account MCP regression probe now reaches the authenticated server and retrieves a hidden marker. The complete suite passes: 327 tests (schema 34, conductor 166, UI 106, codex-sim 21), all TypeScript packages typecheck, and the production UI builds.**
 Last updated: 2026-08-28 by Codex (long-trajectory refactor).
 
 Quota note: work has been interrupted twice by Opus subagent quota limits. The
@@ -76,6 +76,13 @@ projects and deterministic replay.
 - [x] Verify exact JSON/Markdown preservation (including literal `\\frac`),
       recovery, threshold failure, replay determinism, API behavior, graph
       derivation, UI rendering, and legacy compatibility.
+- [x] Live-smoke N=2/M=2: reserve a distinct contiguous task-ID range before
+      recording a round and fail fast on any duplicate, so four configured
+      trajectories launch as four processes instead of racing over one task.
+- [x] Launch the authenticated local MCP server as required with strict Codex
+      config, an exact tool allow-list, and documented noninteractive approval.
+      Replace the blocking historical diagnostic with the production async
+      runner; its real-account marker retrieval passes.
 
 Verify: `npm test`, `npm run typecheck`, `npm run build`, `git diff --check`.
 
@@ -230,14 +237,18 @@ not accepted as a proof."* The mathematics is credible throughout.
 
 Every `memory_search` from every worker failed with `MCP tool call requires
 approval, but approval policy is never`. 57 curated cards, none ever readable.
-A probe (`packages/conductor/scripts/probe-mcp-approval.ts`) showed no
-`mcp_servers.<n>.approval_mode` value fixes it under non-interactive `exec`.
+The original diagnostic later proved invalid: it tried the obsolete
+`approval_mode` key and used `spawnSync` while hosting the MCP server in the
+same Node process, which froze the server during its own handshake.
 
-Fix: the catalog now travels **inside the packet** as `research-library-index.md`,
+The legacy fallback remains useful: its catalog travels **inside the packet** as `research-library-index.md`,
 role-filtered by the Conductor (reviewers see only VERIFIED; quarantined rows
 render as explicit warnings; PENDING current-wave cards never appear), exactly
-the file-based protocol PROTOCOL §7 already specifies as the fallback. MCP
-stays wired as an optional convenience and the contract says so. Tests added.
+the file-based protocol PROTOCOL §7 specifies. The direct tool path is now also
+fixed: generated Codex configuration is strict, the authenticated server is
+required, its tools are allow-listed, and `default_tools_approval_mode` is
+`approve`. The asynchronous real-account probe reaches the server and expands
+its marker card without a human prompt.
 
 ### F2 — The adversarial layer never engaged (FIXED — scoped candidates)
 

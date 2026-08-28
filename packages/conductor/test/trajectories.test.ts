@@ -109,6 +109,78 @@ describe("trajectories-v2 end to end", () => {
     expect(h.diskState()).toEqual(h.state);
   });
 
+  it("starts two Solvers and two Explorers with four distinct task identities", async () => {
+    const calls: SimCall[] = [
+      plannerCall(INTAKE_MATCH, intakeOutput()),
+      call(
+        TRAJECTORY_WORKER_MATCH,
+        "/T001/",
+        trajectoryOutput({ summaryMarkdown: "Solver one completed an independent investigation." }),
+        "th-solver-1",
+      ),
+      call(
+        TRAJECTORY_WORKER_MATCH,
+        "/T002/",
+        trajectoryOutput({ summaryMarkdown: "Solver two completed an independent investigation." }),
+        "th-solver-2",
+      ),
+      call(
+        TRAJECTORY_WORKER_MATCH,
+        "/T003/",
+        trajectoryOutput({ summaryMarkdown: "Explorer one completed an independent investigation." }),
+        "th-explorer-1",
+      ),
+      call(
+        TRAJECTORY_WORKER_MATCH,
+        "/T004/",
+        trajectoryOutput({ summaryMarkdown: "Explorer two completed an independent investigation." }),
+        "th-explorer-2",
+      ),
+      plannerCall(SUMMARY_REVIEW_MATCH, summaryRevisionOutput()),
+      plannerCall(
+        TRAJECTORY_FINAL_MATCH,
+        finalOutput("# Final report\n\nFour independent trajectories completed without a proof."),
+      ),
+    ];
+    const h = Harness.create(
+      "trajectory-four-workers",
+      calls,
+      trajectoryTestConfig((config) => {
+        config.limits.maxConcurrentWorkers = 4;
+        config.trajectory.solversPerWave = 2;
+        config.trajectory.explorersPerWave = 2;
+      }),
+    );
+    current = h;
+    h.start();
+    await h.waitFor((state) => state.phase === "AWAITING_CONFIRMATION", "v2 W000");
+    h.confirm();
+    await h.waitForTerminal(30_000);
+
+    const roster = h.state.waves["W001"]!.roster;
+    expect(roster.map((entry) => [entry.taskId, entry.role])).toEqual([
+      ["T001", "solver"],
+      ["T002", "solver"],
+      ["T003", "explorer"],
+      ["T004", "explorer"],
+    ]);
+    expect(new Set(roster.map((entry) => entry.taskId)).size).toBe(4);
+    expect(Object.keys(h.state.tasks).sort()).toEqual(["T001", "T002", "T003", "T004"]);
+    expect(Object.values(h.state.tasks).map((task) => task.status)).toEqual([
+      "completed",
+      "completed",
+      "completed",
+      "completed",
+    ]);
+    const launchedTaskDirs = h
+      .simLog()
+      .map((row) => /\/tasks\/(T\d{3})\//.exec(row.cwd)?.[1])
+      .filter((id): id is string => id !== undefined)
+      .sort();
+    expect(launchedTaskDirs).toEqual(["T001", "T002", "T003", "T004"]);
+    expect(h.diskState()).toEqual(h.state);
+  });
+
   it("marks a claim failed as soon as the configured pass threshold is impossible", async () => {
     const calls: SimCall[] = [
       plannerCall(INTAKE_MATCH, intakeOutput()),

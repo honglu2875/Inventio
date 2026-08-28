@@ -20,6 +20,8 @@ export interface McpAttachment {
   url: string;
   tokenEnvVar: string;
   token: string;
+  /** Exact tools exposed from this authenticated, project-scoped server. */
+  enabledTools: readonly string[];
 }
 
 export interface RunCodexOptions {
@@ -101,7 +103,7 @@ export function buildArgs(opts: RunCodexOptions): string[] {
   if (opts.resumeThreadId) {
     args.push("resume", opts.resumeThreadId);
   }
-  args.push("--json", "--ignore-user-config", "--skip-git-repo-check");
+  args.push("--json", "--ignore-user-config", "--strict-config", "--skip-git-repo-check");
   if (!opts.resumeThreadId) {
     args.push("-C", opts.cwd, "-s", opts.sandbox);
   }
@@ -112,9 +114,10 @@ export function buildArgs(opts: RunCodexOptions): string[] {
     args.push("-c", "project_doc_max_bytes=0", "-c", "agents.enabled=false");
   }
   if (opts.mcp) {
+    const enabledTools = opts.mcp.enabledTools.map((name) => JSON.stringify(name)).join(",");
     args.push(
       "-c",
-      `mcp_servers.${opts.mcp.serverName}={url="${opts.mcp.url}",bearer_token_env_var="${opts.mcp.tokenEnvVar}"}`,
+      `mcp_servers.${opts.mcp.serverName}={url="${opts.mcp.url}",bearer_token_env_var="${opts.mcp.tokenEnvVar}",required=true,default_tools_approval_mode="approve",enabled_tools=[${enabledTools}]}`,
     );
   }
   if (opts.outputSchemaFile) args.push("--output-schema", opts.outputSchemaFile);

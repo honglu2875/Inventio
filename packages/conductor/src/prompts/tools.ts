@@ -185,3 +185,10 @@ export const MODEL_TOOL_DEFINITIONS: Tool[] = [
     },
   },
 ];
+
+/**
+ * Exact allow-list passed to the Codex CLI for Inventio's authenticated local
+ * MCP server. The server still returns a role-appropriate subset and enforces
+ * every read/write permission against the task token.
+ */
+export const MODEL_TOOL_NAMES = MODEL_TOOL_DEFINITIONS.map((tool) => tool.name);

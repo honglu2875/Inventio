@@ -332,6 +332,15 @@ as well. Tool descriptions guide use but do not grant authority: bearer scope,
 role checks, project workflow, active status, one-correction limits, and file
 confinement are enforced in `memory/service.ts` and `engine.ts`.
 
+`codex/runner.ts` supplies this local authenticated server through strict
+generated configuration. It marks the server required, passes the exact
+`MODEL_TOOL_NAMES` allow-list, and uses Codex's
+`default_tools_approval_mode="approve"` so noninteractive research sessions can
+actually call the tools without a human prompt. This approval does not widen
+authority: the short-lived bearer token and the checks above still decide what
+each call may read or change. `scripts/probe-mcp-approval.ts` exercises this
+exact production path against a live local server.
+
 ## Model-visible contracts outside this directory
 
 Two categories intentionally remain elsewhere:

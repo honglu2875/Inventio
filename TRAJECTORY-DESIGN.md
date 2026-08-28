@@ -20,11 +20,15 @@ versions can still be replayed without reinterpretation.
    mathematical view (`W000`).
 2. Each research round starts `N` independent Solvers and `M` independent
    Explorers from that common view, the current facts and claims, and any
-   user guidance. Defaults are `N=2`, `M=2`, for at most five rounds.
+   user guidance. Defaults are `N=2`, `M=2`, for at most five rounds. Every
+   trajectory has a distinct stable task ID before any process starts.
 3. A Solver works directly on the stated problem. An Explorer develops useful
    nearby mathematics, examples, special cases, obstructions, or methods.
    Both receive long wall-clock budgets, web access when the project permits
    it, a writable computation directory, and tools for inspecting the record.
+   Project tools use a short-lived task token and a fixed allow-list; they are
+   approved noninteractively because the server itself enforces project, role,
+   status, and write limits.
 4. During a trajectory a worker may record a small number of mathematical
    milestones. At the end it returns a write-up and a short, parseable list of
    genuinely useful claims. Every claim must contain a self-contained statement

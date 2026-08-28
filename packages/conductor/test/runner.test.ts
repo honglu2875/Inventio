@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { codexEventErrorMessage, runCodex } from "../src/codex/runner.js";
+import { buildArgs, codexEventErrorMessage, runCodex } from "../src/codex/runner.js";
 import { runStructured } from "../src/codex/structured.js";
 import { workerLaunchPrompt } from "../src/prompts/operational.js";
 
@@ -69,6 +69,25 @@ function readLog(dir: string): { taskToken: string | null; index: number }[] {
 }
 
 describe("runCodex", () => {
+  it("strictly auto-approves only the attached project MCP tools", () => {
+    const { baseOpts } = setup([]);
+    const args = buildArgs({
+      ...baseOpts,
+      mcp: {
+        serverName: "memory",
+        url: "http://127.0.0.1:4701/mcp",
+        tokenEnvVar: "INVENTIO_TASK_TOKEN",
+        token: "not-placed-on-argv",
+        enabledTools: ["source_list", "source_open"],
+      },
+    });
+    expect(args).toContain("--strict-config");
+    expect(args).toContain(
+      'mcp_servers.memory={url="http://127.0.0.1:4701/mcp",bearer_token_env_var="INVENTIO_TASK_TOKEN",required=true,default_tools_approval_mode="approve",enabled_tools=["source_list","source_open"]}',
+    );
+    expect(args.join(" ")).not.toContain("not-placed-on-argv");
+  });
+
   it("extracts structured API failures from the JSONL event stream", () => {
     const nested = JSON.stringify({
       type: "error",
@@ -106,6 +125,7 @@ describe("runCodex", () => {
         url: "http://127.0.0.1:4701/mcp",
         tokenEnvVar: "INVENTIO_TASK_TOKEN",
         token: "tok-123",
+        enabledTools: ["memory_search", "memory_expand"],
       },
       onProgress: (p) => progress.push(p.estimatedTokens),
     });
