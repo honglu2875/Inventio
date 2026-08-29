@@ -34,7 +34,7 @@ export async function main(): Promise<void> {
   const root = path.resolve(process.env["INVENTIO_ROOT"] ?? DEFAULT_ROOT);
   const codexBin = process.env["INVENTIO_CODEX_BIN"] ?? "codex";
   const texBin = process.env["INVENTIO_TEX_BIN"] ?? "tectonic";
-  const poolSize = envInt("INVENTIO_POOL", 3);
+  const poolSize = envInt("INVENTIO_POOL", 8);
   const memoryDisabled = process.env["INVENTIO_DISABLE_MEMORY"] === "1";
 
   mkdirSync(root, { recursive: true });

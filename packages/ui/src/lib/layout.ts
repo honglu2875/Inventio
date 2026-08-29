@@ -23,6 +23,8 @@ export const OPS = {
   PAD: 14,
   TASK_H: 72,
   TGAP: 10,
+  MILE_H: 50,
+  MILE_GAP: 6,
   RES_H: 36,
   LANE_GAP: 64,
   CAND_W: 208,
@@ -64,10 +66,15 @@ function slotX(slot: number): number {
   return OPS.M + slot * (OPS.COL_W + OPS.COL_GAP);
 }
 
-export function expandedWaveHeight(taskCount: number, hasResolution: boolean): number {
+export function expandedWaveHeight(
+  taskCount: number,
+  hasResolution: boolean,
+  milestoneCount = 0,
+): number {
   return (
     OPS.HEADER +
     taskCount * (OPS.TASK_H + OPS.TGAP) +
+    milestoneCount * (OPS.MILE_H + OPS.MILE_GAP) +
     (hasResolution ? OPS.RES_H + OPS.TGAP : 0) +
     OPS.PAD
   );
@@ -82,12 +89,21 @@ export function layoutOps(graph: Graph, collapsed: ReadonlySet<string>): LayoutR
   waves.forEach((w, i) => waveSlot.set(w.id, i + 1));
 
   const tasksByWave = new Map<string, GraphNode[]>();
+  const milestonesByTask = new Map<string, GraphNode[]>();
   const resolutionByWave = new Map<string, GraphNode>();
   for (const n of graph.nodes) {
     if (n.type === "task" && n.parentId) {
       const list = tasksByWave.get(n.parentId) ?? [];
       list.push(n);
       tasksByWave.set(n.parentId, list);
+    }
+    if (n.type === "milestone") {
+      const taskId = typeof n.data["taskId"] === "string" ? n.data["taskId"] : "";
+      if (taskId !== "") {
+        const list = milestonesByTask.get(taskId) ?? [];
+        list.push(n);
+        milestonesByTask.set(taskId, list);
+      }
     }
     if (n.type === "resolution" && n.parentId) resolutionByWave.set(n.parentId, n);
   }
@@ -103,27 +119,47 @@ export function layoutOps(graph: Graph, collapsed: ReadonlySet<string>): LayoutR
     const tasks = tasksByWave.get(wave.id) ?? [];
     const resolution = resolutionByWave.get(wave.id);
     const isCollapsed = collapsed.has(wave.id);
-    const h = isCollapsed ? OPS.CHIP_H : expandedWaveHeight(tasks.length, resolution !== undefined);
+    const milestoneCount = tasks.reduce(
+      (total, task) => total + (milestonesByTask.get(task.id)?.length ?? 0),
+      0,
+    );
+    const h = isCollapsed
+      ? OPS.CHIP_H
+      : expandedWaveHeight(tasks.length, resolution !== undefined, milestoneCount);
     nodes.push({ id: wave.id, x: slotX(slot), y: OPS.TOP, w: OPS.COL_W, h });
     bandBottom = Math.max(bandBottom, OPS.TOP + h);
 
-    tasks.forEach((t, j) => {
+    let cursorY = OPS.HEADER;
+    tasks.forEach((t) => {
       nodes.push({
         id: t.id,
         parentId: wave.id,
         x: OPS.PAD,
-        y: OPS.HEADER + j * (OPS.TASK_H + OPS.TGAP),
+        y: cursorY,
         w: OPS.COL_W - 2 * OPS.PAD,
         h: OPS.TASK_H,
         ...(isCollapsed ? { hidden: true } : {}),
       });
+      cursorY += OPS.TASK_H + OPS.TGAP;
+      for (const milestone of milestonesByTask.get(t.id) ?? []) {
+        nodes.push({
+          id: milestone.id,
+          parentId: wave.id,
+          x: OPS.PAD + 12,
+          y: cursorY,
+          w: OPS.COL_W - 2 * OPS.PAD - 12,
+          h: OPS.MILE_H,
+          ...(isCollapsed ? { hidden: true } : {}),
+        });
+        cursorY += OPS.MILE_H + OPS.MILE_GAP;
+      }
     });
     if (resolution) {
       nodes.push({
         id: resolution.id,
         parentId: wave.id,
         x: OPS.PAD,
-        y: OPS.HEADER + tasks.length * (OPS.TASK_H + OPS.TGAP),
+        y: cursorY,
         w: OPS.COL_W - 2 * OPS.PAD,
         h: OPS.RES_H,
         ...(isCollapsed ? { hidden: true } : {}),

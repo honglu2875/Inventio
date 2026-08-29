@@ -13,6 +13,7 @@ import {
   KNOWN_MODEL_IDS,
   MODEL_ROLE_INFO,
   REASONING_EFFORTS,
+  TRAJECTORY_MODEL_ROLES,
   defaultActiveModelSettings,
   sameModelSettings,
   type ActiveModelRole,
@@ -22,6 +23,19 @@ import { useActionGuard, useApiAction, useProjectState } from "../store/hooks";
 function effectiveModel(role: ActiveModelRole, choice: ModelChoice): string {
   if (choice.model !== null) return choice.model;
   return role === "synthesizer" ? "gpt-5.6-terra (synthesis fallback)" : "Codex CLI default";
+}
+
+function sameTrajectory(
+  left: ProjectSettings["trajectory"],
+  right: ProjectSettings["trajectory"],
+): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  return (
+    left.solversPerWave === right.solversPerWave &&
+    left.explorersPerWave === right.explorersPerWave &&
+    left.verifiersPerClaim === right.verifiersPerClaim &&
+    left.passesRequired === right.passesRequired
+  );
 }
 
 export function WebSearchPermissionControl({
@@ -86,6 +100,8 @@ function SettingsForm({ slug, state }: { slug: string; state: ProjectState }): J
   const saved = useMemo(() => projectSettingsFromConfig(state.config), [state.config]);
   const [draft, setDraft] = useState<ProjectSettings>(saved);
   const [saving, setSaving] = useState(false);
+  const isTrajectory = state.config.workflow === "trajectories-v2";
+  const modelRoles = isTrajectory ? TRAJECTORY_MODEL_ROLES : ACTIVE_MODEL_ROLES;
 
   useEffect(() => {
     setDraft(saved);
@@ -108,7 +124,8 @@ function SettingsForm({ slug, state }: { slug: string; state: ProjectState }): J
       saved.autonomy === draft.autonomy &&
       saved.allowWebSearch === draft.allowWebSearch &&
       saved.totalTokens === draft.totalTokens &&
-      saved.maxWaves === draft.maxWaves;
+      saved.maxWaves === draft.maxWaves &&
+      sameTrajectory(saved.trajectory, draft.trajectory);
     if (saving || guard.disabled || unchanged || resourceError !== null) return;
     setSaving(true);
     void run(
@@ -123,7 +140,8 @@ function SettingsForm({ slug, state }: { slug: string; state: ProjectState }): J
     saved.autonomy !== draft.autonomy ||
     saved.allowWebSearch !== draft.allowWebSearch ||
     saved.totalTokens !== draft.totalTokens ||
-    saved.maxWaves !== draft.maxWaves;
+    saved.maxWaves !== draft.maxWaves ||
+    !sameTrajectory(saved.trajectory, draft.trajectory);
   const spentTokens = state.budget.spentTokens + state.budget.plannerSpentTokens;
   const hasOpenRound = Object.values(state.waves).some((wave) => wave.status !== "closed");
   const resourceError =
@@ -138,7 +156,39 @@ function SettingsForm({ slug, state }: { slug: string; state: ProjectState }): J
             : hasOpenRound &&
                 (draft.totalTokens < saved.totalTokens || draft.maxWaves < saved.maxWaves)
               ? "Resource ceilings cannot be lowered while a research round is open."
-              : null;
+              : isTrajectory && draft.trajectory === undefined
+                ? "Trajectory settings are missing."
+                : isTrajectory &&
+                    (!Number.isSafeInteger(draft.trajectory!.solversPerWave) ||
+                      draft.trajectory!.solversPerWave < 0 ||
+                      draft.trajectory!.solversPerWave > 8 ||
+                      !Number.isSafeInteger(draft.trajectory!.explorersPerWave) ||
+                      draft.trajectory!.explorersPerWave < 0 ||
+                      draft.trajectory!.explorersPerWave > 8)
+                  ? "Solver and Explorer counts must be whole numbers from 0 to 8."
+                  : isTrajectory &&
+                      draft.trajectory!.solversPerWave +
+                        draft.trajectory!.explorersPerWave <
+                        1
+                    ? "At least one Solver or Explorer is required per round."
+                    : isTrajectory &&
+                        draft.trajectory!.solversPerWave +
+                          draft.trajectory!.explorersPerWave >
+                          8
+                      ? "At most eight research trajectories may start per round."
+                      : isTrajectory &&
+                          (!Number.isSafeInteger(draft.trajectory!.verifiersPerClaim) ||
+                            draft.trajectory!.verifiersPerClaim < 1 ||
+                            draft.trajectory!.verifiersPerClaim > 8 ||
+                            !Number.isSafeInteger(draft.trajectory!.passesRequired) ||
+                            draft.trajectory!.passesRequired < 1 ||
+                            draft.trajectory!.passesRequired > 8)
+                        ? "Verification counts must be whole numbers from 1 to 8."
+                        : isTrajectory &&
+                            draft.trajectory!.passesRequired >
+                              draft.trajectory!.verifiersPerClaim
+                          ? "Required passes cannot exceed the number of independent checks."
+                          : null;
 
   return (
     <div className="settings-view">
@@ -152,7 +202,8 @@ function SettingsForm({ slug, state }: { slug: string; state: ProjectState }): J
 
       <p className="settings-intro">
         This is the project&apos;s effective saved configuration. One save records resource ceilings,
-        autonomy, Web search permission, and every model choice together. Process settings apply
+        {isTrajectory ? "trajectory counts" : "autonomy"}, Web search permission, and every model
+        choice together. Process settings apply
         at the next launch; already-running work keeps its launch configuration.
       </p>
 
@@ -212,17 +263,67 @@ function SettingsForm({ slug, state }: { slug: string; state: ProjectState }): J
           </div>
         </section>
 
+        {isTrajectory && draft.trajectory !== undefined ? (
+          <section className="settings-panel" aria-labelledby="trajectory-settings-title">
+            <div className="web-search-heading">
+              <div>
+                <h2 id="trajectory-settings-title">Each research round</h2>
+                <p>
+                  Solvers pursue the stated problem; Explorers investigate useful nearby cases and
+                  methods. A claim becomes a fact only after enough independent checks pass.
+                </p>
+              </div>
+              <div className="resource-settings-grid">
+                {(
+                  [
+                    ["solversPerWave", "Solvers (N)", 0],
+                    ["explorersPerWave", "Explorers (M)", 0],
+                    ["verifiersPerClaim", "Checks per claim (V)", 1],
+                    ["passesRequired", "Passes required (W)", 1],
+                  ] as const
+                ).map(([key, label, min]) => (
+                  <label className="policy-choice" key={key}>
+                    <span>{label}</span>
+                    <input
+                      className="input mono"
+                      type="number"
+                      min={min}
+                      max={8}
+                      value={draft.trajectory![key]}
+                      disabled={guard.disabled || saving}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          trajectory: {
+                            ...(current.trajectory ?? state.config.trajectory),
+                            [key]: Number(event.target.value),
+                          },
+                        }))
+                      }
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="settings-help">
+              N + M may be at most 8. Verification runs independently while later research can
+              continue; changing these values affects future rounds and newly proposed claims.
+            </div>
+          </section>
+        ) : null}
+
         <section className="settings-panel web-search-panel" aria-labelledby="research-policy-title">
           <div className="web-search-heading">
             <div>
               <h2 id="research-policy-title">Research policy</h2>
               <p>
-                Choose whether decisions execute automatically and whether the Research Manager
-                may grant literature search to an individual future assignment.
+                {isTrajectory
+                  ? "Choose whether future research trajectories and independent checks may search the literature."
+                  : "Choose whether decisions execute automatically and whether the Research Manager may grant literature search to an individual future assignment."}
               </p>
             </div>
             <div className="project-policy-controls">
-              <label className="policy-choice">
+              {!isTrajectory ? <label className="policy-choice">
                 <span>Autonomy</span>
                 <select
                   className="select"
@@ -238,7 +339,7 @@ function SettingsForm({ slug, state }: { slug: string; state: ProjectState }): J
                   <option value="auto">Auto</option>
                   <option value="gated">Gated</option>
                 </select>
-              </label>
+              </label> : null}
               <WebSearchPermissionControl
                 enabled={draft.allowWebSearch}
                 disabled={guard.disabled || saving}
@@ -249,10 +350,9 @@ function SettingsForm({ slug, state }: { slug: string; state: ProjectState }): J
             </div>
           </div>
           <div className="settings-help">
-            Search is not automatic: the Research Manager grants it assignment by assignment,
-            and sources found that way still need exact citations and checking. Turning it off
-            removes search from waiting assignments; running workers are unchanged. W000 remains
-            an offline reading of the materials you supplied.
+            {isTrajectory
+              ? "When allowed, the initial W000 reader and each future Solver, Explorer, and Verifier may use Web search directly. Sources still need exact citations and mathematical checking. Turning it off does not alter work already running; the supplied materials remain W000's primary source."
+              : "Search is not automatic: the Research Manager grants it assignment by assignment, and sources found that way still need exact citations and checking. Turning it off removes search from waiting assignments; running workers are unchanged. W000 remains an offline reading of the materials you supplied."}
           </div>
         </section>
 
@@ -270,9 +370,9 @@ function SettingsForm({ slug, state }: { slug: string; state: ProjectState }): J
             <span role="columnheader">Reasoning</span>
           </div>
 
-          {ACTIVE_MODEL_ROLES.map((role) => {
+          {modelRoles.map((role) => {
             const info = MODEL_ROLE_INFO[role];
-            const choice = draft.models[role];
+            const choice = draft.models[role] ?? state.config.models[role];
             return (
               <div className="model-settings-row" role="row" key={role}>
                 <div className="model-role" role="rowheader">
@@ -319,9 +419,9 @@ function SettingsForm({ slug, state }: { slug: string; state: ProjectState }): J
           </div>
 
           <div className="settings-help">
-            A blank model uses the Codex CLI default, except Synthesizer, whose compatibility
-            fallback is <code>gpt-5.6-terra</code>. The model field accepts custom Codex model IDs;
-            availability and supported reasoning levels are checked when Codex launches.
+            {isTrajectory
+              ? "A blank model uses the Codex CLI default. The model field accepts custom Codex model IDs; availability and supported reasoning levels are checked when Codex launches."
+              : <>A blank model uses the Codex CLI default, except Synthesizer, whose compatibility fallback is <code>gpt-5.6-terra</code>. The model field accepts custom Codex model IDs; availability and supported reasoning levels are checked when Codex launches.</>}
           </div>
 
           <footer className="settings-actions">
@@ -333,7 +433,10 @@ function SettingsForm({ slug, state }: { slug: string; state: ProjectState }): J
             className="button ghost"
             disabled={guard.disabled || saving}
             onClick={() =>
-              setDraft((current) => ({ ...current, models: defaultActiveModelSettings() }))
+              setDraft((current) => ({
+                ...current,
+                models: defaultActiveModelSettings(state.config.workflow),
+              }))
             }
           >
             Restore model defaults

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { defaultConfig, type SourceMount } from "@inventio/schema";
+import { defaultTrajectoryConfig } from "@inventio/schema";
 import SourceDropzone from "../components/SourceDropzone";
 import Toasts from "../components/Toasts";
 import { api, errorMessage, type ProjectSummary } from "../lib/api";
@@ -13,7 +13,7 @@ import { useStore } from "../store/store";
 /** ProjectsPage (UI-SPEC §11): the L0 list, the runtime strip, project creation. */
 
 const POLL_MS = 5000;
-const NEW_PROJECT_DEFAULTS = defaultConfig();
+const NEW_PROJECT_DEFAULTS = defaultTrajectoryConfig();
 
 function MiniPhases({ project }: { project: ProjectSummary }): JSX.Element {
   const current = project.phase === "AWAITING_CONFIRMATION" ? "INTAKE" : project.phase;
@@ -41,7 +41,9 @@ function MiniBudget({ project }: { project: ProjectSummary }): JSX.Element {
   const planner = project.budget.plannerSpentTokens;
   const workerPct = Math.min(100, (worker / total) * 100);
   const plannerPct = Math.min(100 - workerPct, (planner / total) * 100);
-  const title = `research workers ${formatExact(worker)} + Research Manager ${formatExact(planner)} of ${formatExact(total)}`;
+  const readerLabel =
+    project.workflow === "trajectories-v2" ? "summary and final readings" : "Research Manager";
+  const title = `research workers ${formatExact(worker)} + ${readerLabel} ${formatExact(planner)} of ${formatExact(total)}`;
   return (
     <div className="budget mini" title={title}>
       <div className="budget-bar" role="img" aria-label={title}>
@@ -95,18 +97,15 @@ function ProjectCard({ project }: { project: ProjectSummary }): JSX.Element {
         <span className="muted small">
           {project.waves} wave{project.waves === 1 ? "" : "s"}
         </span>
-        <span className="muted small">{project.autonomy}</span>
+        <span className="muted small">
+          {project.workflow === "trajectories-v2" ? "long trajectories" : project.autonomy}
+        </span>
         {project.updatedAt === null ? null : (
           <span className="muted small">{formatAgo(project.updatedAt)}</span>
         )}
       </div>
     </Link>
   );
-}
-
-interface MountRow {
-  name: string;
-  path: string;
 }
 
 function NewProjectDialog({ onClose }: { onClose: () => void }): JSX.Element {
@@ -117,30 +116,66 @@ function NewProjectDialog({ onClose }: { onClose: () => void }): JSX.Element {
   const [contextMarkdown, setContextMarkdown] = useState("");
   const [advanced, setAdvanced] = useState(false);
   const [totalTokens, setTotalTokens] = useState(String(NEW_PROJECT_DEFAULTS.budget.totalTokens));
-  const [autonomy, setAutonomy] = useState<"auto" | "gated">(NEW_PROJECT_DEFAULTS.autonomy);
   const [maxWaves, setMaxWaves] = useState(String(NEW_PROJECT_DEFAULTS.limits.maxWaves));
   const [allowWebSearch, setAllowWebSearch] = useState(NEW_PROJECT_DEFAULTS.allowWebSearch);
-  const [mounts, setMounts] = useState<MountRow[]>([{ name: "", path: "" }]);
+  const [solversPerWave, setSolversPerWave] = useState(
+    String(NEW_PROJECT_DEFAULTS.trajectory.solversPerWave),
+  );
+  const [explorersPerWave, setExplorersPerWave] = useState(
+    String(NEW_PROJECT_DEFAULTS.trajectory.explorersPerWave),
+  );
+  const [verifiersPerClaim, setVerifiersPerClaim] = useState(
+    String(NEW_PROJECT_DEFAULTS.trajectory.verifiersPerClaim),
+  );
+  const [passesRequired, setPassesRequired] = useState(
+    String(NEW_PROJECT_DEFAULTS.trajectory.passesRequired),
+  );
   // Files cannot be stored before the project exists, so they are staged here
   // and uploaded the moment creation succeeds — before we navigate away.
   const [stagedSources, setStagedSources] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const pushToast = useStore((s) => s.pushToast);
+  const solverCount = Number(solversPerWave);
+  const explorerCount = Number(explorersPerWave);
+  const verifierCount = Number(verifiersPerClaim);
+  const passCount = Number(passesRequired);
+  const trajectoryError =
+    [solverCount, explorerCount, verifierCount, passCount].some(
+      (value) => !Number.isSafeInteger(value),
+    ) ||
+    solverCount < 0 ||
+    explorerCount < 0 ||
+    verifierCount < 1 ||
+    passCount < 1 ||
+    solverCount > 8 ||
+    explorerCount > 8 ||
+    verifierCount > 8 ||
+    passCount > 8
+      ? "Research and verification counts must be whole numbers in the displayed ranges."
+      : solverCount + explorerCount < 1
+        ? "At least one Solver or Explorer is required per round."
+        : solverCount + explorerCount > 8
+          ? "At most eight research trajectories may start per round."
+          : passCount > verifierCount
+            ? "Required passes cannot exceed the number of independent checks."
+            : null;
 
   const submit = (): void => {
-    if (busy || title.trim() === "" || statement.trim() === "") return;
-    const sourceMounts: SourceMount[] = mounts
-      .filter((m) => m.name.trim() !== "" && m.path.trim() !== "")
-      .map((m) => ({ name: m.name.trim(), path: m.path.trim(), note: "" }));
-
+    if (busy || title.trim() === "" || statement.trim() === "" || trajectoryError !== null) return;
     const config: Record<string, unknown> = {};
     const tokens = Number(totalTokens);
     const waves = Number(maxWaves);
     if (Number.isFinite(tokens) && tokens > 0) config["budget"] = { totalTokens: Math.floor(tokens) };
     if (Number.isFinite(waves) && waves > 0) config["limits"] = { maxWaves: Math.floor(waves) };
-    config["autonomy"] = autonomy;
+    config["workflow"] = "trajectories-v2";
+    config["autonomy"] = "auto";
     config["allowWebSearch"] = allowWebSearch;
-    if (sourceMounts.length > 0) config["sourceMounts"] = sourceMounts;
+    config["trajectory"] = {
+      solversPerWave: Math.floor(solverCount),
+      explorersPerWave: Math.floor(explorerCount),
+      verifiersPerClaim: Math.floor(verifierCount),
+      passesRequired: Math.floor(passCount),
+    };
 
     setBusy(true);
     void run(() =>
@@ -215,7 +250,7 @@ function NewProjectDialog({ onClose }: { onClose: () => void }): JSX.Element {
               value={contextMarkdown}
               spellCheck={false}
               onChange={(e) => setContextMarkdown(e.target.value)}
-              placeholder="Paste long notes, references, partial attempts, intuitions, and possible obstructions. The Research Manager will read them before drafting W000…"
+              placeholder="Paste long notes, references, partial attempts, intuitions, and possible obstructions. They will be read before W000 is drafted…"
             />
             <span className="muted small">
               Long paragraphs are welcome. Supplied claims remain unverified until the research process checks them.
@@ -226,7 +261,7 @@ function NewProjectDialog({ onClose }: { onClose: () => void }): JSX.Element {
             <span className="field-label">Supplementary files <em>(optional)</em></span>
             <SourceDropzone slug={null} staged={stagedSources} onStagedChange={setStagedSources} />
             <span className="muted small">
-              Files are stored with the raw intake before the Research Manager drafts W000.
+              Files are stored verbatim with the raw intake before W000 is drafted.
             </span>
           </div>
 
@@ -250,17 +285,6 @@ function NewProjectDialog({ onClose }: { onClose: () => void }): JSX.Element {
                 />
               </label>
               <label className="field inline">
-                <span className="field-label">Autonomy</span>
-                <select
-                  className="select"
-                  value={autonomy}
-                  onChange={(e) => setAutonomy(e.target.value === "gated" ? "gated" : "auto")}
-                >
-                  <option value="auto">auto</option>
-                  <option value="gated">gated</option>
-                </select>
-              </label>
-              <label className="field inline">
                 <span className="field-label">Max waves</span>
                 <input
                   className="input mono"
@@ -277,51 +301,50 @@ function NewProjectDialog({ onClose }: { onClose: () => void }): JSX.Element {
                     checked={allowWebSearch}
                     onChange={(e) => setAllowWebSearch(e.target.checked)}
                   />
-                  Allow the Research Manager to grant literature search to workers
+                  Allow research trajectories and verification to search the literature
                 </span>
               </label>
-              <div className="field">
-                <span className="field-label">Source mounts</span>
-                {mounts.map((mount, i) => (
-                  <div key={i} className="mount-row">
-                    <input
-                      className="input mono"
-                      placeholder="name"
-                      value={mount.name}
-                      onChange={(e) =>
-                        setMounts((rows) =>
-                          rows.map((r, j) => (j === i ? { ...r, name: e.target.value } : r)),
-                        )
-                      }
-                    />
-                    <input
-                      className="input mono"
-                      placeholder="/absolute/path"
-                      value={mount.path}
-                      onChange={(e) =>
-                        setMounts((rows) =>
-                          rows.map((r, j) => (j === i ? { ...r, path: e.target.value } : r)),
-                        )
-                      }
-                    />
-                    <button
-                      type="button"
-                      className="icon-button"
-                      aria-label="remove mount"
-                      onClick={() => setMounts((rows) => rows.filter((_, j) => j !== i))}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  className="button ghost"
-                  onClick={() => setMounts((rows) => [...rows, { name: "", path: "" }])}
-                >
-                  ＋ add mount
-                </button>
-              </div>
+              <label className="field inline">
+                <span className="field-label">Solvers per round (N)</span>
+                <input
+                  className="input mono"
+                  value={solversPerWave}
+                  inputMode="numeric"
+                  onChange={(e) => setSolversPerWave(e.target.value)}
+                />
+              </label>
+              <label className="field inline">
+                <span className="field-label">Explorers per round (M)</span>
+                <input
+                  className="input mono"
+                  value={explorersPerWave}
+                  inputMode="numeric"
+                  onChange={(e) => setExplorersPerWave(e.target.value)}
+                />
+              </label>
+              <label className="field inline">
+                <span className="field-label">Independent checks per claim (V)</span>
+                <input
+                  className="input mono"
+                  value={verifiersPerClaim}
+                  inputMode="numeric"
+                  onChange={(e) => setVerifiersPerClaim(e.target.value)}
+                />
+              </label>
+              <label className="field inline">
+                <span className="field-label">Checks required to become a fact (W)</span>
+                <input
+                  className="input mono"
+                  value={passesRequired}
+                  inputMode="numeric"
+                  onChange={(e) => setPassesRequired(e.target.value)}
+                />
+              </label>
+              {trajectoryError === null ? null : (
+                <div className="settings-help settings-error" role="alert">
+                  {trajectoryError}
+                </div>
+              )}
             </div>
           ) : null}
         </div>
@@ -332,7 +355,9 @@ function NewProjectDialog({ onClose }: { onClose: () => void }): JSX.Element {
           <button
             type="button"
             className="button primary"
-            disabled={busy || title.trim() === "" || statement.trim() === ""}
+            disabled={
+              busy || title.trim() === "" || statement.trim() === "" || trajectoryError !== null
+            }
             onClick={submit}
           >
             {busy ? (stagedSources.length > 0 ? "Saving materials…" : "Preparing…") : "Next"}

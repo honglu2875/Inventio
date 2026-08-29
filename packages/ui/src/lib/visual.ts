@@ -3,6 +3,7 @@ import type {
   ClaimStatus,
   IssueSeverity,
   TaskStatus,
+  VerificationState,
   WorkerRole,
 } from "@inventio/schema";
 
@@ -14,6 +15,7 @@ import type {
 export const ROLE_GLYPH: Record<WorkerRole | "planner", string> = {
   solver: "◆",
   explorer: "✦",
+  verifier: "✓",
   reviewer: "▣",
   synthesizer: "⬢",
   planner: "●",
@@ -22,6 +24,7 @@ export const ROLE_GLYPH: Record<WorkerRole | "planner", string> = {
 export const ROLE_COLOR: Record<WorkerRole | "planner", string> = {
   solver: "var(--role-solver)",
   explorer: "var(--role-explorer)",
+  verifier: "var(--ok)",
   reviewer: "var(--role-reviewer)",
   synthesizer: "var(--role-synthesizer)",
   planner: "var(--role-planner)",
@@ -48,6 +51,19 @@ export const CLAIM_STATUS_GLYPH: Record<ClaimStatus, string> = {
   REFUTED: "✗",
   SUPERSEDED: "≡",
 };
+
+export function verificationDisplayStatus(
+  verification: Pick<VerificationState, "status" | "verdict">,
+): "PASS" | "FAIL" | "ERROR" | "RUNNING" | "QUEUED" {
+  return verification.verdict ?? (verification.status === "running" ? "RUNNING" : "QUEUED");
+}
+
+/** v2 treats a claim as statement + alleged proof; a failed proof need not refute the statement. */
+export function trajectoryClaimStatusLabel(status: ClaimStatus): string {
+  if (status === "REFUTED") return "FAILED";
+  if (status === "SUPERSEDED") return "DUPLICATE";
+  return status;
+}
 
 /** Plain-language scope of a claim label. Claim status never transfers to a candidate. */
 export function claimStatusMeaning(status: ClaimStatus): string {

@@ -77,8 +77,10 @@ const ModelId = z.string().trim().min(1).max(200).regex(/^\S+$/, "must not conta
 const SettingsModelChoice = z.object({ model: ModelId.nullable(), effort: ReasoningEffort });
 const ModelSettingsBody = z.object({
   researchManager: SettingsModelChoice,
+  summaryReader: SettingsModelChoice.optional(),
   solver: SettingsModelChoice,
   explorer: SettingsModelChoice,
+  verifier: SettingsModelChoice.optional(),
   reviewer: SettingsModelChoice,
   synthesizer: SettingsModelChoice,
 });
@@ -88,6 +90,25 @@ const ProjectSettingsBody = z.object({
   allowWebSearch: z.boolean(),
   totalTokens: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   maxWaves: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  trajectory: z
+    .object({
+      solversPerWave: z.number().int().min(0).max(8),
+      explorersPerWave: z.number().int().min(0).max(8),
+      verifiersPerClaim: z.number().int().min(1).max(8),
+      passesRequired: z.number().int().min(1).max(8),
+    })
+    .superRefine((value, ctx) => {
+      if (value.solversPerWave + value.explorersPerWave < 1) {
+        ctx.addIssue({ code: "custom", message: "at least one Solver or Explorer is required" });
+      }
+      if (value.solversPerWave + value.explorersPerWave > 8) {
+        ctx.addIssue({ code: "custom", message: "at most eight research trajectories may start per round" });
+      }
+      if (value.passesRequired > value.verifiersPerClaim) {
+        ctx.addIssue({ code: "custom", message: "passesRequired cannot exceed verifiersPerClaim" });
+      }
+    })
+    .optional(),
 });
 const DirectiveBody = z.object({
   text: z.string().min(1).max(10_000),
@@ -426,7 +447,21 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
       run(reply, () => {
         const engine = engineOf(request.params.slug);
         const id = checkedId(request.params.id, "artifact");
-        const meta = engine.state.artifacts[id];
+        const recorded = engine.state.artifacts[id];
+        const verification = engine.state.verifications[id];
+        const fact = engine.state.facts[id];
+        const meta =
+          recorded ??
+          (verification?.artifactPath
+            ? {
+                id,
+                kind: "verification" as const,
+                conclusion: verification.verdict,
+                path: verification.artifactPath,
+              }
+            : fact
+              ? { id, kind: "fact" as const, conclusion: fact.status, path: fact.path }
+              : null);
         if (!meta) throw new ManagerError(`unknown artifact ${id}`, 404);
         const file = confine(engine.paths.dir, meta.path);
         if (!existsSync(file)) throw new ManagerError(`artifact file missing: ${meta.path}`, 404);

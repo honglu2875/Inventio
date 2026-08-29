@@ -91,6 +91,7 @@ function request<T>(method: Method, path: string, body?: unknown, asText = false
 export interface ProjectSummary {
   slug: string;
   title: string;
+  workflow: ProjectState["config"]["workflow"];
   phase: ProjectState["phase"];
   paused: boolean;
   terminal: { result: Result; finalPath: string } | null;

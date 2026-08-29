@@ -2,9 +2,9 @@
 
 Rules for whoever (human or agent) picks this up:
 
-- `DESIGN.md` is the spec; `PROTOCOL.md` is the constitution. Read both
-  before writing code. Do not re-open decisions listed at the top of
-  `DESIGN.md`.
+- `TRAJECTORY-DESIGN.md` is the default-workflow spec. `DESIGN.md` and
+  `PROTOCOL.md` define the replay-compatible `council-v1` workflow and shared
+  infrastructure. Read the documents relevant to the code being changed.
 - Work milestone by milestone. Update the **Status** line and check boxes
   as you go — this file is the recovery point after any interruption.
 - Every milestone ends green: `npm test` passes at the repo root and the
@@ -14,8 +14,8 @@ Rules for whoever (human or agent) picks this up:
 - Record every deliberate divergence from DESIGN.md in the deviation log
   at the bottom, with a reason.
 
-**Status: M0–M10 complete; M12 behavioral tuning, M13 selective rebase, M14 working-library curation, M15 single-controller Research Manager, M16 per-project model settings, M17 verbatim intake/editable W000, M18 intake-summary discipline/project Web search, M19 central prompt architecture, M20 revisable raw intake, M21 unified effective project settings, M22 numbered continuation views, M23 W000 regeneration-state recovery, M24 mathematical W000 voice, M25 explicit Web-search state, and M26 standalone TeX publication are green. The Research Manager now carries a recurrent mathematical view between rounds, owns research judgment and library organization, can inspect the working library and original intake sources on demand, may direct up to eight research workers per round, and uses separately budgeted rigorous synthesis. After a stopping report it can independently reassess the complete record, write a preprint or research report in TeX, and hand accepted source to the local untrusted compiler. 308 tests pass (schema 32, conductor 151, UI 104, codex-sim 21), all three TypeScript packages typecheck, and the production UI builds. An isolated migration audit of every computation present in the active genus-2 project at the final snapshot repaired 32/32 baselines: every command exited 0 and every pristine rerun matched exactly. The revised lifecycle also established one substantive scoped theorem after two independent PASS reviews, while retiring 66 unsupported leads and preserving four unresolved background leads. The standalone repository has been released; remaining work is owner review of the four explicitly marked draft voice examples and optional M11 polish.**
-Last updated: 2026-08-26 by Codex (standalone TeX publication).
+**Status: M0–M26 preserve the released `council-v1` implementation. M27 implements the new `trajectories-v2` workflow on the `long-trajectories` branch and makes it the default for new projects, while old projects remain replay-compatible. Long independent Solver and Explorer sessions now drive each round directly; proposed results become self-contained claims, independent Verifiers apply the configured V/W threshold, accepted claims become facts, later concrete challenges can reopen facts, sparse milestones expose progress, and a strong end-of-round reader may make only a small revision to the common mathematical view. The first live N=2/M=2 smoke test exposed and fixed duplicate trajectory IDs and noninteractive MCP approval; the real-account MCP regression probe now reaches the authenticated server and retrieves a hidden marker. The complete suite passes: 327 tests (schema 34, conductor 166, UI 106, codex-sim 21), all TypeScript packages typecheck, and the production UI builds.**
+Last updated: 2026-08-28 by Codex (long-trajectory refactor).
 
 Quota note: work has been interrupted twice by Opus subagent quota limits. The
 tracker is the recovery point — check the milestone boxes, then
@@ -23,6 +23,68 @@ tracker is the recovery point — check the milestone boxes, then
 where things stand before writing code.
 
 ---
+
+## M27 — Long independent trajectories ✅
+
+Binding spec: `TRAJECTORY-DESIGN.md`. This is the default workflow for new
+projects; the earlier council remains available as `council-v1` for existing
+projects and deterministic replay.
+
+- [x] Add an explicit workflow version and preserve legacy event replay, state,
+      artifacts, API behavior, and UI interpretation.
+- [x] Add project settings N/M/V/W: Solvers and Explorers per round, independent
+      checks per claim, and passes required for promotion (`W <= V`). Defaults
+      are N=2, M=2, V=2, W=2, five rounds, an eight-process global pool, and Web
+      search enabled.
+- [x] Replace model-directed round planning in `trajectories-v2` with a small
+      deterministic loop that starts the configured long Solver and Explorer
+      trajectories. No Research Manager chooses assignments or research
+      directions in this workflow.
+- [x] Give each trajectory a two-hour default, independent context, broad
+      project-scoped read tools, a private calculation directory, optional Web
+      search, the current mathematical view, active facts and claims, original
+      sources, and verbatim human guidance.
+- [x] Require a complete trajectory write-up plus a short parseable collection
+      of worthwhile new mathematical statements with self-contained proofs;
+      store these as Markdown claims rather than treating assumptions or routine
+      examples as results.
+- [x] Run claim verification asynchronously alongside later research. Promote a
+      claim only after W of V independent PASS results; mark an impossible
+      threshold FAILED even when a verifier process itself errors, so unfinished
+      checks cannot accumulate forever.
+- [x] Record equivalent claims transitively while retaining distinct proofs.
+      Once one proof is accepted, remove its equivalents from the active claim
+      pool and preserve them as inspectable duplicates.
+- [x] Let each trajectory raise at most one concrete challenge to an accepted
+      fact. Store the challenge as a correction claim and submit it to the same
+      independent verification process before changing the fact.
+- [x] Let a strong summary reader make a small end-of-round revision to W000
+      only when new claims or facts materially change the mathematical picture;
+      it cannot plan, dispatch, or direct the next round.
+- [x] Add sparse trajectory milestones and render trajectories, claims, facts,
+      checks, equivalences, corrections, and intermediate progress in the
+      existing UI without replacing its overall navigation.
+- [x] Separate the initial W000 reading from all legacy Research Manager prompt
+      material and preserve an editable preview based on the raw objective,
+      notes, uploads, and source tools.
+- [x] Add crash recovery for finished trajectory and verification outputs so a
+      restart records already-durable work without repeating a model call or
+      spending its tokens twice.
+- [x] Centralize and document every new prompt and tool contract; update the
+      repository overview and mark the older protocol documents as compatibility
+      references rather than the default research design.
+- [x] Verify exact JSON/Markdown preservation (including literal `\\frac`),
+      recovery, threshold failure, replay determinism, API behavior, graph
+      derivation, UI rendering, and legacy compatibility.
+- [x] Live-smoke N=2/M=2: reserve a distinct contiguous task-ID range before
+      recording a round and fail fast on any duplicate, so four configured
+      trajectories launch as four processes instead of racing over one task.
+- [x] Launch the authenticated local MCP server as required with strict Codex
+      config, an exact tool allow-list, and documented noninteractive approval.
+      Replace the blocking historical diagnostic with the production async
+      runner; its real-account marker retrieval passes.
+
+Verify: `npm test`, `npm run typecheck`, `npm run build`, `git diff --check`.
 
 ## M0 — Documents ✅
 
@@ -175,14 +237,18 @@ not accepted as a proof."* The mathematics is credible throughout.
 
 Every `memory_search` from every worker failed with `MCP tool call requires
 approval, but approval policy is never`. 57 curated cards, none ever readable.
-A probe (`packages/conductor/scripts/probe-mcp-approval.ts`) showed no
-`mcp_servers.<n>.approval_mode` value fixes it under non-interactive `exec`.
+The original diagnostic later proved invalid: it tried the obsolete
+`approval_mode` key and used `spawnSync` while hosting the MCP server in the
+same Node process, which froze the server during its own handshake.
 
-Fix: the catalog now travels **inside the packet** as `research-library-index.md`,
+The legacy fallback remains useful: its catalog travels **inside the packet** as `research-library-index.md`,
 role-filtered by the Conductor (reviewers see only VERIFIED; quarantined rows
 render as explicit warnings; PENDING current-wave cards never appear), exactly
-the file-based protocol PROTOCOL §7 already specifies as the fallback. MCP
-stays wired as an optional convenience and the contract says so. Tests added.
+the file-based protocol PROTOCOL §7 specifies. The direct tool path is now also
+fixed: generated Codex configuration is strict, the authenticated server is
+required, its tools are allow-listed, and `default_tools_approval_mode` is
+`approve`. The asynchronous real-account probe reaches the server and expands
+its marker card without a human prompt.
 
 ### F2 — The adversarial layer never engaged (FIXED — scoped candidates)
 

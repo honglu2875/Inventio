@@ -2,9 +2,11 @@ import type { NodeTypes } from "@xyflow/react";
 import CandidateNode from "./CandidateNode";
 import ClaimNode from "./ClaimNode";
 import FinalNode from "./FinalNode";
+import FactNode from "./FactNode";
 import IssueNode from "./IssueNode";
 import LineageNode from "./LineageNode";
 import MemoryHubNode from "./MemoryHubNode";
+import MilestoneNode from "./MilestoneNode";
 import ObligationNode from "./ObligationNode";
 import ProblemNode from "./ProblemNode";
 import QuestionNode from "./QuestionNode";
@@ -12,6 +14,7 @@ import ResolutionNode from "./ResolutionNode";
 import ReviewNode from "./ReviewNode";
 import TaskNode from "./TaskNode";
 import WaveNode from "./WaveNode";
+import VerificationNode from "./VerificationNode";
 
 /**
  * React Flow node type registries. Defined once at module scope — recreating
@@ -29,6 +32,7 @@ export const OPS_NODE_TYPES: NodeTypes = {
   memoryHubNode: MemoryHubNode,
   questionNode: QuestionNode,
   finalNode: FinalNode,
+  milestoneNode: MilestoneNode,
 };
 
 export const EVIDENCE_NODE_TYPES: NodeTypes = {
@@ -36,6 +40,9 @@ export const EVIDENCE_NODE_TYPES: NodeTypes = {
   claimNode: ClaimNode,
   obligationNode: ObligationNode,
   issueNode: IssueNode,
+  problemNode: ProblemNode,
+  factNode: FactNode,
+  verificationNode: VerificationNode,
 };
 
 /** Graph node `type` (schema) → React Flow node type name. */
@@ -53,4 +60,7 @@ export const RF_TYPE_OF: Record<string, string> = {
   claim: "claimNode",
   issue: "issueNode",
   obligation: "obligationNode",
+  milestone: "milestoneNode",
+  fact: "factNode",
+  verification: "verificationNode",
 };

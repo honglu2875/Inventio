@@ -207,7 +207,10 @@ describe("reducer", () => {
     expect(state.budget.plannerSpentTokens).toBe(2 * 8000);
     expect(state.counters.task).toBe(3);
     expect(state.counters.wave).toBe(1);
-    expect(state.counters.claim).toBe(2);
+    expect(state.counters.claim).toBe(3);
+    expect(state.counters.fact).toBe(1);
+    expect(state.counters.verification).toBe(1);
+    expect(state.counters.milestone).toBe(1);
     expect(state.counters.decision).toBe(2);
     expect(state.counters.publication).toBe(1);
   });

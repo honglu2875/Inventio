@@ -1,9 +1,10 @@
 # Inventio prompt architecture
 
 This directory is the review boundary for deliberate model-facing
-instructions in the Conductor. If wording is intended to guide a Research
-Manager or worker, it belongs here even when the instruction is only used for
-an error recovery turn or a developer diagnostic.
+instructions in Inventio. If wording is intended to guide an initial reader,
+research trajectory, Verifier, summary reader, legacy Research Manager, or
+other model call, it belongs here even when it is used only for recovery or a
+developer diagnostic.
 
 The effective prompt is not one string. Inventio gives Codex a short message on
 standard input, a deliberately composed working directory, a JSON output
@@ -28,7 +29,8 @@ instruction boundary.
 
 | File | What may be revised there | Direct consumers |
 |---|---|---|
-| `researchManager.ts` | W000, post-report W###.n revision, next-move, completed-round assessment, legacy statement-revision, stopping-report composition, and post-terminal TeX-publication contracts; all Research Manager context-file composition | `engine/engine.ts` |
+| `trajectories.ts` | All `trajectories-v2` contracts and composed context: initial W000 reading, long Solver/Explorer sessions, independent claim checks, small end-of-round view edits, and the stopping report | `engine/engine.ts` |
+| `researchManager.ts` | Legacy W000, post-report W###.n revision, next-move, completed-round assessment, legacy statement-revision, stopping-report composition, and post-terminal TeX-publication contracts; all council-v1 Research Manager context-file composition | `engine/engine.ts` |
 | `workers.ts` | Solver, Explorer, Reviewer, and Synthesizer contracts; generated worker `AGENTS.md`; generated `research-question.md` | `engine/packets.ts` |
 | `shared.ts` | Mathematical-writing rules inserted into both Research Manager and worker contracts | `researchManager.ts`, `workers.ts` |
 | `managerExamples.ts` | Owner-written and owner-review Research Manager voice examples, including the W000 voice-and-emphasis contrast | `researchManager.ts` |
@@ -42,15 +44,97 @@ contracts because their labels and warnings materially guide the Research
 Manager. Pure evidence builders such as the deterministic round summary remain
 under `engine/`: their output is project data, not a behavioral prompt.
 
-## Research Manager calls
+## Long-trajectory calls (`trajectories-v2`)
 
-All calls below are launched by `ProjectEngine.runResearchManagerCall()` in
+New projects follow this path. `ProjectEngine.trajectoryLoop()` schedules the
+work deterministically; there is no model next-move call and no model that
+briefs the trajectories.
+
+### W000 initial reading
+
+- **When:** at first start, and whenever the owner explicitly regenerates W000
+  after revising the raw objective, background, or uploaded files.
+- **Short prompt:** `TRAJECTORY_INTAKE_PROMPT` in `trajectories.ts`.
+- **Long contract:** the deliberately small `AGENTS.md` produced by
+  `trajectoryIntakeFiles()`. This is separate from the legacy intake contract,
+  so controller language and its voice examples cannot leak into v2.
+- **Context:** `statement.md`, optional `context.md`, `raw-materials/index.md`,
+  and fixed copies of every indexed original source.
+- **Output:** the compatible `IntakeOutput` schema. Its W000 abstract and
+  Markdown are substantive; legacy taxonomy/question fields stay empty.
+- **Execution:** the configured summary-reader model, isolated from repository
+  instructions. Web search follows the project setting; retained sources are
+  also available through the project-scoped source tools.
+
+### Solver and Explorer trajectories
+
+- **When:** `planTrajectoryWave()` starts exactly the configured `N` Solvers
+  and `M` Explorers for each research round.
+- **Short prompt:** `TRAJECTORY_WORKER_PROMPT`, or
+  `TRAJECTORY_RESTART_PROMPT` when continuing a durable Codex thread after a
+  process restart.
+- **Long contract/context:** `trajectoryWorkerFiles()` writes a role-specific
+  `AGENTS.md`, the exact problem, current mathematical view, compact active
+  facts and claims, original-source catalog, and any human direction belonging
+  to that round. Earlier full write-ups, proofs, and original sources remain
+  expandable through scoped MCP tools rather than being copied wholesale.
+- **Output:** `TrajectoryOutput`: a readable write-up, short mathematical
+  summary, conclusion about the original problem, and at most eight valuable
+  self-contained statements with complete alleged proofs. An empty claim list
+  is valid.
+- **Execution:** one isolated, workspace-write Codex process with `scratch/`, a
+  two-hour default wall-clock allowance, configured model/effort, optional Web
+  search, and project tools. Sparse `mark_milestone` calls feed the graph;
+  `flag_fact` may be used once only for a concrete contradiction.
+
+### Independent claim checks
+
+- **When:** as soon as a new claim is persisted, independently `V` times.
+  These calls share the global process pool and may run while later research is
+  being prepared.
+- **Short prompt:** `VERIFICATION_PROMPT`.
+- **Long contract/context:** `verificationFiles()` supplies exactly the
+  original problem and one self-contained claim/proof. Other project attempts
+  are absent.
+- **Output:** `VerificationOutput` with `PASS` or `FAIL`, a short reason, and a
+  complete report. At least the claim's frozen `W` passes are needed for fact
+  promotion; settings changes never rewrite an existing claim's standard.
+- **Recovery:** queued and running checks are durable. A server restart reruns
+  an incomplete check, and invariant repair finishes any interrupted
+  claim-to-fact transition without duplicating facts.
+
+### End-of-round view revision
+
+- **When:** once after all Solver/Explorer trajectories in a round finish.
+- **Short prompt:** `SUMMARY_REVIEW_PROMPT`.
+- **Long contract/context:** `summaryReviewFiles()` supplies the current view,
+  concise trajectory returns, and the current fact/claim index.
+- **Output:** `SummaryRevisionOutput`. The reader either returns the view
+  unchanged or makes one small mathematical edit, and may identify groups of
+  truly identical claim statements. It cannot choose future work.
+
+### Stopping report
+
+- **When:** a verified fact proves or disproves the original problem, the
+  configured round limit is reached, or the remaining allowance cannot support
+  another round. Outstanding checks finish first.
+- **Short prompt:** `TRAJECTORY_FINAL_PROMPT`.
+- **Long contract/context:** `trajectoryFinalFiles()` supplies the exact
+  problem, current view, deterministic stopping status, active facts with
+  proofs, and separate warnings for facts under unresolved correction.
+- **Output:** the compatible `FinalOutput`. The runtime prepends the
+  authoritative result and has a deterministic fallback if composition fails.
+
+## Legacy Research Manager calls (`council-v1`)
+
+All calls below are used by replay-compatible `council-v1` projects and are
+launched by `ProjectEngine.runResearchManagerCall()` in
 `engine/engine.ts`. That method writes the listed files under
 `projects/<slug>/decisions/<DEC###>/packet/`, selects the configured Research
 Manager model unless noted otherwise, attaches read-only memory tools when
 allowed, writes `output-schema.json`, and invokes `codex/structured.ts`.
 
-### W000 initial reading
+### Legacy W000 initial reading
 
 - **When:** a new project starts, or the owner revises the raw objective,
   background, or files and explicitly regenerates W000 before confirmation.
@@ -239,12 +323,23 @@ status for deterministic handling.
 
 ## MCP tool descriptions
 
-`MODEL_TOOL_DEFINITIONS` is returned by `memory/service.ts` on every MCP
-`tools/list` request. The descriptions tell models how to search/expand the
-research library and how to list/open original intake sources. They describe
-access but do not enforce it: bearer scope, reviewer restrictions,
-quarantine, and Research-Manager-only source access remain deterministic code
-in `memory/service.ts`.
+`MODEL_TOOL_DEFINITIONS` is returned by `memory/service.ts` on MCP
+`tools/list` requests. Legacy projects receive their card/source tools. A
+`trajectories-v2` Solver or Explorer additionally receives tools to search/open
+active claims and facts, search/open earlier write-ups, record a milestone, and
+raise one concrete fact correction. It may list/open original intake sources
+as well. Tool descriptions guide use but do not grant authority: bearer scope,
+role checks, project workflow, active status, one-correction limits, and file
+confinement are enforced in `memory/service.ts` and `engine.ts`.
+
+`codex/runner.ts` supplies this local authenticated server through strict
+generated configuration. It marks the server required, passes the exact
+`MODEL_TOOL_NAMES` allow-list, and uses Codex's
+`default_tools_approval_mode="approve"` so noninteractive research sessions can
+actually call the tools without a human prompt. This approval does not widen
+authority: the short-lived bearer token and the checks above still decide what
+each call may read or change. `scripts/probe-mcp-approval.ts` exercises this
+exact production path against a live local server.
 
 ## Model-visible contracts outside this directory
 

@@ -12,12 +12,14 @@ import {
 import {
   candidateLifecycle,
   deriveEvidenceGraph,
+  deriveTrajectoryEvidenceGraph,
   latestActiveCandidateId,
   type ProjectState,
 } from "@inventio/schema";
 import { EVIDENCE_NODE_TYPES } from "../components/nodes";
 import { useProjectSlug } from "../components/ProjectContext";
 import { layoutEvidence } from "../lib/evidenceLayout";
+import { layoutTrajectoryEvidence } from "../lib/trajectoryEvidenceLayout";
 import { buildEdges, buildNodes, stabilizeNodes, type ExtraData } from "../lib/rfGraph";
 import { candidateStageColor } from "../lib/visual";
 import { useProjectState } from "../store/hooks";
@@ -29,6 +31,87 @@ import { useProjectState } from "../store/hooks";
  */
 
 const PRO_OPTIONS = { hideAttribution: true } as const;
+
+function TrajectoryEvidenceCanvas({ state }: { state: ProjectState }): JSX.Element {
+  const [params, setParams] = useSearchParams();
+  const sel = params.get("sel");
+  const { setCenter } = useReactFlow();
+  const cache = useRef<Map<string, Node>>(new Map());
+  const graph = useMemo(() => deriveTrajectoryEvidenceGraph(state), [state]);
+  const layout = useMemo(() => layoutTrajectoryEvidence(graph), [graph]);
+  const nodes = useMemo(
+    () => stabilizeNodes(cache.current, buildNodes(graph, layout, { selectedId: sel })),
+    [graph, layout, sel],
+  );
+  const edges = useMemo(() => buildEdges(graph), [graph]);
+  const boxes = useMemo(
+    () => new Map(layout.nodes.map((node) => [node.id, node])),
+    [layout],
+  );
+  const select = useCallback((nodeId: string) => {
+    setParams((previous) => {
+      const next = new URLSearchParams(previous);
+      next.set("sel", nodeId);
+      return next;
+    }, { replace: false });
+  }, [setParams]);
+  return (
+    <ReactFlow
+      nodes={nodes}
+      edges={edges}
+      nodeTypes={EVIDENCE_NODE_TYPES}
+      nodesDraggable={false}
+      nodesConnectable={false}
+      elementsSelectable
+      zoomOnDoubleClick={false}
+      minZoom={0.12}
+      maxZoom={1.6}
+      fitView
+      proOptions={PRO_OPTIONS}
+      onNodeClick={(_event, node) => select(node.id)}
+      onNodeDoubleClick={(_event, node) => {
+        const box = boxes.get(node.id);
+        if (!box) return;
+        void setCenter(box.x + box.w / 2, box.y + box.h / 2, { zoom: 1, duration: 300 });
+      }}
+    >
+      <Background gap={24} size={1} />
+      <Controls showInteractive={false} />
+      <MiniMap pannable zoomable nodeStrokeWidth={2} />
+    </ReactFlow>
+  );
+}
+
+function TrajectoryEvidence({ state }: { state: ProjectState }): JSX.Element {
+  const activeClaims = state.claimOrder.filter((id) => state.claims[id]?.status === "UNVERIFIED").length;
+  const activeFacts = state.factOrder.filter((id) => {
+    const status = state.facts[id]?.status;
+    return status === "ACTIVE" || status === "SUSPICIOUS";
+  }).length;
+  const queued = state.verificationOrder.filter((id) => state.verifications[id]?.status === "queued").length;
+  return (
+    <div className="evidence-view">
+      <div className="evidence-toolbar trajectory-evidence-toolbar">
+        <div className="evidence-status-banner">
+          <div className="row wrap">
+            <strong>Current mathematical evidence</strong>
+            <span className="chip ok">{activeFacts} fact{activeFacts === 1 ? "" : "s"}</span>
+            <span className="chip">{activeClaims} claim{activeClaims === 1 ? "" : "s"} being checked</span>
+            {queued > 0 ? <span className="chip warn">{queued} checks waiting</span> : null}
+          </div>
+          <p>
+            The graph follows each active claim through its independent checks to an established
+            fact. Failed and duplicate claims remain inspectable in the Library without crowding
+            this working view.
+          </p>
+        </div>
+      </div>
+      <div className="canvas evidence-canvas">
+        <ReactFlowProvider><TrajectoryEvidenceCanvas state={state} /></ReactFlowProvider>
+      </div>
+    </div>
+  );
+}
 
 function evidenceExtras(state: ProjectState, candidateId: string): ExtraData {
   const candidate = state.candidates[candidateId];
@@ -155,6 +238,10 @@ export default function EvidenceView(): JSX.Element {
         <p className="muted">Loading project…</p>
       </div>
     );
+  }
+
+  if (state.config.workflow === "trajectories-v2") {
+    return <TrajectoryEvidence state={state} />;
   }
 
   const requested = params.get("version");

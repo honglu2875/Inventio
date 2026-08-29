@@ -3,7 +3,7 @@ import path from "node:path";
 import {
   ProjectConfig,
   SLUG_RE,
-  defaultConfig,
+  defaultTrajectoryConfig,
   type ProjectState,
   type SourceMount,
 } from "@inventio/schema";
@@ -76,6 +76,7 @@ export interface CloneIntakeArgs {
 export interface ProjectSummary {
   slug: string;
   title: string;
+  workflow: ProjectState["config"]["workflow"];
   phase: ProjectState["phase"];
   paused: boolean;
   terminal: ProjectState["terminal"];
@@ -106,7 +107,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
  * the other budget defaults, but a supplied array (e.g. sourceMounts) replaces.
  */
 export function mergeConfig(patch: unknown): ProjectConfig {
-  const base: Record<string, unknown> = { ...defaultConfig() };
+  const base: Record<string, unknown> = { ...defaultTrajectoryConfig() };
   if (patch !== undefined && patch !== null) {
     if (!isPlainObject(patch)) throw new ManagerError("config must be an object", 400);
     for (const [key, value] of Object.entries(patch)) {
@@ -166,7 +167,19 @@ export class EngineManager {
   /** Per-project memory backend: recalls land in that project's event log. */
   private wireMemory(engine: ProjectEngine): void {
     if (!this.memoryService) return;
-    const backend = new FileMemoryBackend(engine.paths.dir, (rec) => engine.recordRecall(rec));
+    const backend = new FileMemoryBackend(
+      engine.paths.dir,
+      (rec) => engine.recordRecall(rec),
+      engine.state.config.workflow === "trajectories-v2"
+        ? {
+            getState: () => engine.state,
+            recordMilestone: (taskId, title, markdown) =>
+              engine.recordTrajectoryMilestone(taskId, title, markdown),
+            flagFact: (taskId, factId, reason) =>
+              engine.flagTrajectoryFact(taskId, factId, reason),
+          }
+        : undefined,
+    );
     this.memoryService.registerProject(engine.slug, backend);
   }
 
@@ -240,7 +253,9 @@ export class EngineManager {
       sourceMounts: [],
     });
     const legacyDigest = source.state.problem.contextDigestMarkdown;
-    const w000 = source.state.researchManagerNotes.find((note) => note.waveId === "W000");
+    const w000 =
+      source.state.mathematicalViews.find((note) => note.waveId === "W000") ??
+      source.state.researchManagerNotes.find((note) => note.waveId === "W000");
     const engine = ProjectEngine.create(this.deps(), {
       slug,
       title,
@@ -319,7 +334,7 @@ export class EngineManager {
   uploadSource(slug: string, filename: string, data: Buffer): UploadedSource & { mount: string } {
     const engine = this.require(slug);
     if (engine.isRefreshingIntake()) {
-      throw new ManagerError("source files cannot change while the Research Manager is reading the intake", 409);
+      throw new ManagerError("source files cannot change while the initial mathematical view is being regenerated", 409);
     }
     const safeName = sanitizeUploadName(filename);
     const retained = engine.state.problem.sources.some(
@@ -355,7 +370,7 @@ export class EngineManager {
   deleteSource(slug: string, name: string): void {
     const engine = this.require(slug);
     if (engine.isRefreshingIntake()) {
-      throw new ManagerError("source files cannot change while the Research Manager is reading the intake", 409);
+      throw new ManagerError("source files cannot change while the initial mathematical view is being regenerated", 409);
     }
     const safeName = sanitizeUploadName(name);
     const retained = engine.state.problem.sources.some(
@@ -389,6 +404,7 @@ export class EngineManager {
         return {
           slug: engine.slug,
           title: s.title,
+          workflow: s.config.workflow,
           phase: s.phase,
           paused: s.paused,
           terminal: s.terminal,

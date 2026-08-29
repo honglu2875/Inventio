@@ -3,6 +3,7 @@ import type {
   Clarification,
   ArtifactKind,
   CardStatus,
+  ClaimRelation,
   ClaimStatus,
   DecisionKind,
   IssueSeverity,
@@ -14,6 +15,7 @@ import type {
   Result,
   RosterEntry,
   Usage,
+  VerificationVerdict,
 } from "./events.js";
 import type { ProjectConfig, WorkerRole } from "./config.js";
 import type { IdKind } from "./ids.js";
@@ -49,6 +51,8 @@ export interface TaskState {
   disposition: "carry_forward" | "needs_precise_unblock" | "set_aside" | null;
   dispositionReason: string | null;
   preciseUnblock: string | null;
+  /** Mathematical turning points recorded during a long v2 trajectory. */
+  milestoneIds: string[];
 }
 
 export type WaveStatus = "open" | "softInterrupted" | "closed";
@@ -66,6 +70,8 @@ export interface WaveState {
   taskIds: string[];
   docketMarkdown: string | null;
   resolutionPath: string | null;
+  /** v2 summary reader has considered this round, including a no-change decision. */
+  summaryReviewed: boolean;
 }
 
 export interface ArtifactMeta {
@@ -111,13 +117,62 @@ export interface ReviewState {
 
 export interface ClaimState {
   id: string;
+  title: string;
   statement: string;
+  proofMarkdown: string;
   status: ClaimStatus;
   provenance: string;
   /** The proposing task, when known. Replayed legacy events infer this from provenance. */
   sourceTaskId: string | null;
+  sourceWaveId: string | null;
+  path: string | null;
+  relationToGoal: ClaimRelation;
+  kind: "mathematical" | "correction";
+  targetFactId: string | null;
+  /** Frozen when the claim is proposed; null only for replayed legacy claims. */
+  verificationPolicy: { verifiersPerClaim: number; passesRequired: number } | null;
   dependsOn: string[];
+  equivalentIds: string[];
+  verificationIds: string[];
+  promotedFactId: string | null;
   history: { from: ClaimStatus; to: ClaimStatus; justification: string; by: string; seq: number }[];
+}
+
+export interface VerificationState {
+  id: string;
+  claimId: string;
+  ordinal: number;
+  status: "queued" | "running" | "completed";
+  verdict: VerificationVerdict | null;
+  summaryMarkdown: string;
+  artifactPath: string | null;
+  usage: Usage | null;
+  requestedAtSeq: number;
+  completedAtSeq: number | null;
+}
+
+export interface FactState {
+  id: string;
+  claimId: string;
+  title: string;
+  statement: string;
+  proofMarkdown: string;
+  path: string;
+  status: "ACTIVE" | "SUSPICIOUS" | "RETRACTED" | "SUPERSEDED";
+  correctionClaimIds: string[];
+  retractedByClaimId: string | null;
+  /** Set when an equivalence relation later reveals a duplicate fact. */
+  supersededByFactId: string | null;
+  recordedAtSeq: number;
+}
+
+export interface MilestoneState {
+  id: string;
+  taskId: string;
+  title: string;
+  markdown: string;
+  recordedAtSeq: number;
+  recordedAt: string;
 }
 
 export interface IssueState {
@@ -254,6 +309,19 @@ export interface ResearchManagerNoteState {
   recordedAt: string;
 }
 
+/** Editable W000 followed by small, optional end-of-round revisions in v2. */
+export interface MathematicalViewState {
+  waveId: string;
+  path: string;
+  abstract: string;
+  markdown: string;
+  changed: boolean;
+  reason: string;
+  source: "intake" | "summary_reader" | "human_edited" | "fallback";
+  recordedAtSeq: number;
+  recordedAt: string;
+}
+
 export interface ProjectState {
   slug: string;
   title: string;
@@ -293,6 +361,12 @@ export interface ProjectState {
   reviews: Record<string, ReviewState>;
   claims: Record<string, ClaimState>;
   claimOrder: string[];
+  facts: Record<string, FactState>;
+  factOrder: string[];
+  verifications: Record<string, VerificationState>;
+  verificationOrder: string[];
+  milestones: Record<string, MilestoneState>;
+  milestoneOrder: string[];
   issues: Record<string, IssueState>;
   cards: Record<string, CardState>;
   questions: Record<string, QuestionState>;
@@ -302,6 +376,8 @@ export interface ProjectState {
   decisionOrder: string[];
   /** Chronological snapshots; the last entry is the Manager's current view. */
   researchManagerNotes: ResearchManagerNoteState[];
+  /** v2 current mathematical view and its concise revision history. */
+  mathematicalViews: MathematicalViewState[];
   computations: Record<string, ComputationState>;
   budget: BudgetState;
   openGateDecisionId: string | null;
@@ -376,7 +452,11 @@ export function pendingContinuationRevision(
 export function nextContinuationRevisionId(state: ProjectState): string {
   const base = state.waveOrder.at(-1) ?? "W000";
   let highest = 1;
-  for (const note of state.researchManagerNotes) {
+  const notes =
+    state.config.workflow === "trajectories-v2"
+      ? state.mathematicalViews
+      : state.researchManagerNotes;
+  for (const note of notes) {
     if (note.waveId === base) {
       highest = Math.max(highest, 1);
       continue;
@@ -422,6 +502,12 @@ export function initialState(): ProjectState {
     reviews: {},
     claims: {},
     claimOrder: [],
+    facts: {},
+    factOrder: [],
+    verifications: {},
+    verificationOrder: [],
+    milestones: {},
+    milestoneOrder: [],
     issues: {},
     cards: {},
     questions: {},
@@ -430,6 +516,7 @@ export function initialState(): ProjectState {
     decisions: {},
     decisionOrder: [],
     researchManagerNotes: [],
+    mathematicalViews: [],
     computations: {},
     budget: { totalTokens: 0, spentTokens: 0, plannerSpentTokens: 0 },
     openGateDecisionId: null,

@@ -5,7 +5,7 @@ import { api } from "../../lib/api";
 import { useActionGuard, useApiAction, useProjectState } from "../../store/hooks";
 
 function interactionTitle(question: QuestionState): string {
-  if (question.interaction === "retry") return "Research Manager recovery needed";
+  if (question.interaction === "retry") return "Research process recovery needed";
   if (question.interaction === "acknowledge") return "Project notice";
   return question.blocking ? "Research waiting for your answer" : "Research question";
 }
@@ -44,7 +44,7 @@ export function QuestionActions({
       <div className="question-actions operational-question-actions">
         <p className="muted small">
           {retry
-            ? "This is an operational stop, not a request for mathematical input. Retrying keeps the research record unchanged and asks the Research Manager for a fresh next move."
+            ? "This is an operational stop, not a request for mathematical input. Retrying keeps the mathematical record unchanged and repeats the failed operation."
             : "This notice does not need a prose answer and does not block the research."}
         </p>
         <div className="row end">
@@ -55,7 +55,7 @@ export function QuestionActions({
             {...(guard.title === undefined ? {} : { title: guard.title })}
             onClick={() => void act("dismiss")}
           >
-            {retry ? "Retry Research Manager" : "Acknowledge"}
+            {retry ? "Retry" : "Acknowledge"}
           </button>
         </div>
       </div>

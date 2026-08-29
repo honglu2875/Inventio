@@ -5,9 +5,12 @@ import {
   type CandidateLifecycle,
   type ArtifactKind,
   type ArtifactMeta,
+  type ClaimState,
   type ClaimStatus,
   type ComputationState,
+  type FactState,
   type ProjectState,
+  type VerificationState,
 } from "@inventio/schema";
 import Markdown from "../components/Markdown";
 import MathText from "../components/MathText";
@@ -22,6 +25,8 @@ import {
   candidateStageColor,
   claimStatusMeaning,
   conclusionColor,
+  trajectoryClaimStatusLabel,
+  verificationDisplayStatus,
 } from "../lib/visual";
 import { useActionGuard, useApiAction, useProjectState } from "../store/hooks";
 
@@ -38,7 +43,11 @@ type Section =
   | "attempts"
   | "explorations"
   | "reviews"
+  | "facts"
   | "claims"
+  | "failed-claims"
+  | "writeups"
+  | "verifications"
   | "memory"
   | "resolutions"
   | "computations"
@@ -51,6 +60,7 @@ const ARTIFACT_SECTIONS: Partial<Record<Section, ArtifactKind>> = {
   reviews: "review",
   resolutions: "resolution",
   final: "final",
+  writeups: "writeup",
 };
 
 /** Inverse of ARTIFACT_SECTIONS: which section owns an artifact of this kind. */
@@ -61,6 +71,9 @@ const SECTION_FOR_KIND: Record<ArtifactKind, Section> = {
   review: "reviews",
   resolution: "resolutions",
   final: "final",
+  writeup: "writeups",
+  fact: "facts",
+  verification: "verifications",
 };
 
 const SECTION_LABEL: Record<Section, string> = {
@@ -70,14 +83,18 @@ const SECTION_LABEL: Record<Section, string> = {
   attempts: "Attempts",
   explorations: "Explorations",
   reviews: "Reviews",
-  claims: "Claims",
+  facts: "Facts",
+  claims: "Claims being checked",
+  "failed-claims": "Failed & duplicate claims",
+  writeups: "Research write-ups",
+  verifications: "Independent checks",
   memory: "Memory",
   resolutions: "Resolutions",
   computations: "Computations",
   final: "Reports",
 };
 
-const ORDER: Section[] = [
+const LEGACY_ORDER: Section[] = [
   "problem",
   "sources",
   "candidate",
@@ -91,8 +108,21 @@ const ORDER: Section[] = [
   "final",
 ];
 
+const TRAJECTORY_ORDER: Section[] = [
+  "problem",
+  "sources",
+  "facts",
+  "claims",
+  "failed-claims",
+  "writeups",
+  "verifications",
+  "final",
+];
+
+const ALL_SECTIONS = [...new Set([...LEGACY_ORDER, ...TRAJECTORY_ORDER])];
+
 function isSection(value: string | undefined): value is Section {
-  return value !== undefined && (ORDER as string[]).includes(value);
+  return value !== undefined && (ALL_SECTIONS as string[]).includes(value);
 }
 
 function artifactsOf(state: ProjectState, kind: ArtifactKind): ArtifactMeta[] {
@@ -113,9 +143,21 @@ function counts(state: ProjectState): Record<Section, number> {
     attempts: artifactsOf(state, "attempt").filter((a) => !isSetAsideArtifact(state, a)).length,
     explorations: artifactsOf(state, "exploration").filter((a) => !isSetAsideArtifact(state, a)).length,
     reviews: artifactsOf(state, "review").length,
+    facts: state.factOrder.filter((id) => {
+      const status = state.facts[id]?.status;
+      return status === "ACTIVE" || status === "SUSPICIOUS";
+    }).length,
     claims: Object.values(state.claims).filter(
-      (claim) => claim.status === "VERIFIED" || claim.status === "UNVERIFIED",
+      (claim) =>
+        state.config.workflow === "trajectories-v2"
+          ? claim.status === "UNVERIFIED"
+          : claim.status === "VERIFIED" || claim.status === "UNVERIFIED",
     ).length,
+    "failed-claims": Object.values(state.claims).filter(
+      (claim) => claim.status === "REFUTED" || claim.status === "SUPERSEDED",
+    ).length,
+    writeups: artifactsOf(state, "writeup").length,
+    verifications: state.verificationOrder.length,
     memory: Object.values(state.cards).filter(
       (entry) => entry.status === "PROPOSED" || entry.status === "VERIFIED",
     ).length,
@@ -879,6 +921,269 @@ function ComputationsSection({ slug, state }: { slug: string; state: ProjectStat
   );
 }
 
+// ------------------------------------------------------- trajectories-v2 library
+
+const FACT_STATUS_COLOR: Record<FactState["status"], string> = {
+  ACTIVE: "var(--ok)",
+  SUSPICIOUS: "var(--warn)",
+  RETRACTED: "var(--danger)",
+  SUPERSEDED: "var(--muted)",
+};
+
+function claimSection(claim: ClaimState): Section {
+  return claim.status === "REFUTED" || claim.status === "SUPERSEDED"
+    ? "failed-claims"
+    : "claims";
+}
+
+function VerificationList({ slug, state, claim }: { slug: string; state: ProjectState; claim: ClaimState }): JSX.Element {
+  const checks = claim.verificationIds
+    .map((id) => state.verifications[id])
+    .filter((value): value is VerificationState => value !== undefined);
+  const policy = claim.verificationPolicy ?? state.config.trajectory;
+  const passes = checks.filter((check) => check.verdict === "PASS").length;
+  return (
+    <section className="trajectory-checks">
+      <h4 className="section-head">Independent checks</h4>
+      <p className="small muted">
+        {passes} of {policy.passesRequired} required passes · {checks.length} of {policy.verifiersPerClaim} checks requested
+      </p>
+      {checks.length === 0 ? (
+        <p className="muted small">No check has been requested.</p>
+      ) : (
+        <div className="trajectory-check-list">
+          {checks.map((check) => (
+            <Link
+              key={check.id}
+              className="trajectory-check-row"
+              to={`/p/${encodeURIComponent(slug)}/library/verifications/${encodeURIComponent(check.id)}`}
+            >
+              <span className="mono">{check.id}</span>
+              <span className={`chip${check.verdict === "PASS" ? " ok" : check.verdict === "FAIL" || check.verdict === "ERROR" ? " danger-badge" : ""}`}>
+                {verificationDisplayStatus(check)}
+              </span>
+              <span className="small muted">{check.summaryMarkdown || "Waiting for an independent reading."}</span>
+            </Link>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function TrajectoryClaimDetail({ slug, state, claim }: { slug: string; state: ProjectState; claim: ClaimState }): JSX.Element {
+  const color = CLAIM_STATUS_COLOR[claim.status];
+  return (
+    <article className="library-detail trajectory-document">
+      <header className="detail-head">
+        <span className="mono detail-id">{claim.id}</span>
+        <span className="chip" style={{ color, borderColor: color }}>{trajectoryClaimStatusLabel(claim.status)}</span>
+        <span className="chip">{claim.relationToGoal}</span>
+        {claim.kind === "correction" ? <span className="chip warn">correction</span> : null}
+        {claim.sourceTaskId ? (
+          <Link className="button ghost small" to={resolveNodeRoute(slug, claim.sourceTaskId).to}>
+            source {claim.sourceTaskId}
+          </Link>
+        ) : null}
+      </header>
+      <h3>{claim.title || claim.id}</h3>
+      <h4 className="section-head">Statement</h4>
+      <Markdown>{claim.statement}</Markdown>
+      <h4 className="section-head">Alleged proof</h4>
+      <Markdown>{claim.proofMarkdown || "No proof text was retained."}</Markdown>
+      <VerificationList slug={slug} state={state} claim={claim} />
+      {claim.equivalentIds.length > 0 ? (
+        <p className="small muted">
+          Same statement as {claim.equivalentIds.map((id, index) => {
+            const other = state.claims[id];
+            return (
+              <Fragment key={id}>
+                {index > 0 ? ", " : ""}
+                <Link to={`/p/${encodeURIComponent(slug)}/library/${other ? claimSection(other) : "claims"}/${encodeURIComponent(id)}`} className="mono">
+                  {id}
+                </Link>
+              </Fragment>
+            );
+          })}. Distinct proofs remain separately inspectable.
+        </p>
+      ) : null}
+      {claim.promotedFactId ? (
+        <p className="small">
+          Recorded as <Link className="mono" to={`/p/${encodeURIComponent(slug)}/library/facts/${encodeURIComponent(claim.promotedFactId)}`}>{claim.promotedFactId}</Link>.
+        </p>
+      ) : null}
+      {claim.targetFactId ? (
+        <p className="small">
+          Challenges <Link className="mono" to={`/p/${encodeURIComponent(slug)}/library/facts/${encodeURIComponent(claim.targetFactId)}`}>{claim.targetFactId}</Link>.
+        </p>
+      ) : null}
+      <p className="small muted">{claim.provenance}</p>
+    </article>
+  );
+}
+
+function TrajectoryClaimsSection({
+  slug,
+  state,
+  selectedId,
+  archived,
+  onSelect,
+}: {
+  slug: string;
+  state: ProjectState;
+  selectedId: string | undefined;
+  archived: boolean;
+  onSelect: (id: string | undefined) => void;
+}): JSX.Element {
+  const [query, setQuery] = useState("");
+  const selected = selectedId ? state.claims[selectedId] : undefined;
+  if (selected) {
+    return (
+      <>
+        <button type="button" className="button ghost small back" onClick={() => onSelect(undefined)}>
+          ← all {archived ? "archived claims" : "claims being checked"}
+        </button>
+        <TrajectoryClaimDetail slug={slug} state={state} claim={selected} />
+      </>
+    );
+  }
+  const needle = query.trim().toLowerCase();
+  const rows = state.claimOrder
+    .map((id) => state.claims[id])
+    .filter((claim): claim is ClaimState => claim !== undefined)
+    .filter((claim) =>
+      archived
+        ? claim.status === "REFUTED" || claim.status === "SUPERSEDED"
+        : claim.status === "UNVERIFIED",
+    )
+    .filter((claim) =>
+      needle === "" ||
+      claim.id.toLowerCase().includes(needle) ||
+      claim.title.toLowerCase().includes(needle) ||
+      claim.statement.toLowerCase().includes(needle),
+    );
+  return (
+    <>
+      <div className="queue-summary small">
+        {archived
+          ? "Claims whose alleged proof failed an independent check, or whose statement is already represented by an established fact, remain here for inspection. They are not supplied as active mathematical knowledge."
+          : "Every item here is a self-contained proposed result with an alleged proof. It remains a claim until its frozen independent-check threshold is met."}
+      </div>
+      <div className="filters">
+        <input className="input search" placeholder="search claims…" value={query} onChange={(event) => setQuery(event.target.value)} />
+      </div>
+      {rows.length === 0 ? <p className="muted empty-note">Nothing here yet.</p> : (
+        <table className="table claims-table">
+          <thead><tr><th>id</th><th>status</th><th>relation</th><th>statement</th><th>checks</th></tr></thead>
+          <tbody>{rows.map((claim) => {
+            const checks = claim.verificationIds.map((id) => state.verifications[id]).filter(Boolean);
+            const passes = checks.filter((check) => check?.verdict === "PASS").length;
+            const policy = claim.verificationPolicy ?? state.config.trajectory;
+            return (
+              <tr key={claim.id} className="clickable" onClick={() => onSelect(claim.id)}>
+                <td className="mono">{claim.id}</td>
+                <td style={{ color: CLAIM_STATUS_COLOR[claim.status] }}>{trajectoryClaimStatusLabel(claim.status)}</td>
+                <td>{claim.relationToGoal}</td>
+                <td><MathText>{claim.statement}</MathText></td>
+                <td className="mono">{passes}/{policy.passesRequired} pass · {checks.length}/{policy.verifiersPerClaim}</td>
+              </tr>
+            );
+          })}</tbody>
+        </table>
+      )}
+    </>
+  );
+}
+
+function FactsSection({ slug, state, selectedId, onSelect }: { slug: string; state: ProjectState; selectedId: string | undefined; onSelect: (id: string | undefined) => void }): JSX.Element {
+  const [showArchive, setShowArchive] = useState(false);
+  const selected = selectedId ? state.facts[selectedId] : undefined;
+  if (selected) {
+    const sourceClaim = state.claims[selected.claimId];
+    return (
+      <>
+        <button type="button" className="button ghost small back" onClick={() => onSelect(undefined)}>← all facts</button>
+        <article className="library-detail trajectory-document">
+          <header className="detail-head">
+            <span className="mono detail-id">{selected.id}</span>
+            <span className="chip" style={{ color: FACT_STATUS_COLOR[selected.status], borderColor: FACT_STATUS_COLOR[selected.status] }}>{selected.status}</span>
+            {sourceClaim ? <span className="chip">{sourceClaim.relationToGoal}</span> : null}
+          </header>
+          <h3>{selected.title || selected.id}</h3>
+          <h4 className="section-head">Statement</h4>
+          <Markdown>{selected.statement}</Markdown>
+          <h4 className="section-head">Verified proof</h4>
+          <Markdown>{selected.proofMarkdown}</Markdown>
+          {selected.status === "SUSPICIOUS" ? (
+            <div className="banner warn">A concrete mathematical challenge is still being checked. Do not treat this fact as settled meanwhile.</div>
+          ) : null}
+          {selected.status === "RETRACTED" && selected.retractedByClaimId ? (
+            <div className="banner danger">This statement was withdrawn after <Link className="mono" to={`/p/${encodeURIComponent(slug)}/library/claims/${encodeURIComponent(selected.retractedByClaimId)}`}>{selected.retractedByClaimId}</Link> passed independent checking.</div>
+          ) : null}
+          <p className="small">
+            Established from <Link className="mono" to={`/p/${encodeURIComponent(slug)}/library/claims/${encodeURIComponent(selected.claimId)}`}>{selected.claimId}</Link>.
+          </p>
+          {selected.status === "SUPERSEDED" && selected.supersededByFactId ? (
+            <p className="small">Same result retained as <Link className="mono" to={`/p/${encodeURIComponent(slug)}/library/facts/${encodeURIComponent(selected.supersededByFactId)}`}>{selected.supersededByFactId}</Link>.</p>
+          ) : null}
+          {selected.correctionClaimIds.length > 0 ? (
+            <p className="small muted">Corrections considered: {selected.correctionClaimIds.map((id, index) => {
+              const correction = state.claims[id];
+              return <Fragment key={id}>{index > 0 ? ", " : ""}<Link className="mono" to={`/p/${encodeURIComponent(slug)}/library/${correction ? claimSection(correction) : "claims"}/${encodeURIComponent(id)}`}>{id}</Link></Fragment>;
+            })}</p>
+          ) : null}
+          {sourceClaim ? <VerificationList slug={slug} state={state} claim={sourceClaim} /> : null}
+        </article>
+      </>
+    );
+  }
+  const all = state.factOrder.map((id) => state.facts[id]).filter((fact): fact is FactState => fact !== undefined);
+  const archived = all.filter((fact) => fact.status === "RETRACTED" || fact.status === "SUPERSEDED");
+  const rows = showArchive ? all : all.filter((fact) => fact.status === "ACTIVE" || fact.status === "SUSPICIOUS");
+  return (
+    <>
+      <div className="queue-summary small">Facts are claims whose alleged proofs met their frozen independent-check threshold. A suspicious fact remains visible but is not treated as settled until its concrete correction claim is resolved.</div>
+      {archived.length > 0 ? <button type="button" className="button ghost small back" onClick={() => setShowArchive((value) => !value)}>{showArchive ? "Hide" : "Show"} {archived.length} retracted or duplicate fact{archived.length === 1 ? "" : "s"}</button> : null}
+      {rows.length === 0 ? <p className="muted empty-note">No fact has passed independent checking yet.</p> : (
+        <table className="table claims-table"><thead><tr><th>id</th><th>status</th><th>relation</th><th>statement</th><th>source claim</th></tr></thead>
+          <tbody>{rows.map((fact) => {
+            const claim = state.claims[fact.claimId];
+            return <tr key={fact.id} className="clickable" onClick={() => onSelect(fact.id)}><td className="mono">{fact.id}</td><td style={{ color: FACT_STATUS_COLOR[fact.status] }}>{fact.status}</td><td>{claim?.relationToGoal ?? "RELATED"}</td><td><MathText>{fact.statement}</MathText></td><td className="mono">{fact.claimId}</td></tr>;
+          })}</tbody>
+        </table>
+      )}
+    </>
+  );
+}
+
+function VerificationReport({ slug, verification }: { slug: string; verification: VerificationState }): JSX.Element {
+  const [body, setBody] = useState<ArtifactBody | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (verification.artifactPath === null || verification.completedAtSeq === null) return;
+    let live = true;
+    void loadArtifact(slug, verification.id, verification.completedAtSeq)
+      .then((value) => { if (live) setBody(value); })
+      .catch((reason: unknown) => { if (live) setError(errorMessage(reason)); });
+    return () => { live = false; };
+  }, [slug, verification.id, verification.artifactPath, verification.completedAtSeq]);
+  if (verification.artifactPath === null) return <Markdown>{verification.summaryMarkdown}</Markdown>;
+  if (error) return <div className="banner danger">{error}</div>;
+  if (!body) return <div className="skeleton-bar w90" />;
+  return <Markdown>{body.markdown}</Markdown>;
+}
+
+function VerificationsSection({ slug, state, selectedId, onSelect }: { slug: string; state: ProjectState; selectedId: string | undefined; onSelect: (id: string | undefined) => void }): JSX.Element {
+  const selected = selectedId ? state.verifications[selectedId] : undefined;
+  if (selected) {
+    return <><button type="button" className="button ghost small back" onClick={() => onSelect(undefined)}>← all independent checks</button><article className="library-detail trajectory-document"><header className="detail-head"><span className="mono detail-id">{selected.id}</span><span className="chip">{verificationDisplayStatus(selected)}</span><Link className="button ghost small" to={`/p/${encodeURIComponent(slug)}/library/claims/${encodeURIComponent(selected.claimId)}`}>claim {selected.claimId}</Link></header><VerificationReport slug={slug} verification={selected} /></article></>;
+  }
+  const rows = state.verificationOrder.map((id) => state.verifications[id]).filter((value): value is VerificationState => value !== undefined);
+  return rows.length === 0 ? <p className="muted empty-note">No independent checks have been requested yet.</p> : (
+    <table className="table"><thead><tr><th>id</th><th>claim</th><th>check</th><th>verdict</th><th>summary</th></tr></thead><tbody>{rows.map((check) => <tr className="clickable" key={check.id} onClick={() => onSelect(check.id)}><td className="mono">{check.id}</td><td className="mono">{check.claimId}</td><td>{check.ordinal}</td><td>{verificationDisplayStatus(check)}</td><td className="small muted">{check.summaryMarkdown || (check.status === "running" ? "Checking now" : "Waiting")}</td></tr>)}</tbody></table>
+  );
+}
+
 // ----------------------------------------------------------------------- view
 
 export default function LibraryView(): JSX.Element {
@@ -922,6 +1227,12 @@ export default function LibraryView(): JSX.Element {
     }
   }, [state, id, section, navigate, slug, location.search]);
 
+  useEffect(() => {
+    if (state?.config.workflow !== "trajectories-v2") return;
+    if (TRAJECTORY_ORDER.includes(section)) return;
+    navigate(`/p/${slug}/library/problem${location.search}`, { replace: true });
+  }, [state, section, navigate, slug, location.search]);
+
   if (state === null || tree === null) {
     return (
       <div className="centered-state">
@@ -931,6 +1242,8 @@ export default function LibraryView(): JSX.Element {
   }
 
   const artifactKind = ARTIFACT_SECTIONS[section];
+  const isTrajectory = state.config.workflow === "trajectories-v2";
+  const order = isTrajectory ? TRAJECTORY_ORDER : LEGACY_ORDER;
   const activeLatest =
     state.activeLineageId === null
       ? null
@@ -939,10 +1252,10 @@ export default function LibraryView(): JSX.Element {
   return (
     <div className="library">
       <nav className="library-tree" aria-label="library sections">
-        {ORDER.map((key) => {
+        {order.map((key) => {
           if (key === "final" && tree.final === 0) return null;
           const count = tree[key];
-          const bold = key === "candidate";
+          const bold = isTrajectory ? key === "facts" : key === "candidate";
           return (
             <button
               key={key}
@@ -957,7 +1270,7 @@ export default function LibraryView(): JSX.Element {
             </button>
           );
         })}
-        {activeLatest === null ? null : (
+        {isTrajectory || activeLatest === null ? null : (
           <div className="tree-note mono small muted">latest {activeLatest}</div>
         )}
       </nav>
@@ -986,7 +1299,7 @@ export default function LibraryView(): JSX.Element {
 
         {section === "sources" ? <SourcesSection slug={slug} state={state} /> : null}
 
-        {artifactKind === undefined ? null : (
+        {artifactKind === undefined || (isTrajectory && artifactKind !== "writeup" && artifactKind !== "final") ? null : (
           <ArtifactSection
             slug={slug}
             state={state}
@@ -996,8 +1309,36 @@ export default function LibraryView(): JSX.Element {
           />
         )}
 
-        {section === "claims" ? (
+        {!isTrajectory && section === "claims" ? (
           <ClaimsSection slug={slug} state={state} selectedId={id} onSelect={onSelect} />
+        ) : null}
+
+        {isTrajectory && section === "facts" ? (
+          <FactsSection slug={slug} state={state} selectedId={id} onSelect={onSelect} />
+        ) : null}
+
+        {isTrajectory && section === "claims" ? (
+          <TrajectoryClaimsSection
+            slug={slug}
+            state={state}
+            selectedId={id}
+            archived={false}
+            onSelect={onSelect}
+          />
+        ) : null}
+
+        {isTrajectory && section === "failed-claims" ? (
+          <TrajectoryClaimsSection
+            slug={slug}
+            state={state}
+            selectedId={id}
+            archived
+            onSelect={onSelect}
+          />
+        ) : null}
+
+        {isTrajectory && section === "verifications" ? (
+          <VerificationsSection slug={slug} state={state} selectedId={id} onSelect={onSelect} />
         ) : null}
 
         {section === "memory" ? (

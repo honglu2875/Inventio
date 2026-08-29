@@ -10,6 +10,7 @@ import { MemoryService } from "../src/memory/service.js";
 import { buildApp, taskMemoFromOutput } from "../src/server/http.js";
 import { EngineManager, mergeConfig, slugify } from "../src/server/manager.js";
 import { tailJsonl } from "../src/server/sse.js";
+import { defaultConfig } from "@inventio/schema";
 import {
   FINAL_MATCH,
   PUBLICATION_MATCH,
@@ -123,6 +124,7 @@ async function parked(h: Harness, title: string, slug?: string): Promise<string>
   const { status, json } = await createProject(h.app, {
     title,
     statement: "Prove that every X is a Y.",
+    config: defaultConfig(),
     ...(slug ? { slug } : {}),
   });
   expect(status).toBe(201);
@@ -440,6 +442,7 @@ describe("projects", () => {
       statement: "An early statement that intake will normalize.",
       contextMarkdown: "Long original notes that must remain available verbatim.",
       config: {
+        workflow: "council-v1",
         budget: { totalTokens: 9_000_000 },
         allowWebSearch: true,
         sourceMounts: [
@@ -567,7 +570,8 @@ describe("projects", () => {
   it("merges config over the defaults", () => {
     const merged = mergeConfig({ budget: { totalTokens: 1234 }, autonomy: "gated" });
     expect(merged.budget.totalTokens).toBe(1234);
-    expect(merged.budget.defaultTaskTokens).toBe(1_500_000);
+    expect(merged.budget.defaultTaskTokens).toBe(2_000_000);
+    expect(merged.workflow).toBe("trajectories-v2");
     expect(merged.autonomy).toBe("gated");
     expect(() => mergeConfig({ budget: { totalTokens: -1 } })).toThrow();
   });
@@ -808,6 +812,84 @@ describe("steering routes", () => {
       totalTokens: 55_000_000,
       maxWaves: 32,
       models,
+    });
+  });
+
+  it("persists v2 trajectory counts together and rejects an impossible verification threshold", async () => {
+    const h = harness();
+    const created = await createProject(h.app, {
+      title: "Trajectory settings project",
+      slug: "trajectory-settings",
+      statement: "Prove P.",
+      config: {
+        workflow: "trajectories-v2",
+        trajectory: {
+          solversPerWave: 2,
+          explorersPerWave: 2,
+          verifiersPerClaim: 2,
+          passesRequired: 2,
+        },
+      },
+      start: false,
+    });
+    expect(created.status).toBe(201);
+
+    const initial = await h.app.inject({
+      method: "GET",
+      url: "/api/projects/trajectory-settings/settings",
+    });
+    const settings = (initial.json() as { settings: Record<string, unknown> }).settings;
+    expect(settings["trajectory"]).toEqual({
+      solversPerWave: 2,
+      explorersPerWave: 2,
+      verifiersPerClaim: 2,
+      passesRequired: 2,
+    });
+
+    const changed = await h.app.inject({
+      method: "POST",
+      url: "/api/projects/trajectory-settings/settings",
+      payload: {
+        ...settings,
+        trajectory: {
+          solversPerWave: 3,
+          explorersPerWave: 1,
+          verifiersPerClaim: 4,
+          passesRequired: 3,
+        },
+      },
+    });
+    expect(changed.statusCode).toBe(200);
+    expect(h.manager.get("trajectory-settings")!.state.config.trajectory).toEqual({
+      solversPerWave: 3,
+      explorersPerWave: 1,
+      verifiersPerClaim: 4,
+      passesRequired: 3,
+    });
+
+    const impossible = await h.app.inject({
+      method: "POST",
+      url: "/api/projects/trajectory-settings/settings",
+      payload: {
+        ...settings,
+        trajectory: {
+          solversPerWave: 2,
+          explorersPerWave: 2,
+          verifiersPerClaim: 2,
+          passesRequired: 3,
+        },
+      },
+    });
+    expect(impossible.statusCode).toBe(400);
+    expect(h.manager.get("trajectory-settings")!.state.config.trajectory.passesRequired).toBe(3);
+
+    await h.manager.shutdown();
+    h.manager.openAll();
+    expect(h.manager.get("trajectory-settings")!.state.config.trajectory).toEqual({
+      solversPerWave: 3,
+      explorersPerWave: 1,
+      verifiersPerClaim: 4,
+      passesRequired: 3,
     });
   });
 
@@ -1193,7 +1275,7 @@ describe("source uploads", () => {
     expect((await h.app.inject({ method: "POST", url: `/api/projects/${slug}/start` })).statusCode).toBe(200);
     await waitFor(() => engine.state.phase === "AWAITING_CONFIRMATION");
 
-    const firstW000Seq = engine.state.researchManagerNotes.find((note) => note.waveId === "W000")!.recordedAtSeq;
+    const firstW000Seq = engine.state.mathematicalViews.find((note) => note.waveId === "W000")!.recordedAtSeq;
     const firstUploadHash = engine.state.problem.sources.find((source) => source.title === "notes.md")!.sha256;
     const revised = await h.app.inject({
       method: "POST",
@@ -1228,7 +1310,7 @@ describe("source uploads", () => {
       url: `/api/projects/${slug}/regenerate-intake`,
     });
     expect(regenerated.statusCode).toBe(200);
-    const currentW000 = engine.state.researchManagerNotes.find((note) => note.waveId === "W000")!;
+    const currentW000 = engine.state.mathematicalViews.find((note) => note.waveId === "W000")!;
     expect(currentW000.recordedAtSeq).toBeGreaterThan(engine.state.problem.rawUpdatedAtSeq);
     expect(readFileSync(
       path.join(h.root, slug, "decisions", "DEC002", "packet", "raw-materials", "S001-Original-objective"),

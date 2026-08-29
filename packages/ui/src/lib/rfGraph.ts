@@ -86,6 +86,36 @@ function edgeStyle(edge: GraphEdge): {
         ...(edge.label === undefined ? {} : { label: edge.label }),
       };
     }
+    case "verifies": {
+      const color = edge.label === "PASS" ? "var(--ok)" : edge.label === "FAIL" ? "var(--danger)" : "var(--muted)";
+      return {
+        style: { ...EDGE_BASE, stroke: color },
+        marker: true,
+        markerColor: color,
+        ...(edge.label === undefined ? {} : { label: edge.label }),
+      };
+    }
+    case "promotes":
+      return {
+        style: { ...EDGE_BASE, stroke: "var(--ok)", strokeWidth: 2 },
+        marker: true,
+        markerColor: "var(--ok)",
+        ...(edge.label === undefined ? {} : { label: edge.label }),
+      };
+    case "equivalent":
+      return {
+        style: { ...EDGE_BASE, strokeDasharray: "4 4" },
+        marker: false,
+        markerColor: "var(--border)",
+        ...(edge.label === undefined ? {} : { label: edge.label }),
+      };
+    case "relation":
+      return {
+        style: { ...EDGE_BASE },
+        marker: true,
+        markerColor: "var(--border)",
+        ...(edge.label === undefined ? {} : { label: edge.label }),
+      };
     case "revision":
       return {
         style: { ...EDGE_BASE, stroke: "var(--accent)" },
