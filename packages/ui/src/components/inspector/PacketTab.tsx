@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import Markdown from "../Markdown";
-import { api, errorMessage } from "../../lib/api";
+import { ApiError, api, errorMessage } from "../../lib/api";
 import { useProjectState } from "../../store/hooks";
 
 /**
@@ -42,7 +42,7 @@ export default function PacketTab({ slug, taskId }: { slug: string; taskId: stri
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [text, setText] = useState<string | null>(null);
-  const [fileError, setFileError] = useState<string | null>(null);
+  const [fileError, setFileError] = useState<{ message: string; omitted: boolean } | null>(null);
   const [raw, setRaw] = useState(false);
 
   useEffect(() => {
@@ -75,7 +75,12 @@ export default function PacketTab({ slug, taskId }: { slug: string; taskId: stri
         if (live) setText(body);
       })
       .catch((err: unknown) => {
-        if (live) setFileError(errorMessage(err));
+        if (live) {
+          setFileError({
+            message: errorMessage(err),
+            omitted: err instanceof ApiError && err.status === 413,
+          });
+        }
       });
     return () => {
       live = false;
@@ -123,7 +128,9 @@ export default function PacketTab({ slug, taskId }: { slug: string; taskId: stri
             ) : null}
           </div>
           {fileError !== null ? (
-            <div className="banner danger">{fileError}</div>
+            <div className={`banner ${fileError.omitted ? "warn" : "danger"}`}>
+              {fileError.message}
+            </div>
           ) : text === null ? (
             <div className="skeleton-bar w90" />
           ) : isMarkdown && !raw ? (

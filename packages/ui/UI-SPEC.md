@@ -121,7 +121,7 @@ for text on panels in both themes.
 ```ts
 interface ProjectSlot {
   state: ProjectState | null;         // reducer-folded
-  connection: "connecting" | "live" | "reconnecting" | "fixture";
+  connection: "connecting" | "live" | "reconnecting" | "fixture" | "static";
   lastError: string | null;
 }
 interface UiStore {
@@ -152,6 +152,9 @@ interface UiStore {
   `happy.json` (generate by copying a sim-run `events.jsonl` from the
   engine e2e tests, converted to a JSON array). The store slot is marked
   `connection: "fixture"` and all POST actions are disabled with tooltips.
+- Portable export mode: an embedded `inventio-project-export` JSON element
+  hydrates the same store without an API or event stream. The slot is marked
+  `connection: "static"`; all POST actions are absent or disabled.
 
 ## 4. Routes
 
@@ -314,6 +317,21 @@ launched after that event, including assignments waiting in the queue; an
 already-running process keeps the command line with which it started. The view
 states this boundary explicitly and shows a warning while tasks are running.
 It also provides Revert and Restore defaults actions. Fixture mode is read-only.
+
+Every loaded project also has an **Export HTML** action. It downloads one
+self-contained, interactive, read-only snapshot without changing project
+state. The snapshot reuses the ordinary Research, Summary/Manager, Research
+map/Evidence, Library, graph, and inspector components. It uses hash routes so
+tabs, selections, and internal links work from `file://` or any static host.
+The project switcher becomes a fixed title, Settings and every mutating control
+are absent, live indicators do not animate, and the task Live tab is named
+Transcript and shows the frozen 200-line archive tail. The header records the
+export time and event sequence. All UI JavaScript, CSS, and KaTeX fonts are
+inlined. Mathematical artifacts, task notes, event history, and supported text
+brief/source files are embedded; binary files and text files above the export
+1,000,000-byte per-file limit remain listed with an omission reason rather
+than making the document unbounded. Runtime thread handles and local
+source-mount paths are redacted.
 
 ## 7. Inspector (right slide-over, 440px, resizable 360–720px)
 

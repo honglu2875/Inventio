@@ -11,6 +11,7 @@ import type {
   Result,
   TaskState,
 } from "@inventio/schema";
+import { exportedText, projectExportFor, projectExportSnapshot } from "./projectExport";
 
 /**
  * Typed fetch helpers for the conductor control surface (DESIGN §12).
@@ -189,11 +190,49 @@ export const api = {
   // reads
   health: (): Promise<HealthInfo> => request("GET", "/health"),
   runtime: (): Promise<RuntimeInfo> => request("GET", "/runtime"),
-  listProjects: (): Promise<ProjectSummary[]> => request("GET", "/projects"),
-  snapshot: (slug: string): Promise<Snapshot> => request("GET", `/projects/${enc(slug)}`),
-  artifact: (slug: string, id: string): Promise<ArtifactBody> =>
-    request("GET", `/projects/${enc(slug)}/artifacts/${enc(id)}`),
+  listProjects: (): Promise<ProjectSummary[]> => {
+    const exported = projectExportSnapshot();
+    if (exported === null) return request("GET", "/projects");
+    const state = exported.state;
+    return Promise.resolve([
+      {
+        slug: exported.slug,
+        title: state.title,
+        workflow: state.config.workflow,
+        phase: state.phase,
+        paused: state.paused,
+        terminal: state.terminal,
+        autonomy: state.autonomy,
+        waves: state.waveOrder.length,
+        budget: state.budget,
+        openBlockingQuestions: Object.values(state.questions).filter(
+          (question) => question.blocking && question.status === "open",
+        ).length,
+        updatedAt: exported.events.at(-1)?.ts ?? null,
+      },
+    ]);
+  },
+  snapshot: (slug: string): Promise<Snapshot> => {
+    const exported = projectExportFor(slug);
+    return exported === null
+      ? request("GET", `/projects/${enc(slug)}`)
+      : Promise.resolve({ state: exported.state, seq: exported.lastEventSeq });
+  },
+  artifact: (slug: string, id: string): Promise<ArtifactBody> => {
+    const exported = projectExportFor(slug);
+    if (exported === null) return request("GET", `/projects/${enc(slug)}/artifacts/${enc(id)}`);
+    const artifact = exported.artifacts[id];
+    return artifact === undefined
+      ? Promise.reject(new ApiError(`artifact ${id} was not included in this HTML snapshot`, 404))
+      : Promise.resolve(artifact);
+  },
   task: async (slug: string, id: string): Promise<TaskDetail> => {
+    const exported = projectExportFor(slug);
+    if (exported !== null) {
+      const task = exported.tasks[id];
+      if (task === undefined) throw new ApiError(`unknown task ${id}`, 404);
+      return task.detail;
+    }
     const detail = await request<TaskDetailWire>("GET", `/projects/${enc(slug)}/tasks/${enc(id)}`);
     return {
       ...detail,
@@ -201,13 +240,26 @@ export const api = {
       partialWorkMarkdown: detail.partialWorkMarkdown ?? null,
     };
   },
-  packetFile: (slug: string, id: string, path: string): Promise<string> =>
-    request(
+  packetFile: (slug: string, id: string, path: string): Promise<string> => {
+    const exported = projectExportFor(slug);
+    if (exported !== null) {
+      const file = exported.tasks[id]?.packetFiles[path];
+      if (file === undefined) {
+        return Promise.reject(new ApiError(`brief file ${path} was not included in this HTML snapshot`, 404));
+      }
+      try {
+        return Promise.resolve(exportedText(file));
+      } catch (error) {
+        return Promise.reject(new ApiError(errorMessage(error), 413));
+      }
+    }
+    return request(
       "GET",
       `/projects/${enc(slug)}/tasks/${enc(id)}/packet/${path.split("/").map(enc).join("/")}`,
       undefined,
       true,
-    ),
+    );
+  },
 
   // lifecycle
   createProject: (body: CreateProjectBody): Promise<{ slug: string }> =>
@@ -369,6 +421,42 @@ export function publicationTexUrl(slug: string, publicationId: string): string {
     enc(publicationId) +
     "/tex"
   );
+}
+
+export function projectExportHtmlUrl(slug: string): string {
+  return `${API_BASE}/projects/${enc(slug)}/export-html`;
+}
+
+export interface ProjectSourceLink {
+  href: string | null;
+  omittedReason: string | null;
+}
+
+/** Resolve an uploaded source either through the live API or its portable copy. */
+export function projectSourceLink(slug: string, name: string): ProjectSourceLink {
+  const exported = projectExportFor(slug);
+  if (exported === null) {
+    return {
+      href: `${API_BASE}/projects/${enc(slug)}/sources/${enc(name)}`,
+      omittedReason: null,
+    };
+  }
+  const file = exported.sources[name];
+  if (file === undefined) {
+    return { href: null, omittedReason: "The original file was not included in this snapshot." };
+  }
+  if (!file.included) return { href: null, omittedReason: file.reason };
+  return {
+    href: `data:${file.mediaType};charset=utf-8,${encodeURIComponent(file.text)}`,
+    omittedReason: null,
+  };
+}
+
+/** Null means that the ordinary live SSE transcript should be used. */
+export function projectTaskTranscript(slug: string, taskId: string): string[] | null {
+  const exported = projectExportFor(slug);
+  if (exported === null) return null;
+  return exported.tasks[taskId]?.transcript ?? [];
 }
 
 // -------------------------------------------------- artifact body cache (§10)

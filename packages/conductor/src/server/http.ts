@@ -7,16 +7,21 @@ import { z } from "zod";
 import {
   INTAKE_ABSTRACT_MAX_CHARS,
   IntakeMemory,
-  Memo as MemoSchema,
   ReasoningEffort,
   SLUG_RE,
   type Event,
-  type Memo,
 } from "@inventio/schema";
 import type { ProjectEngine } from "../engine/engine.js";
 import { EngineManager, ManagerError } from "./manager.js";
+import {
+  buildProjectExportSnapshot,
+  renderStandaloneProjectHtml,
+  taskMemoFromOutput,
+} from "./projectExport.js";
 import { openSse, resumeCursor, tailJsonl } from "./sse.js";
 import { MAX_UPLOAD_BYTES } from "./uploads.js";
+
+export { taskMemoFromOutput } from "./projectExport.js";
 
 /**
  * The control surface (DESIGN §12). Same-origin, loopback-bound, no auth:
@@ -189,18 +194,6 @@ function readJsonIfPresent(baseDir: string, file: string): unknown {
   }
 }
 
-/**
- * A task's output file contains the artifact, memo, and recall log. The task
- * detail endpoint exposes only the nested memo; returning the whole object is
- * shape-compatible at compile time only because JSON is read as `unknown`, and
- * makes the Notes tab fail when it reaches `memo.newClaims.length`.
- */
-export function taskMemoFromOutput(raw: unknown): Memo | null {
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const parsed = MemoSchema.safeParse((raw as Record<string, unknown>)["memo"]);
-  return parsed.success ? parsed.data : null;
-}
-
 const CONTENT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -338,6 +331,31 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
       const engine = engineOf(request.params.slug);
       return { state: engine.state, seq: engine.state.seq };
     }),
+  );
+
+  app.get<{ Params: { slug: string } }>(
+    "/api/projects/:slug/export-html",
+    async (request, reply) =>
+      run(reply, () => {
+        if (uiDir === null) {
+          throw new ManagerError(
+            "HTML export requires the built Inventio UI; run npm run build and retry",
+            503,
+          );
+        }
+        const engine = engineOf(request.params.slug);
+        const snapshot = buildProjectExportSnapshot(engine);
+        const html = renderStandaloneProjectHtml(uiDir, snapshot);
+        const day = snapshot.exportedAt.slice(0, 10);
+        void reply
+          .type("text/html; charset=utf-8")
+          .header("cache-control", "no-store")
+          .header(
+            "content-disposition",
+            `attachment; filename*=UTF-8''${encodeURIComponent(`inventio-${engine.slug}-${day}.html`)}`,
+          );
+        return html;
+      }),
   );
 
   // --------------------------------------------------------- source uploads

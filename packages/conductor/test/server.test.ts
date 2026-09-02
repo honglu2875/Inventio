@@ -57,7 +57,7 @@ interface Harness {
 const open: Harness[] = [];
 
 /** Scenario: `n` intake calls, optionally followed by a complete research path. */
-function harness(intakeCalls = 4, extraCalls: SimCall[] = []): Harness {
+function harness(intakeCalls = 4, extraCalls: SimCall[] = [], uiDir: string | null = null): Harness {
   const dir = mkdtempSync(path.join(os.tmpdir(), "collq-server-"));
   const scenario = path.join(dir, "scenario.json");
   writeFileSync(
@@ -89,7 +89,7 @@ function harness(intakeCalls = 4, extraCalls: SimCall[] = []): Harness {
       publicationCompiler,
     },
   });
-  const app = buildApp(manager, { uiDir: null, heartbeatMs: 500, tailPollMs: 50 });
+  const app = buildApp(manager, { uiDir, heartbeatMs: 500, tailPollMs: 50 });
   const h: Harness = { manager, app, root, publicationCompiler };
   open.push(h);
   return h;
@@ -250,6 +250,53 @@ describe("diagnostics", () => {
     const api = await h.inject({ method: "GET", url: "/api/nope" });
     expect(api.statusCode).toBe(404);
     await h.close();
+  });
+
+  it("downloads one self-contained, read-only HTML view of a project", async () => {
+    const uiDir = mkdtempSync(path.join(os.tmpdir(), "inventio-export-ui-"));
+    mkdirSync(path.join(uiDir, "assets"), { recursive: true });
+    writeFileSync(
+      path.join(uiDir, "index.html"),
+      '<!doctype html><html><head><title>Inventio</title><script type="module" src="/assets/app.js"></script><link rel="stylesheet" href="/assets/app.css"></head><body><div id="root"></div></body></html>',
+    );
+    writeFileSync(path.join(uiDir, "assets", "app.js"), "window.portableInventio = true;\n");
+    writeFileSync(path.join(uiDir, "assets", "app.css"), "body { color: #fff; }\n");
+
+    const h = harness(1, [], uiDir);
+    const slug = await parked(h, "Portable project");
+    const engine = h.manager.get(slug)!;
+    const before = { seq: engine.state.seq, events: engine.events.length };
+    const response = await h.app.inject({
+      method: "GET",
+      url: `/api/projects/${slug}/export-html`,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("text/html");
+    expect(response.headers["content-disposition"]).toContain(
+      `inventio-${slug}-`,
+    );
+    expect(response.body).toContain("window.portableInventio = true");
+    expect(response.body).not.toContain('src="/assets/');
+    expect(response.body).not.toContain('href="/assets/');
+
+    const embedded = /<script id="inventio-project-export" type="application\/json">([\s\S]*?)<\/script>/.exec(response.body)?.[1];
+    expect(embedded).toBeDefined();
+    const project = JSON.parse(embedded!) as {
+      formatVersion: number;
+      slug: string;
+      lastEventSeq: number;
+      state: { phase: string; seq: number };
+      events: { type: string }[];
+    };
+    expect(project).toMatchObject({
+      formatVersion: 1,
+      slug,
+      state: { phase: "AWAITING_CONFIRMATION" },
+    });
+    expect(project.lastEventSeq).toBe(project.state.seq);
+    expect(project.events.some((event) => event.type === "project.created")).toBe(true);
+    expect({ seq: engine.state.seq, events: engine.events.length }).toEqual(before);
   });
 });
 

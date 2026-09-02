@@ -213,6 +213,11 @@ The system runs to a terminal state on its own. You can always:
   Tectonic's untrusted mode. If compilation fails, the error is shown beside
   the still-downloadable TeX, and **Retry PDF** reuses it without another model
   call.
+- **export an interactive HTML snapshot** — **Export HTML** downloads the
+  Research, Summary, Research map, Library, and node inspectors as one
+  read-only file. It opens offline, keeps graph and TeX interactions, and does
+  not modify the project. Binary uploads are listed but not embedded; supported
+  text sources and brief files are included up to 1,000,000 bytes per file.
 
 ## Safety notes
 

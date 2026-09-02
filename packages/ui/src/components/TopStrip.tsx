@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { currentTerminalPublication, type ProjectState } from "@inventio/schema";
-import { api, errorMessage, type ProjectSummary } from "../lib/api";
+import { api, errorMessage, projectExportHtmlUrl, type ProjectSummary } from "../lib/api";
 import { formatExact, formatTokens } from "../lib/format";
+import { projectExportSnapshot } from "../lib/projectExport";
 import { PHASES, burnDownChips, resultColor } from "../lib/visual";
 import { useStore } from "../store/store";
 import { useActionGuard, useApiAction, useConnection } from "../store/hooks";
@@ -154,6 +155,15 @@ function ProjectSwitcher({ slug }: { slug: string }): JSX.Element {
   );
 }
 
+function StaticProjectLabel({ title, slug }: { title: string; slug: string }): JSX.Element {
+  return (
+    <div className="static-project-label" title={slug}>
+      <strong>{title}</strong>
+      <span className="mono muted small">{slug}</span>
+    </div>
+  );
+}
+
 function ConnectionDot({ slug }: { slug: string }): JSX.Element {
   const connection = useConnection(slug);
   const label =
@@ -209,6 +219,7 @@ function MathToggle(): JSX.Element {
 }
 
 export default function TopStrip({ slug, state }: { slug: string; state: ProjectState | null }): JSX.Element {
+  const exported = projectExportSnapshot();
   const guard = useActionGuard(slug);
   const run = useApiAction();
   const pushToast = useStore((s) => s.pushToast);
@@ -260,7 +271,11 @@ export default function TopStrip({ slug, state }: { slug: string; state: Project
   return (
     <>
       <header className="topstrip">
-        <ProjectSwitcher slug={slug} />
+        {exported === null ? (
+          <ProjectSwitcher slug={slug} />
+        ) : (
+          <StaticProjectLabel title={exported.state.title} slug={exported.slug} />
+        )}
         {state === null ? (
           <span className="muted small">loading…</span>
         ) : (
@@ -268,104 +283,127 @@ export default function TopStrip({ slug, state }: { slug: string; state: Project
             <PhaseTracker state={state} />
             <BudgetBar state={state} />
             <BurnDown state={state} />
-            {runningTasks > 0 ? (
+            {exported === null && runningTasks > 0 ? (
               <span className="pool" title={`${runningTasks} running workers`}>
                 ⚙ {runningTasks}
               </span>
             ) : null}
             <div className="spacer" />
-            {state.problem.normalizedMarkdown !== null ? (
-              <button
-                type="button"
-                className="button ghost"
-                disabled={guard.disabled}
-                title={guard.title ?? "Create a new project from this intake only"}
-                onClick={() => setFreshStartOpen(true)}
-              >
-                Fresh start
-              </button>
-            ) : null}
-            {state.config.workflow === "council-v1" ? (
-              <button
-                type="button"
-                className={`toggle${state.config.autonomy === "gated" ? " on" : ""}`}
-                disabled={guard.disabled}
-                {...(guard.title === undefined ? {} : { title: guard.title })}
-                onClick={() => {
-                  const mode = state.config.autonomy === "auto" ? "gated" : "auto";
-                  void run(() => api.setAutonomy(slug, mode));
-                }}
-              >
-                {state.config.autonomy === "auto" ? "Auto" : "Gated"}
-              </button>
-            ) : null}
-            {state.terminal ? (
+            {exported === null ? (
               <>
-                <button
-                  type="button"
-                  className="button"
-                  disabled={publicationStarting || (publication === null && guard.disabled)}
-                  title={
-                    publication === null
-                      ? guard.title ?? "Prepare a standalone TeX manuscript from the complete record"
-                      : "Open the standalone manuscript"
-                  }
-                  onClick={() => {
-                    setPublicationOpen(true);
-                    setPublicationStartError(null);
-                    if (publication === null) void preparePublication();
-                  }}
+                <a
+                  className="button ghost"
+                  href={projectExportHtmlUrl(slug)}
+                  download
+                  title="Download an interactive, read-only snapshot of this project"
                 >
-                  {publicationStarting
-                    ? "Preparing manuscript…"
-                    : publication?.status === "drafting"
-                      ? "Preparing manuscript…"
-                      : publication?.status === "compiling"
-                        ? "Compiling PDF…"
-                        : publication?.texPath
-                          ? "Paper"
-                          : publication?.status === "failed"
-                            ? "Paper needs attention"
-                            : "Prepare paper"}
-                </button>
-                <button
-                  type="button"
-                  className="button primary"
-                  disabled={guard.disabled || publicationBusy}
-                  title={
-                    guard.title ??
-                    (publicationBusy
-                      ? "Wait for the standalone publication pass to finish"
-                      : undefined)
-                  }
-                  onClick={() => setContinueOpen(true)}
-                >
-                  Continue research
-                </button>
+                  Export HTML
+                </a>
+                {state.problem.normalizedMarkdown !== null ? (
+                  <button
+                    type="button"
+                    className="button ghost"
+                    disabled={guard.disabled}
+                    title={guard.title ?? "Create a new project from this intake only"}
+                    onClick={() => setFreshStartOpen(true)}
+                  >
+                    Fresh start
+                  </button>
+                ) : null}
+                {state.config.workflow === "council-v1" ? (
+                  <button
+                    type="button"
+                    className={`toggle${state.config.autonomy === "gated" ? " on" : ""}`}
+                    disabled={guard.disabled}
+                    {...(guard.title === undefined ? {} : { title: guard.title })}
+                    onClick={() => {
+                      const mode = state.config.autonomy === "auto" ? "gated" : "auto";
+                      void run(() => api.setAutonomy(slug, mode));
+                    }}
+                  >
+                    {state.config.autonomy === "auto" ? "Auto" : "Gated"}
+                  </button>
+                ) : null}
+                {state.terminal ? (
+                  <>
+                    <button
+                      type="button"
+                      className="button"
+                      disabled={publicationStarting || (publication === null && guard.disabled)}
+                      title={
+                        publication === null
+                          ? guard.title ?? "Prepare a standalone TeX manuscript from the complete record"
+                          : "Open the standalone manuscript"
+                      }
+                      onClick={() => {
+                        setPublicationOpen(true);
+                        setPublicationStartError(null);
+                        if (publication === null) void preparePublication();
+                      }}
+                    >
+                      {publicationStarting
+                        ? "Preparing manuscript…"
+                        : publication?.status === "drafting"
+                          ? "Preparing manuscript…"
+                          : publication?.status === "compiling"
+                            ? "Compiling PDF…"
+                            : publication?.texPath
+                              ? "Paper"
+                              : publication?.status === "failed"
+                                ? "Paper needs attention"
+                                : "Prepare paper"}
+                    </button>
+                    <button
+                      type="button"
+                      className="button primary"
+                      disabled={guard.disabled || publicationBusy}
+                      title={
+                        guard.title ??
+                        (publicationBusy
+                          ? "Wait for the standalone publication pass to finish"
+                          : undefined)
+                      }
+                      onClick={() => setContinueOpen(true)}
+                    >
+                      Continue research
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="button"
+                    disabled={guard.disabled}
+                    {...(guard.title === undefined ? {} : { title: guard.title })}
+                    onClick={() => {
+                      void run(() => (state.paused ? api.resume(slug) : api.pause(slug)));
+                    }}
+                  >
+                    {state.paused ? "Resume" : "Pause"}
+                  </button>
+                )}
               </>
             ) : (
-              <button
-                type="button"
-                className="button"
-                disabled={guard.disabled}
-                {...(guard.title === undefined ? {} : { title: guard.title })}
-                onClick={() => {
-                  void run(() => (state.paused ? api.resume(slug) : api.pause(slug)));
-                }}
+              <span
+                className="snapshot-stamp mono small"
+                title={
+                  exported.omissions.length === 0
+                    ? "All supported text surfaces were embedded"
+                    : `${exported.omissions.length} large, binary, or missing files were omitted`
+                }
               >
-                {state.paused ? "Resume" : "Pause"}
-              </button>
+                Snapshot · {new Date(exported.exportedAt).toLocaleString()}
+              </span>
             )}
           </>
         )}
         <MathToggle />
         <ThemeToggle />
-        <ConnectionDot slug={slug} />
+        {exported === null ? <ConnectionDot slug={slug} /> : null}
       </header>
-      {continueOpen && state?.terminal ? (
+      {exported === null && continueOpen && state?.terminal ? (
         <ContinueResearchDialog slug={slug} state={state} onClose={() => setContinueOpen(false)} />
       ) : null}
-      {publicationOpen && state?.terminal ? (
+      {exported === null && publicationOpen && state?.terminal ? (
         <PublicationDialog
           slug={slug}
           publication={publication}
@@ -375,7 +413,7 @@ export default function TopStrip({ slug, state }: { slug: string; state: Project
           onClose={() => setPublicationOpen(false)}
         />
       ) : null}
-      {freshStartOpen && state !== null && state.problem.normalizedMarkdown !== null ? (
+      {exported === null && freshStartOpen && state !== null && state.problem.normalizedMarkdown !== null ? (
         <FreshStartDialog slug={slug} state={state} onClose={() => setFreshStartOpen(false)} />
       ) : null}
     </>

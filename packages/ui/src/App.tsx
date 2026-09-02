@@ -1,5 +1,6 @@
 import { useEffect } from "react";
-import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
+import { BrowserRouter, HashRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
+import { hasProjectExportPayload, projectExportSnapshot } from "./lib/projectExport";
 import { resolveNodeRoute } from "./lib/selection";
 import { useStore } from "./store/store";
 import ProjectsPage from "./views/ProjectsPage";
@@ -36,10 +37,29 @@ function NodeResolver(): JSX.Element {
 
 export default function App(): JSX.Element {
   useThemeBootstrap();
+  const exported = projectExportSnapshot();
+  if (exported === null && hasProjectExportPayload()) {
+    return (
+      <main className="projects-page">
+        <section className="banner danger" role="alert">
+          <h1>Snapshot could not be opened</h1>
+          <p>
+            The embedded project record is incomplete or damaged. Export the project again from
+            the current Inventio application.
+          </p>
+        </section>
+      </main>
+    );
+  }
+  const Router = exported === null ? BrowserRouter : HashRouter;
+  const projectRoot = exported === null ? "/" : `/p/${exported.slug}`;
   return (
-    <BrowserRouter>
+    <Router>
       <Routes>
-        <Route path="/" element={<ProjectsPage />} />
+        <Route
+          path="/"
+          element={exported === null ? <ProjectsPage /> : <Navigate to={projectRoot} replace />}
+        />
         <Route path="/p/:slug/node/:nodeId" element={<NodeResolver />} />
         <Route path="/p/:slug" element={<ProjectLayout />}>
           <Route index element={<OpsView />} />
@@ -48,10 +68,10 @@ export default function App(): JSX.Element {
           <Route path="library" element={<LibraryView />} />
           <Route path="library/:section" element={<LibraryView />} />
           <Route path="library/:section/:id" element={<LibraryView />} />
-          <Route path="settings" element={<SettingsView />} />
+          {exported === null ? <Route path="settings" element={<SettingsView />} /> : null}
         </Route>
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to={projectRoot} replace />} />
       </Routes>
-    </BrowserRouter>
+    </Router>
   );
 }

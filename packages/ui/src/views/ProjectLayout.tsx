@@ -7,6 +7,7 @@ import DirectiveDock from "../components/steering/DirectiveDock";
 import GateCard from "../components/steering/GateCard";
 import QuestionsToast from "../components/steering/QuestionsToast";
 import { ProjectSlugContext } from "../components/ProjectContext";
+import { isProjectExport } from "../lib/projectExport";
 import { connectProject } from "../store/connect";
 import { startFixture } from "../store/fixtures";
 import { useProjectState, useSlot } from "../store/hooks";
@@ -20,7 +21,8 @@ import { useStore } from "../store/store";
 export default function ProjectLayout(): JSX.Element {
   const { slug = "" } = useParams();
   const [params, setParams] = useSearchParams();
-  const fixture = params.get("fixture");
+  const exported = isProjectExport();
+  const fixture = exported ? null : params.get("fixture");
   const sel = params.get("sel");
   const state = useProjectState(slug);
   const slot = useSlot(slug);
@@ -59,7 +61,7 @@ export default function ProjectLayout(): JSX.Element {
 
   return (
     <ProjectSlugContext.Provider value={slug}>
-      <div className={`app${sel === null ? "" : " with-inspector"}`}>
+      <div className={`app${exported ? " static-export" : ""}${sel === null ? "" : " with-inspector"}`}>
         <TopStrip slug={slug} state={state} />
         <nav className="view-tabs">
           <NavLink end to={`/p/${slug}${query}`} className="view-tab">
@@ -74,23 +76,25 @@ export default function ProjectLayout(): JSX.Element {
           <NavLink to={`/p/${slug}/library${query}`} className="view-tab">
             Library
           </NavLink>
-          <NavLink to={`/p/${slug}/settings${query}`} className="view-tab">
-            Settings
-          </NavLink>
+          {exported ? null : (
+            <NavLink to={`/p/${slug}/settings${query}`} className="view-tab">
+              Settings
+            </NavLink>
+          )}
           {slot?.lastError ? <span className="strip-error">{slot.lastError}</span> : null}
         </nav>
         <main className="content">
-          <QuestionsToast slug={slug} />
+          {exported ? null : <QuestionsToast slug={slug} />}
           <div className="content-view">
             <Outlet />
           </div>
         </main>
-        <DirectiveDock slug={slug} />
+        {exported ? null : <DirectiveDock slug={slug} />}
         {sel === null ? null : <Inspector slug={slug} nodeId={sel} onClose={closeInspector} />}
-        {state?.openGateDecisionId ? (
+        {!exported && state?.openGateDecisionId ? (
           <GateCard slug={slug} decisionId={state.openGateDecisionId} />
         ) : null}
-        <Toasts />
+        {exported ? null : <Toasts />}
       </div>
     </ProjectSlugContext.Provider>
   );

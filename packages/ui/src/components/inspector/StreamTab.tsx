@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { API_BASE } from "../../lib/api";
+import { API_BASE, projectTaskTranscript } from "../../lib/api";
 import { truncate } from "../../lib/format";
 import { useConnection } from "../../store/hooks";
 
@@ -49,6 +49,7 @@ function toRow(key: number, line: string): Row {
 
 export default function StreamTab({ slug, taskId }: { slug: string; taskId: string }): JSX.Element {
   const connection = useConnection(slug);
+  const transcript = projectTaskTranscript(slug, taskId);
   const [rows, setRows] = useState<Row[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [follow, setFollow] = useState(true);
@@ -57,6 +58,13 @@ export default function StreamTab({ slug, taskId }: { slug: string; taskId: stri
   const counter = useRef(0);
 
   useEffect(() => {
+    if (transcript !== null) {
+      const frozen = transcript.slice(-MAX_ROWS).map((line, index) => toRow(index + 1, line));
+      setRows(frozen);
+      setError(null);
+      counter.current = frozen.length;
+      return;
+    }
     if (connection === "fixture") return;
     setRows([]);
     setError(null);
@@ -77,7 +85,7 @@ export default function StreamTab({ slug, taskId }: { slug: string; taskId: stri
     return () => {
       source.close();
     };
-  }, [slug, taskId, connection]);
+  }, [slug, taskId, connection, transcript]);
 
   useEffect(() => {
     if (!follow) return;
@@ -91,10 +99,14 @@ export default function StreamTab({ slug, taskId }: { slug: string; taskId: stri
   return (
     <div className="stream">
       <div className="row between stream-head">
-        <label className="checkbox small">
-          <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />
-          auto-follow
-        </label>
+        {transcript === null ? (
+          <label className="checkbox small">
+            <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />
+            auto-follow
+          </label>
+        ) : (
+          <span className="muted small">frozen transcript tail</span>
+        )}
         <span className="muted small mono">
           {rows.length}
           {rows.length >= MAX_ROWS ? `/${MAX_ROWS} (trimmed)` : ""}
@@ -102,7 +114,9 @@ export default function StreamTab({ slug, taskId }: { slug: string; taskId: stri
       </div>
       {error === null ? null : <div className="banner warn">{error}</div>}
       {rows.length === 0 ? (
-        <p className="muted small">Waiting for output…</p>
+        <p className="muted small">
+          {transcript === null ? "Waiting for output…" : "No archived output was present at export time."}
+        </p>
       ) : (
         <ol className="stream-list">
           {rows.map((row) => (

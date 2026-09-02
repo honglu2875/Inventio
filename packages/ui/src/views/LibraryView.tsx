@@ -15,8 +15,15 @@ import {
 import Markdown from "../components/Markdown";
 import MathText from "../components/MathText";
 import { useProjectSlug } from "../components/ProjectContext";
-import { API_BASE, api, errorMessage, loadArtifact, type ArtifactBody } from "../lib/api";
+import {
+  api,
+  errorMessage,
+  loadArtifact,
+  projectSourceLink,
+  type ArtifactBody,
+} from "../lib/api";
 import { formatExact } from "../lib/format";
+import { isProjectExport } from "../lib/projectExport";
 import { resolveNodeRoute } from "../lib/selection";
 import {
   CARD_STATUS_COLOR,
@@ -190,6 +197,7 @@ function SourcesSection({ slug, state }: { slug: string; state: ProjectState }):
     <div className="card-grid">
       {state.problem.sources.map((source) => {
         const uploadName = source.kind === "upload" ? source.relativePath.split("/").at(-1) : null;
+        const upload = uploadName ? projectSourceLink(slug, uploadName) : null;
         const original = source.kind === "objective"
           ? state.statement
           : source.kind === "background"
@@ -205,15 +213,17 @@ function SourcesSection({ slug, state }: { slug: string; state: ProjectState }):
             {source.excerptMarkdown.trim() ? <Markdown>{source.excerptMarkdown}</Markdown> : null}
             {original !== null ? (
               <details><summary>Open verbatim text</summary><pre className="statement-source">{original}</pre></details>
-            ) : uploadName ? (
+            ) : uploadName && upload?.href ? (
               <a
                 className="button ghost"
-                href={`${API_BASE}/projects/${encodeURIComponent(slug)}/sources/${encodeURIComponent(uploadName)}`}
+                href={upload.href}
                 target="_blank"
                 rel="noreferrer"
               >
                 Open original file
               </a>
+            ) : upload?.omittedReason ? (
+              <p className="muted small">Original file omitted: {upload.omittedReason}</p>
             ) : null}
           </details>
         );
@@ -461,6 +471,7 @@ function ClaimsSection({
   selectedId: string | undefined;
   onSelect: (id: string | undefined) => void;
 }): JSX.Element {
+  const exported = isProjectExport();
   const guard = useActionGuard(slug);
   const run = useApiAction();
   const [statuses, setStatuses] = useState<ClaimStatus[]>([
@@ -620,44 +631,48 @@ function ClaimsSection({
                           <p className="small mono muted">depends on: {claim.dependsOn.join(", ")}</p>
                         )}
                         <div className="row">
-                          <input
-                            className="input"
-                            placeholder="note (required)"
-                            value={note}
-                            onChange={(e) => setNote(e.target.value)}
-                          />
-                          <button
-                            type="button"
-                            className="button"
-                            disabled={guard.disabled || note.trim() === ""}
-                            title={guard.title ?? "a justification note is required"}
-                            onClick={() => {
-                              void run(
-                                () => api.setClaimStatus(slug, claim.id, "FAILED", note.trim()),
-                                `${claim.id} marked FAILED`,
-                              ).then((ok) => {
-                                if (ok) setNote("");
-                              });
-                            }}
-                          >
-                            Mark proof failed
-                          </button>
-                          <button
-                            type="button"
-                            className="button primary"
-                            disabled={guard.disabled || note.trim() === ""}
-                            title={guard.title ?? "a justification note is required"}
-                            onClick={() => {
-                              void run(
-                                () => api.setClaimStatus(slug, claim.id, "VERIFIED", note.trim()),
-                                `${claim.id} marked VERIFIED`,
-                              ).then((ok) => {
-                                if (ok) setNote("");
-                              });
-                            }}
-                          >
-                            Mark VERIFIED
-                          </button>
+                          {exported ? null : (
+                            <>
+                              <input
+                                className="input"
+                                placeholder="note (required)"
+                                value={note}
+                                onChange={(e) => setNote(e.target.value)}
+                              />
+                              <button
+                                type="button"
+                                className="button"
+                                disabled={guard.disabled || note.trim() === ""}
+                                title={guard.title ?? "a justification note is required"}
+                                onClick={() => {
+                                  void run(
+                                    () => api.setClaimStatus(slug, claim.id, "FAILED", note.trim()),
+                                    `${claim.id} marked FAILED`,
+                                  ).then((ok) => {
+                                    if (ok) setNote("");
+                                  });
+                                }}
+                              >
+                                Mark proof failed
+                              </button>
+                              <button
+                                type="button"
+                                className="button primary"
+                                disabled={guard.disabled || note.trim() === ""}
+                                title={guard.title ?? "a justification note is required"}
+                                onClick={() => {
+                                  void run(
+                                    () => api.setClaimStatus(slug, claim.id, "VERIFIED", note.trim()),
+                                    `${claim.id} marked VERIFIED`,
+                                  ).then((ok) => {
+                                    if (ok) setNote("");
+                                  });
+                                }}
+                              >
+                                Mark VERIFIED
+                              </button>
+                            </>
+                          )}
                           <Link className="button ghost small" to={resolveNodeRoute(slug, claim.id).to}>
                             show in graph
                           </Link>
@@ -688,6 +703,7 @@ function MemorySection({
   selectedId: string | undefined;
   onSelect: (id: string | undefined) => void;
 }): JSX.Element {
+  const exported = isProjectExport();
   const guard = useActionGuard(slug);
   const run = useApiAction();
   const [status, setStatus] = useState("active");
@@ -745,30 +761,32 @@ function MemorySection({
           {selected.admissionReason === null ? null : (
             <p className="small muted">admission: {selected.admissionReason}</p>
           )}
-          <div className="row">
-            <input
-              className="input"
-              placeholder="quarantine note (required)"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-            />
-            <button
-              type="button"
-              className="button danger"
-              disabled={guard.disabled || note.trim() === ""}
-              title={guard.title ?? "a note is required"}
-              onClick={() => {
-                void run(
-                  () => api.quarantineCard(slug, selected.id, note.trim()),
-                  `${selected.id} quarantined`,
-                ).then((ok) => {
-                  if (ok) setNote("");
-                });
-              }}
-            >
-              Quarantine
-            </button>
-          </div>
+          {exported ? null : (
+            <div className="row">
+              <input
+                className="input"
+                placeholder="quarantine note (required)"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+              />
+              <button
+                type="button"
+                className="button danger"
+                disabled={guard.disabled || note.trim() === ""}
+                title={guard.title ?? "a note is required"}
+                onClick={() => {
+                  void run(
+                    () => api.quarantineCard(slug, selected.id, note.trim()),
+                    `${selected.id} quarantined`,
+                  ).then((ok) => {
+                    if (ok) setNote("");
+                  });
+                }}
+              >
+                Quarantine
+              </button>
+            </div>
+          )}
         </article>
       </>
     );

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { IssueSeverity, ProjectState } from "@inventio/schema";
 import { api } from "../../lib/api";
 import { formatExact, formatTokens, truncate } from "../../lib/format";
+import { isProjectExport } from "../../lib/projectExport";
 import { classifyNodeId, permalinkFor, type NodeKind } from "../../lib/selection";
 import { verificationDisplayStatus } from "../../lib/visual";
 import { useActionGuard, useApiAction, useProjectState } from "../../store/hooks";
@@ -252,6 +253,7 @@ export default function Inspector({
 }): JSX.Element {
   const state = useProjectState(slug);
   const kind = classifyNodeId(nodeId);
+  const exported = isProjectExport();
   const tabs = useMemo(() => tabsFor(kind), [kind]);
   const [tab, setTab] = useState<TabKey>(() => tabs[0] ?? "events");
   const [width, setWidth] = useState(DEFAULT_W);
@@ -283,11 +285,13 @@ export default function Inspector({
   }, []);
 
   const copyLink = useCallback(() => {
-    const href = `${window.location.origin}${permalinkFor(slug, nodeId)}`;
+    const href = exported
+      ? `${window.location.href.split("#")[0]}#${permalinkFor(slug, nodeId)}`
+      : `${window.location.origin}${permalinkFor(slug, nodeId)}`;
     void navigator.clipboard?.writeText(href).catch(() => {
       /* clipboard blocked: the link is still in the URL bar after navigating */
     });
-  }, [slug, nodeId]);
+  }, [slug, nodeId, exported]);
 
   const title = titleFor(state, kind, nodeId);
 
@@ -329,13 +333,16 @@ export default function Inspector({
             className={`inspector-tab${tab === key ? " active" : ""}`}
             onClick={() => setTab(key)}
           >
-            {TAB_LABEL[key]}
+            {exported && key === "stream" ? "Transcript" : TAB_LABEL[key]}
           </button>
         ))}
       </nav>
 
       <div className="inspector-body" role="tabpanel">
-        <RenderBoundary key={`${nodeId}:${tab}`} label={`${TAB_LABEL[tab]} for ${nodeId}`}>
+        <RenderBoundary
+          key={`${nodeId}:${tab}`}
+          label={`${exported && tab === "stream" ? "Transcript" : TAB_LABEL[tab]} for ${nodeId}`}
+        >
           {tab === "artifact" ? <ArtifactTab slug={slug} nodeId={nodeId} kind={kind} /> : null}
           {tab === "packet" ? <PacketTab slug={slug} taskId={nodeId} /> : null}
           {tab === "memo" ? <MemoTab slug={slug} taskId={nodeId} /> : null}
@@ -345,8 +352,8 @@ export default function Inspector({
         </RenderBoundary>
       </div>
 
-      {kind === "task" ? <TaskFooter slug={slug} taskId={nodeId} /> : null}
-      {kind === "candidate" ? <CandidateFooter slug={slug} candidateId={nodeId} /> : null}
+      {!exported && kind === "task" ? <TaskFooter slug={slug} taskId={nodeId} /> : null}
+      {!exported && kind === "candidate" ? <CandidateFooter slug={slug} candidateId={nodeId} /> : null}
     </aside>
   );
 }

@@ -1,5 +1,6 @@
 import type { Event } from "@inventio/schema";
 import { api, errorMessage } from "../lib/api";
+import { projectExportFor } from "../lib/projectExport";
 import { useStore } from "./store";
 
 /**
@@ -12,6 +13,11 @@ const SNAPSHOT_RETRY_MS = 3000;
 
 export function connectProject(slug: string): () => void {
   const store = useStore.getState();
+  const exported = projectExportFor(slug);
+  if (exported !== null) {
+    store.setStaticSnapshot(slug, exported.state, exported.events);
+    return () => {};
+  }
   store.ensureSlot(slug);
   store.setConnection(slug, "connecting");
 

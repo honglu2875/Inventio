@@ -8,3 +8,4 @@ export * from "./candidate-status.js";
 export * from "./actions.js";
 export * from "./worker-output.js";
 export * from "./tex-integrity.js";
+export * from "./project-export.js";

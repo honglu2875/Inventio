@@ -23,10 +23,13 @@ export interface ActionGuard {
   title: string | undefined;
 }
 
-/** Fixture replay is read-only: every mutating control is disabled (§3, §5). */
+/** Fixture replay and portable HTML snapshots are read-only. */
 export function useActionGuard(slug: string): ActionGuard {
-  const fixture = useStore((s) => s.projects[slug]?.connection === "fixture");
-  return fixture
+  const readOnly = useStore((s) => {
+    const connection = s.projects[slug]?.connection;
+    return connection === "fixture" || connection === "static";
+  });
+  return readOnly
     ? { disabled: true, title: READ_ONLY_TOOLTIP }
     : { disabled: false, title: undefined };
 }

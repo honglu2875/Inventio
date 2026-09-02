@@ -800,6 +800,11 @@ cached by artifact id + seq.
   action as an approve/edit/reject card (the edit form is schema-driven
   from the action envelope).
 - **Pause/Resume**, project-level.
+- **Export HTML**, project-level and read-only. It embeds the current project
+  read surface and the built UI in one offline document without appending an
+  event. Static mode fixes the project identity, removes Settings and all
+  mutations, freezes transcript tails and status animation, and retains graph,
+  tab, search, Markdown, and TeX interactions through hash routes.
 - **Project settings**: one saved form reads the effective event-sourced value
   and edits the token ceiling, maximum research rounds, autonomy, Web-search
   permission, model ID, and reasoning effort for Research Manager, Solver,
@@ -850,6 +855,7 @@ validated; artifact reads path-confined to the project directory.
 | GET  | `/api/runtime` | Codex and local TeX compiler status, pool occupancy, model defaults |
 | GET/POST | `/api/projects` | list / create `{ title, slug?, statement, contextMarkdown?, config?, start? }`; `start:false` permits uploads before W000 |
 | GET  | `/api/projects/:slug` | full `ProjectState` snapshot + `seq` |
+| GET  | `/api/projects/:slug/export-html` | self-contained interactive read-only project snapshot |
 | GET  | `/api/projects/:slug/events?since=` | SSE event stream (resumable) |
 | POST | `/api/projects/:slug/publication` | start the current stopping report's final TeX reading, or retry its accepted TeX compilation |
 | GET  | `/api/projects/:slug/publications/:id/pdf` | download a ready standalone PDF |

@@ -7,7 +7,8 @@ import {
 } from "@inventio/schema";
 import Markdown from "../components/Markdown";
 import SourceDropzone from "../components/SourceDropzone";
-import { API_BASE, api } from "../lib/api";
+import { api, projectSourceLink } from "../lib/api";
+import { isProjectExport } from "../lib/projectExport";
 import { useActionGuard, useApiAction } from "../store/hooks";
 
 function sourceOriginal(state: ProjectState, source: IntakeSource): string | null {
@@ -25,9 +26,7 @@ function SourceCatalog({ slug, state }: { slug: string; state: ProjectState }): 
       {state.problem.sources.map((source) => {
         const original = sourceOriginal(state, source);
         const uploadName = source.kind === "upload" ? source.relativePath.split("/").at(-1) : null;
-        const uploadUrl = uploadName
-          ? `${API_BASE}/projects/${encodeURIComponent(slug)}/sources/${encodeURIComponent(uploadName)}`
-          : null;
+        const upload = uploadName ? projectSourceLink(slug, uploadName) : null;
         return (
           <details className="intake-source-card" key={source.id}>
             <summary>
@@ -46,10 +45,12 @@ function SourceCatalog({ slug, state }: { slug: string; state: ProjectState }): 
                   <summary>Open verbatim text</summary>
                   <pre className="statement-source">{original}</pre>
                 </details>
-              ) : uploadUrl !== null ? (
-                <a className="button ghost" href={uploadUrl} target="_blank" rel="noreferrer">
+              ) : upload?.href ? (
+                <a className="button ghost" href={upload.href} target="_blank" rel="noreferrer">
                   Open original file
                 </a>
+              ) : upload?.omittedReason ? (
+                <p className="muted small">Original file omitted: {upload.omittedReason}</p>
               ) : null}
               <p className="mono muted small">sha256 {source.sha256}</p>
             </div>
@@ -201,6 +202,51 @@ function RawIntakeEditor({
 
 function DraftIntake(props: { slug: string; state: ProjectState }): JSX.Element {
   return <RawIntakeEditor {...props} />;
+}
+
+function StaticIntake({ slug, state }: { slug: string; state: ProjectState }): JSX.Element {
+  const views =
+    state.config.workflow === "trajectories-v2"
+      ? state.mathematicalViews
+      : state.researchManagerNotes;
+  const w000 = views.find((note) => note.waveId === "W000");
+  return (
+    <section className="intake-confirm w000-review" aria-labelledby="static-intake-title">
+      <header className="section-header intake-header">
+        <div>
+          <span className="eyebrow">Project snapshot</span>
+          <h1 id="static-intake-title">{w000 ? "Current mathematical view" : "Submitted materials"}</h1>
+          <p>This is the project record at the time the portable HTML view was exported.</p>
+        </div>
+      </header>
+      {w000 ? (
+        <article className="intake-pane w000-rendered">
+          {w000.abstract ? <p className="w000-abstract-preview">{w000.abstract}</p> : null}
+          <Markdown>{w000.markdown}</Markdown>
+        </article>
+      ) : (
+        <article className="intake-pane">
+          <h2>Objective</h2>
+          <pre className="statement-source">{state.statement}</pre>
+          {state.contextMarkdown ? (
+            <>
+              <h2>Background, literature, and existing ideas</h2>
+              <pre className="statement-source">{state.contextMarkdown}</pre>
+            </>
+          ) : null}
+        </article>
+      )}
+      <section className="intake-materials">
+        <div className="pane-heading">
+          <div>
+            <h2>Original materials</h2>
+            <span className="muted small">{state.problem.sources.length} retained sources</span>
+          </div>
+        </div>
+        <SourceCatalog slug={slug} state={state} />
+      </section>
+    </section>
+  );
 }
 
 /** One initial mathematical reading, directly editable before discovery begins. */
@@ -399,5 +445,6 @@ function W000Review({ slug, state }: { slug: string; state: ProjectState }): JSX
 }
 
 export default function IntakeConfirm(props: { slug: string; state: ProjectState }): JSX.Element {
+  if (isProjectExport()) return <StaticIntake {...props} />;
   return props.state.phase === "CREATED" ? <DraftIntake {...props} /> : <W000Review {...props} />;
 }

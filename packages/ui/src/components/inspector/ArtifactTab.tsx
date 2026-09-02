@@ -8,6 +8,7 @@ import {
 import Markdown from "../Markdown";
 import { api, errorMessage, loadArtifact, type ArtifactBody } from "../../lib/api";
 import { formatExact } from "../../lib/format";
+import { isProjectExport } from "../../lib/projectExport";
 import type { NodeKind } from "../../lib/selection";
 import {
   CARD_STATUS_COLOR,
@@ -116,6 +117,7 @@ function ArtifactBodyView({
 }
 
 function QuestionBody({ slug, nodeId }: { slug: string; nodeId: string }): JSX.Element {
+  const exported = isProjectExport();
   const state = useProjectState(slug);
   const guard = useActionGuard(slug);
   const run = useApiAction();
@@ -150,7 +152,7 @@ function QuestionBody({ slug, nodeId }: { slug: string; nodeId: string }): JSX.E
           </div>
         </>
       )}
-      {!open ? null : (
+      {!open || exported ? null : (
         <div className="answer-form">
           <textarea
             className="textarea"
@@ -196,6 +198,7 @@ function QuestionBody({ slug, nodeId }: { slug: string; nodeId: string }): JSX.E
 }
 
 function ClaimBody({ slug, nodeId }: { slug: string; nodeId: string }): JSX.Element {
+  const exported = isProjectExport();
   const state = useProjectState(slug);
   const guard = useActionGuard(slug);
   const run = useApiAction();
@@ -274,49 +277,51 @@ function ClaimBody({ slug, nodeId }: { slug: string; nodeId: string }): JSX.Elem
           ))}
         </ul>
       )}
-      <div className="answer-form">
-        <textarea
-          className="textarea"
-          rows={2}
-          placeholder="note (required)"
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-        />
-        <div className="row end">
-          <button
-            type="button"
-            className="button"
-            disabled={guard.disabled || note.trim() === ""}
-            title={guard.title ?? "a justification note is required"}
-            onClick={() => {
-              void run(
-                () => api.setClaimStatus(slug, nodeId, "FAILED", note.trim()),
-                `${nodeId} marked FAILED`,
-              ).then((ok) => {
-                if (ok) setNote("");
-              });
-            }}
-          >
-            Mark proof failed
-          </button>
-          <button
-            type="button"
-            className="button primary"
-            disabled={guard.disabled || note.trim() === ""}
-            title={guard.title ?? "a justification note is required"}
-            onClick={() => {
-              void run(
-                () => api.setClaimStatus(slug, nodeId, "VERIFIED", note.trim()),
-                `${nodeId} marked VERIFIED`,
-              ).then((ok) => {
-                if (ok) setNote("");
-              });
-            }}
-          >
-            Mark VERIFIED
-          </button>
+      {exported ? null : (
+        <div className="answer-form">
+          <textarea
+            className="textarea"
+            rows={2}
+            placeholder="note (required)"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+          <div className="row end">
+            <button
+              type="button"
+              className="button"
+              disabled={guard.disabled || note.trim() === ""}
+              title={guard.title ?? "a justification note is required"}
+              onClick={() => {
+                void run(
+                  () => api.setClaimStatus(slug, nodeId, "FAILED", note.trim()),
+                  `${nodeId} marked FAILED`,
+                ).then((ok) => {
+                  if (ok) setNote("");
+                });
+              }}
+            >
+              Mark proof failed
+            </button>
+            <button
+              type="button"
+              className="button primary"
+              disabled={guard.disabled || note.trim() === ""}
+              title={guard.title ?? "a justification note is required"}
+              onClick={() => {
+                void run(
+                  () => api.setClaimStatus(slug, nodeId, "VERIFIED", note.trim()),
+                  `${nodeId} marked VERIFIED`,
+                ).then((ok) => {
+                  if (ok) setNote("");
+                });
+              }}
+            >
+              Mark VERIFIED
+            </button>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -354,6 +359,7 @@ function VerificationBody({ slug, nodeId }: { slug: string; nodeId: string }): J
 }
 
 function CardBody({ slug, nodeId }: { slug: string; nodeId: string }): JSX.Element {
+  const exported = isProjectExport();
   const state = useProjectState(slug);
   const guard = useActionGuard(slug);
   const run = useApiAction();
@@ -377,31 +383,35 @@ function CardBody({ slug, nodeId }: { slug: string; nodeId: string }): JSX.Eleme
       {entry.admissionReason === null ? null : (
         <p className="small muted">admission: {entry.admissionReason}</p>
       )}
-      <div className="answer-form">
-        <textarea
-          className="textarea"
-          rows={2}
-          placeholder="quarantine note (required)"
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-        />
-        <div className="row end">
-          <button
-            type="button"
-            className="button danger"
-            disabled={guard.disabled || note.trim() === ""}
-            title={guard.title ?? "a note is required"}
-            onClick={() => {
-              void run(() => api.quarantineCard(slug, nodeId, note.trim()), `${nodeId} quarantined`)
-                .then((ok) => {
+      {exported ? null : (
+        <div className="answer-form">
+          <textarea
+            className="textarea"
+            rows={2}
+            placeholder="quarantine note (required)"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+          <div className="row end">
+            <button
+              type="button"
+              className="button danger"
+              disabled={guard.disabled || note.trim() === ""}
+              title={guard.title ?? "a note is required"}
+              onClick={() => {
+                void run(
+                  () => api.quarantineCard(slug, nodeId, note.trim()),
+                  `${nodeId} quarantined`,
+                ).then((ok) => {
                   if (ok) setNote("");
                 });
-            }}
-          >
-            Quarantine
-          </button>
+              }}
+            >
+              Quarantine
+            </button>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

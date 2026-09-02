@@ -25,7 +25,7 @@ setAutoFreeze(false);
 // so reject an unknown discriminant before `applyEvent` advances the sequence.
 const KNOWN_EVENT_TYPES = new Set<string>(EVENT_TYPES);
 
-export type ConnectionState = "connecting" | "live" | "reconnecting" | "fixture";
+export type ConnectionState = "connecting" | "live" | "reconnecting" | "fixture" | "static";
 
 export interface ProjectSlot {
   state: ProjectState | null;
@@ -75,6 +75,7 @@ export interface UiStore {
 
   ensureSlot: (slug: string) => void;
   setSnapshot: (slug: string, state: ProjectState) => void;
+  setStaticSnapshot: (slug: string, state: ProjectState, events: Event[]) => void;
   /**
    * Fold a streamed batch. Returns false when the local reducer cannot
    * understand an event so the connection layer can replace this possibly
@@ -197,6 +198,26 @@ export const useStore = create<UiStore>()((set, get) => ({
           [slug]: { ...prev, state, lastError: null, waveIds: [...state.waveOrder] },
         },
         collapse: { ...s.collapse, [slug]: collapsed },
+      };
+    });
+  },
+
+  setStaticSnapshot: (slug, state, events) => {
+    get().setSnapshot(slug, state);
+    set((s) => {
+      const prev = s.projects[slug] ?? emptySlot();
+      return {
+        projects: {
+          ...s.projects,
+          [slug]: {
+            ...prev,
+            state,
+            connection: "static",
+            lastError: null,
+            events: [...events],
+            waveIds: [...state.waveOrder],
+          },
+        },
       };
     });
   },
@@ -336,8 +357,8 @@ export function collapsedSet(slug: string, collapse: Record<string, string[]>): 
   return new Set(collapse[slug] ?? []);
 }
 
-/** Read-only projects (fixture replay) forbid every mutating action (§3). */
-export const READ_ONLY_TOOLTIP = "fixture replay — read-only";
+/** Portable snapshots and fixture replays forbid every mutating action. */
+export const READ_ONLY_TOOLTIP = "read-only project view";
 
 export function slotOf(state: UiStore, slug: string): ProjectSlot | undefined {
   return state.projects[slug];

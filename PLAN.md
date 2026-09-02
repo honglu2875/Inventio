@@ -14,13 +14,35 @@ Rules for whoever (human or agent) picks this up:
 - Record every deliberate divergence from DESIGN.md in the deviation log
   at the bottom, with a reason.
 
-**Status: M0–M26 preserve the released `council-v1` implementation. M27 implements the default `trajectories-v2` workflow, M28 makes claim checking and round summaries stable, M29 hardens live-run integrity, M30 gives every mathematical author one rigorous ASD-STE100 English contract, and M31 exposes the per-trajectory token limit as a durable project setting. Existing projects and event logs remain replay-compatible. The complete suite passes: 365 tests (schema 47, conductor 183, UI 114, codex-sim 21), all TypeScript packages typecheck, and the production UI builds.**
-Last updated: 2026-09-01 by Codex.
+**Status: M0–M26 preserve the released `council-v1` implementation. M27 implements the default `trajectories-v2` workflow, M28 makes claim checking and round summaries stable, M29 hardens live-run integrity, M30 gives every mathematical author one rigorous ASD-STE100 English contract, M31 exposes the per-trajectory token limit as a durable project setting, and M32 adds a self-contained read-only HTML project export. Existing projects and event logs remain replay-compatible. The complete suite passes: 370 tests (schema 47, conductor 186, UI 116, codex-sim 21), all TypeScript packages typecheck, and the production UI builds.**
+Last updated: 2026-09-02 by Codex.
 
 Quota note: work has been interrupted twice by Opus subagent quota limits. The
 tracker is the recovery point — check the milestone boxes, then
 `npx vitest run --root packages/conductor` and `--root packages/ui` to confirm
 where things stand before writing code.
+
+---
+
+## M32 — Self-contained HTML project export ✅
+
+- [x] Add an **Export HTML** action to every live project without changing
+      project state or pausing ongoing research.
+- [x] Generate one offline HTML document with the production application,
+      styles, dynamic chunks, and KaTeX fonts inlined.
+- [x] Embed a consistent read-only project snapshot and reuse the ordinary
+      tabs, graph, library, Markdown/TeX rendering, and inspector components.
+- [x] Replace live routing and data access with hash routing and the embedded
+      record. Remove Settings, project switching, live animation, and every
+      mutating control.
+- [x] Include the event history, mathematical artifacts, notes, supported text
+      sources and briefs, and the last 200 transcript records for each task.
+      Explain omitted binary or oversized files in the document.
+- [x] Redact runtime thread handles and local source-mount paths, safely embed
+      untrusted mathematical text, and cover the renderer and HTTP boundary
+      with regressions.
+
+Verify: `npm test`, `npm run typecheck`, `npm run build`, `git diff --check`.
 
 ---
 

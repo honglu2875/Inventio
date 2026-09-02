@@ -628,6 +628,26 @@ body.resizing {
   max-width: 220px;
 }
 
+.static-project-label {
+  display: flex;
+  min-width: 180px;
+  max-width: 280px;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.static-project-label strong,
+.static-project-label span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.snapshot-stamp {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .phase-tracker {
   display: flex;
   align-items: center;
@@ -1547,6 +1567,15 @@ body.resizing {
 
 .status-ring.pulsing {
   animation: pulse-ring 2s ease-in-out infinite;
+}
+
+.static-export .status-ring.pulsing {
+  animation: none;
+}
+
+.static-export .node-question.is-blocking,
+.static-export .badge.pending {
+  animation: none;
 }
 
 @keyframes pulse-ring {
