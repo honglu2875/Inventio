@@ -767,7 +767,11 @@ describe("steering routes", () => {
     });
     expect(initial.statusCode).toBe(200);
     const initialSettings = (initial.json() as { settings: Record<string, unknown> }).settings;
-    expect(initialSettings).toMatchObject({ allowWebSearch: true, autonomy: "gated" });
+    expect(initialSettings).toMatchObject({
+      allowWebSearch: true,
+      autonomy: "gated",
+      workerTokenLimit: 2_000_000,
+    });
 
     const models = (initialSettings["models"] ?? {}) as Record<string, unknown>;
     const changed = await h.app.inject({
@@ -779,6 +783,7 @@ describe("steering routes", () => {
         allowWebSearch: false,
         autonomy: "auto",
         totalTokens: 55_000_000,
+        workerTokenLimit: 3_000_000,
         maxWaves: 32,
       },
     });
@@ -789,6 +794,7 @@ describe("steering routes", () => {
         allowWebSearch: false,
         autonomy: "auto",
         totalTokens: 55_000_000,
+        workerTokenLimit: 3_000_000,
         maxWaves: 32,
         models,
       },
@@ -799,6 +805,7 @@ describe("steering routes", () => {
         allowWebSearch: false,
         autonomy: "auto",
         totalTokens: 55_000_000,
+        workerTokenLimit: 3_000_000,
         maxWaves: 32,
         models,
       },
@@ -810,9 +817,13 @@ describe("steering routes", () => {
       allowWebSearch: false,
       autonomy: "auto",
       totalTokens: 55_000_000,
+      workerTokenLimit: 3_000_000,
       maxWaves: 32,
       models,
     });
+    expect(
+      h.manager.get("initially-searchable")!.state.config.budget.defaultTaskTokens,
+    ).toBe(3_000_000);
   });
 
   it("persists v2 trajectory counts together and rejects an impossible verification threshold", async () => {

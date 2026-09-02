@@ -32,8 +32,8 @@ instruction boundary.
 | `trajectories.ts` | All `trajectories-v2` contracts and composed context: initial W000 reading, long Solver/Explorer sessions, independent claim checks, small end-of-round view edits, and the stopping report | `engine/engine.ts` |
 | `researchManager.ts` | Legacy W000, post-report W###.n revision, next-move, completed-round assessment, legacy statement-revision, stopping-report composition, and post-terminal TeX-publication contracts; all council-v1 Research Manager context-file composition | `engine/engine.ts` |
 | `workers.ts` | Solver, Explorer, Reviewer, and Synthesizer contracts; generated worker `AGENTS.md`; generated `research-question.md` | `engine/packets.ts` |
-| `shared.ts` | Mathematical-writing rules inserted into both Research Manager and worker contracts | `researchManager.ts`, `workers.ts` |
-| `managerExamples.ts` | Owner-written and owner-review Research Manager voice examples, including the W000 voice-and-emphasis contrast | `researchManager.ts` |
+| `shared.ts` | The ASD-STE100 mathematical-English contract and TeX-layout rules appended to every generated project `AGENTS.md` | `trajectories.ts`, `researchManager.ts`, `workers.ts` |
+| `managerExamples.ts` | Owner-written and owner-review Research Manager judgment examples, including the W000 contrast; the shared English contract controls their output style | `researchManager.ts` |
 | `operational.ts` | Short launch, resume, focused-follow-up, unusable-work, replacement-worker, structured-output repair, and automatic retry messages | `engine/engine.ts`, `codex/structured.ts` |
 | `tools.ts` | Model-visible names, descriptions, and argument descriptions for the memory and original-source MCP tools | `memory/service.ts` |
 | `diagnostics.ts` | Prompts used only by manual Codex diagnostic scripts, never by a research project | `scripts/probe-mcp-approval.ts` |
@@ -43,6 +43,34 @@ instruction boundary.
 contracts because their labels and warnings materially guide the Research
 Manager. Pure evidence builders such as the deterministic round summary remain
 under `engine/`: their output is project data, not a behavioral prompt.
+
+## Shared mathematical English contract
+
+Every project model call receives the same final section in its generated
+`AGENTS.md`. `shared.ts` defines this section and appends it through
+`withMathematicalWritingGuidance()`. It applies to W000, long trajectories,
+claim comparison, independent checks, round summaries, legacy controller and
+worker calls, stopping reports, and publication manuscripts. Recovery and
+schema-repair turns reuse the same directory, so the contract remains active.
+
+The contract explicitly tells each model to follow the full ASD-STE100
+Simplified Technical English, Issue 9, standard for all model-authored English
+prose. It assumes that the model knows the standard. Its local details are
+examples that emphasize useful rules for mathematical writing. These examples
+include short sentences, one main point per sentence, clear referents,
+consistent terms, active voice when possible, simple verb forms, and gradual
+presentation. Other examples concern semicolons, ambiguous “-ing” clauses,
+idioms, unnecessary jargon, and unexplained abbreviations. The examples do not
+replace or limit ASD-STE100. The official standard is available at
+<https://www.asd-ste100.org/assets/files/ASD-STE100_ISSUE9.pdf>.
+
+Mathematical terms are permitted technical nouns and verbs. The contract does
+not alter formulas, code, JSON keys, citations, proper names, or literal source
+text. Mathematical rigor and self-containedness have priority over sentence
+length. A model must preserve hypotheses, quantifiers, dependencies, and
+logical distinctions. It must split or restructure difficult prose rather
+than simplify the mathematics. The Research Manager examples supply judgment
+and voice only. Their older sentence structure is not a style template.
 
 ## Long-trajectory calls (`trajectories-v2`)
 
@@ -81,37 +109,66 @@ briefs the trajectories.
 - **Output:** `TrajectoryOutput`: a readable write-up, short mathematical
   summary, conclusion about the original problem, and at most eight valuable
   self-contained statements with complete alleged proofs. An empty claim list
-  is valid.
+  is valid. Objective integrity checks reject damaged TeX, unmatched math
+  delimiters, internal project IDs, and references to omitted surrounding
+  work. `runStructured()` gives the same trajectory one repair turn; these
+  checks make no judgment about mathematical direction or proof strategy.
 - **Execution:** one isolated, workspace-write Codex process with `scratch/`, a
   two-hour default wall-clock allowance, configured model/effort, optional Web
-  search, and project tools. Sparse `mark_milestone` calls feed the graph;
-  `flag_fact` may be used once only for a concrete contradiction.
+  search, and project tools. The per-task token number is a planning target;
+  exact usage arrives only when a turn ends, with a calibrated live estimate
+  serving as an emergency ceiling. Sparse `mark_milestone` calls feed the
+  graph; `flag_fact` may be used once only for a concrete contradiction.
+
+### Statement comparison
+
+- **When:** once after a completed round has new statements worth comparing
+  and before their proofs are independently checked.
+- **Short prompt:** `CLAIM_COMPARISON_PROMPT`.
+- **Long contract/context:** `claimComparisonFiles()` supplies the exact
+  problem, the current round's K IDs, and the all-status statement index. It
+  explicitly forbids planning, proof assessment, editing, implication-based
+  grouping, and thematic grouping.
+- **Output:** `ClaimComparisonOutput`, containing only groups with identical
+  hypotheses, scope, and conclusion. Runtime validation requires known K IDs,
+  at least one current-round claim, and matching claim kind/relation metadata.
+  Failure is a recoverable optimization loss and never blocks research.
 
 ### Independent claim checks
 
-- **When:** as soon as a new claim is persisted, independently `V` times.
-  These calls share the global process pool and may run while later research is
-  being prepared.
+- **When:** after the round's statement comparison. At most one proof for an
+  identical-statement group is active at a time; a failed proof allows the next
+  distinct proof to be checked.
 - **Short prompt:** `VERIFICATION_PROMPT`.
 - **Long contract/context:** `verificationFiles()` supplies exactly the
   original problem and one self-contained claim/proof. Other project attempts
-  are absent.
-- **Output:** `VerificationOutput` with `PASS` or `FAIL`, a short reason, and a
-  complete report. At least the claim's frozen `W` passes are needed for fact
-  promotion; settings changes never rewrite an existing claim's standard.
+  are absent. A custom Codex filesystem profile permits reads and calculations
+  only inside this check's packet; repository, project, and peer-check paths
+  are not readable.
+- **Output:** `VerificationOutput` with `PASS` or `FAIL`, a short reason, a
+  complete report, and one finding category. At least the claim's frozen `W`
+  passes among at most `V` checks are needed for fact promotion; settings
+  changes never rewrite an existing claim's standard.
 - **Recovery:** queued and running checks are durable. A server restart reruns
   an incomplete check, and invariant repair finishes any interrupted
-  claim-to-fact transition without duplicating facts.
+  claim-to-fact transition without duplicating facts. A process-level verifier
+  error is replaced by a fresh check and never counts as mathematical failure.
+  A proof that cannot reach the pass threshold becomes `FAILED` for an
+  incorrect step or substantive proof gap. A missing dependency or damaged
+  presentation becomes `NEEDS_REVISION`; this does not claim that its statement
+  is false (`REFUTED` is reserved for a disproof).
 
 ### End-of-round view revision
 
-- **When:** once after all Solver/Explorer trajectories in a round finish.
+- **When:** once after all Solver/Explorer trajectories, statement comparison,
+  and independent checks belonging to a round have settled.
 - **Short prompt:** `SUMMARY_REVIEW_PROMPT`.
 - **Long contract/context:** `summaryReviewFiles()` supplies the current view,
-  concise trajectory returns, and the current fact/claim index.
+  concise trajectory returns and the now-stable active library.
 - **Output:** `SummaryRevisionOutput`. The reader either returns the view
-  unchanged or makes one small mathematical edit, and may identify groups of
-  truly identical claim statements. It cannot choose future work.
+  unchanged or makes one small mathematical edit. Runtime checks reject
+  clipped/outline-like abstracts, and every saved view receives its actual
+  W-number heading. The reader cannot choose future work.
 
 ### Stopping report
 
@@ -369,6 +426,8 @@ When changing a prompt:
    `PROTOCOL.md`.
 3. Keep mathematical prose academic. Internal JSON field names belong only in
    explicitly marked response-format sections.
+   All model-authored English must retain the shared ASD-STE100 contract.
+   Do not duplicate or weaken that contract in an individual role prompt.
 4. Remember that prompt strings are sent through JSON-bearing output. Examples
    of TeX commands must show doubled backslashes where the model is being told
    how to encode JSON, so `\\frac` never becomes a form-feed escape.

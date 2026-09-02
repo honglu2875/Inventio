@@ -173,6 +173,22 @@ describe("replay overlap", () => {
     expect(slotOf("stale").events.length).toBe(HAPPY.length);
     expect(slotOf("stale").state?.seq).toBe(HAPPY.length);
   });
+
+  it("signals a reducer mismatch so the stream can reload a snapshot", () => {
+    const head = HAPPY.slice(0, 4);
+    fold("newer-server", [head]);
+    const bad = {
+      seq: 5,
+      ts: new Date(5).toISOString(),
+      type: "schema.fromTheFuture",
+    } as unknown as Event;
+
+    const applied = useStore.getState().applyEvents("newer-server", [bad]);
+
+    expect(applied).toBe(false);
+    expect(slotOf("newer-server").state?.seq).toBe(4);
+    expect(slotOf("newer-server").lastError).toContain("schema.fromTheFuture");
+  });
 });
 
 describe("collapse policy", () => {

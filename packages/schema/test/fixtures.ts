@@ -141,6 +141,7 @@ export function buildCanonicalEvents(): Event[] {
   });
   ev("task.extended", { taskId: "T001", addTokens: 200_000, by: "human" });
   ev("task.completed", { taskId: "T001", usage });
+  ev("task.accounted", { taskId: "T001", chargedTokens: 8_000, basis: "reported" });
   ev("artifact.recorded", { artifactId: "A001", kind: "attempt", taskId: "T001", path: "artifacts/attempts/A001.md", conclusion: "UNCERTAIN" });
   ev("crossexam.sent", { taskId: "T001", decisionId: "DEC001", refIds: ["K001"], questionMarkdown: "Clarify step 3." });
   ev("crossexam.answered", { taskId: "T001", answerMarkdown: "Step 3 uses monotonicity.", usage: null });
@@ -153,6 +154,11 @@ export function buildCanonicalEvents(): Event[] {
   ev("task.failed", { taskId: "T003", error: "codex exited 1" });
 
   ev("claim.added", { claimId: "K001", statement: "P holds for n=1.", status: "UNVERIFIED", provenance: "A001 §2", sourceTaskId: "T001", dependsOn: [] });
+  ev("claim.provenanceRepaired", {
+    claimId: "K001",
+    from: "A001 §2",
+    to: "A001 §2 (from T001)",
+  });
   ev("claim.added", { claimId: "K002", statement: "P(n) implies P(n+1).", status: "UNVERIFIED", provenance: "A001 §3", sourceTaskId: "T001", dependsOn: ["K001"] });
   ev("claim.equivalent", {
     leftClaimId: "K001",
@@ -225,6 +231,7 @@ export function buildCanonicalEvents(): Event[] {
 
   ev("wave.softInterrupted", { waveId: "W001", by: "human" });
   ev("wave.closed", { waveId: "W001", docketMarkdown: "## Docket\n- K001, K002 proposed" });
+  ev("wave.claimsCompared", { waveId: "W001" });
   ev("task.dispositioned", { taskId: "T001", waveId: "W001", disposition: "carry_forward", reason: "The base case is worth independent review.", unblock: null });
   ev("manager.noteRecorded", {
     waveId: "W001",

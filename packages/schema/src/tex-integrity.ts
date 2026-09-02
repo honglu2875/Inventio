@@ -57,6 +57,13 @@ export function repairSilentJsonTexControls(text: string): string {
     if (prefix !== undefined) {
       const { letters, end } = asciiLettersAt(text, i + 1);
       const command = prefix + letters;
+      // Mirror the raw transport rule: standard JSON newline semantics take
+      // precedence over ambiguous single-slash `\ne` and `\nu` spellings.
+      if (text[i] === "\n" && (command === "ne" || command === "nu")) {
+        out += text[i]!;
+        i += 1;
+        continue;
+      }
       if (isSilentJsonTexCommand(command)) {
         out += `\\${command}`;
         i = end;
@@ -76,7 +83,15 @@ export function repairSilentJsonTexControls(text: string): string {
  * one of these bytes must be retried instead of guessed at.
  */
 export function repairLegacyArtifactControls(text: string): string {
-  return repairSilentJsonTexControls(text)
+  let repaired = repairSilentJsonTexControls(text)
+    // A former raw-JSON guard could mistake a genuine `\n` line break before
+    // a line beginning with `e` for the TeX relation `\ne`. At the start of a
+    // display, that relation has no left operand. Keep persisted legacy facts
+    // readable without rewriting their event history.
+    .replace(/(\\\[|\$\$)[ \t]*\\ne/g, "$1\ne")
+    // Conventional negative spacing after an Euler class is not a sensible
+    // use of the binary not-equal relation. Restore the swallowed line break.
+    .replace(/\\ne(?=\\!\\left)/g, "\ne")
     // Observed legacy spellings of \alpha and \beta.
     .replace(/\x07(?=(?:alpha|beta)\b)/g, "\\")
     // Observed legacy spellings in A016: [\Sigma] and [\overline M].
@@ -89,4 +104,33 @@ export function repairLegacyArtifactControls(text: string): string {
     // Never let an unrecognized control byte render invisibly. Keeping a
     // visible replacement character is safer than silently inventing TeX.
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, "�");
+
+  // A short-lived legacy guard also converted a genuine JSON newline before
+  // an ordinary Toda field `u` into the perfectly valid TeX command `\nu`.
+  // Unlike the control-byte cases above, `\nu` may be intentional mathematics,
+  // so repair only equations whose right-hand side identifies the established
+  // Toda `u` field unambiguously. Once such a damaged definition is present,
+  // its matching derivatives in the same document are safe to restore too.
+  const damagedTodaField =
+    /\\nu\s*=\s*\(\\Lambda-1\)(?:G|\\mathcal F)_t/.test(repaired) ||
+    /\\nu\s*=\s*D\\Psi_\{0,T\}/.test(repaired) ||
+    /\\nu_T\s*=\s*Dv\b/.test(repaired);
+  if (damagedTodaField) {
+    repaired = repaired
+      .replace(/\\nu(?=\s*=\s*\(\\Lambda-1\)(?:G|\\mathcal F)_t)/g, "u")
+      .replace(/\\nu(?=\s*=\s*D\\Psi_\{0,T\})/g, "u")
+      .replace(/\\nu_T(?=\s*=\s*Dv\b)/g, "u_T")
+      .replace(/\\nu_t(?=\s*=\s*v\^\+-v)/g, "u_t")
+      .replace(/D\\nu\b/g, "Du")
+      .replace(/z\+\\nu\+vz\^\{-1\}/g, "z+u+vz^{-1}");
+  }
+  const damagedTodaCoefficients =
+    /U\s*=\s*\\sum[^\n]*u_n/.test(repaired) && /\\nu_n\s*=\s*d_n/.test(repaired);
+  if (damagedTodaCoefficients) {
+    repaired = repaired
+      .replace(/\\nu_n(?=\s*=\s*d_n\b)/g, "u_n")
+      .replace(/\\nu_S(?=\s*=\s*D\[z\^\{-1\}\])/g, "u_S");
+  }
+
+  return repaired;
 }

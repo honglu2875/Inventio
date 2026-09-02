@@ -134,6 +134,8 @@ export interface TaskDetail {
   packetManifest: string[];
   memo: Memo | null;
   meta: Record<string, unknown> | null;
+  /** Last mathematical message from a session that ended before a valid return. */
+  partialWorkMarkdown: string | null;
 }
 
 interface TaskDetailWire extends Omit<TaskDetail, "memo"> {
@@ -193,7 +195,11 @@ export const api = {
     request("GET", `/projects/${enc(slug)}/artifacts/${enc(id)}`),
   task: async (slug: string, id: string): Promise<TaskDetail> => {
     const detail = await request<TaskDetailWire>("GET", `/projects/${enc(slug)}/tasks/${enc(id)}`);
-    return { ...detail, memo: decodeTaskMemo(detail.memo) };
+    return {
+      ...detail,
+      memo: decodeTaskMemo(detail.memo),
+      partialWorkMarkdown: detail.partialWorkMarkdown ?? null,
+    };
   },
   packetFile: (slug: string, id: string, path: string): Promise<string> =>
     request(
@@ -327,7 +333,7 @@ export const api = {
   setClaimStatus: (
     slug: string,
     claimId: string,
-    to: Extract<ClaimStatus, "VERIFIED" | "REFUTED">,
+    to: Extract<ClaimStatus, "VERIFIED" | "FAILED" | "REFUTED">,
     note: string,
   ): Promise<{ ok: true }> =>
     request("POST", `/projects/${enc(slug)}/claims/${enc(claimId)}/status`, { to, note }),

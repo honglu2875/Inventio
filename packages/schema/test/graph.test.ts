@@ -107,16 +107,29 @@ describe("evidence graph", () => {
 });
 
 describe("trajectory evidence graph", () => {
-  it("shows active claims, running checks, fact promotion, equivalence, and a concrete correction", () => {
+  it("shows research trajectories, turning points, active claims, checks, and established facts", () => {
     const events = buildCanonicalEvents();
     const cut = events.findIndex((event) => event.type === "verification.completed");
     const state = replay(initialState(), events.slice(0, cut));
     const graph = deriveTrajectoryEvidenceGraph(state);
     const ids = new Set(graph.nodes.map((node) => node.id));
 
-    for (const expected of ["problem", "K001", "K002", "K003", "V001", "F001"]) {
+    for (const expected of ["problem", "T001", "MS001", "K001", "K002", "K003", "V001", "F001"]) {
       expect(ids.has(expected), `missing node ${expected}`).toBe(true);
     }
+    expect(graph.edges).toContainEqual({
+      id: "trajectory-step:T001:MS001",
+      source: "T001",
+      target: "MS001",
+      type: "sequence",
+    });
+    expect(graph.edges).toContainEqual({
+      id: "produced:MS001:K001",
+      source: "MS001",
+      target: "K001",
+      type: "produced",
+      label: "RELATED",
+    });
     expect(graph.nodes.find((node) => node.id === "V001")?.label).toBe("V001 RUNNING");
     expect(graph.edges).toContainEqual({
       id: "check:K003:V001",
@@ -128,5 +141,33 @@ describe("trajectory evidence graph", () => {
     expect(graph.edges.some((edge) => edge.type === "promotes" && edge.source === "K001" && edge.target === "F001")).toBe(true);
     expect(graph.edges.some((edge) => edge.type === "equivalent" && new Set([edge.source, edge.target]).has("K001") && new Set([edge.source, edge.target]).has("K002"))).toBe(true);
     expect(graph.edges.some((edge) => edge.type === "attacks" && edge.source === "K003" && edge.target === "F001")).toBe(true);
+  });
+
+  it("supports a focused summary while retaining aggregate check counts", () => {
+    const events = buildCanonicalEvents();
+    const cut = events.findIndex((event) => event.type === "verification.completed");
+    const state = replay(initialState(), events.slice(0, cut));
+    state.waves.W001!.status = "closed";
+
+    const focused = deriveTrajectoryEvidenceGraph(state, {
+      includeMilestones: false,
+      includeVerifications: false,
+    });
+    const focusedIds = new Set(focused.nodes.map((node) => node.id));
+    expect(focusedIds.has("T001")).toBe(true);
+    expect(focusedIds.has("T002")).toBe(false);
+    expect(focusedIds.has("MS001")).toBe(false);
+    expect(focusedIds.has("V001")).toBe(false);
+    expect(focused.nodes.find((node) => node.id === "K003")?.data.checkCount).toBe(1);
+    expect(focused.edges.some((edge) => edge.source === "T001" && edge.target === "K003" && edge.type === "produced")).toBe(true);
+
+    const all = deriveTrajectoryEvidenceGraph(state, {
+      includeAllTrajectories: true,
+      includeMilestones: false,
+      includeVerifications: false,
+    });
+    const allIds = new Set(all.nodes.map((node) => node.id));
+    expect(allIds.has("T002")).toBe(true);
+    expect(allIds.has("T003")).toBe(true);
   });
 });

@@ -15,6 +15,7 @@ import type {
   Result,
   RosterEntry,
   Usage,
+  VerificationFinding,
   VerificationVerdict,
 } from "./events.js";
 import type { ProjectConfig, WorkerRole } from "./config.js";
@@ -38,6 +39,8 @@ export interface TaskState {
   packetManifest: string[];
   threadId: string | null;
   estimatedTokens: number;
+  /** Cumulative worker-token charge already applied to the project budget. */
+  chargedTokens: number;
   lastItem: { type: string; preview: string } | null;
   usage: Usage | null;
   artifactIds: string[];
@@ -72,6 +75,8 @@ export interface WaveState {
   resolutionPath: string | null;
   /** v2 summary reader has considered this round, including a no-change decision. */
   summaryReviewed: boolean;
+  /** v2 has compared this round's statements for mathematical identity. */
+  claimsCompared: boolean;
 }
 
 export interface ArtifactMeta {
@@ -144,6 +149,7 @@ export interface VerificationState {
   ordinal: number;
   status: "queued" | "running" | "completed";
   verdict: VerificationVerdict | null;
+  finding: VerificationFinding | null;
   summaryMarkdown: string;
   artifactPath: string | null;
   usage: Usage | null;

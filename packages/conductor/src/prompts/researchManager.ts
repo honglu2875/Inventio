@@ -1,7 +1,7 @@
 import { candidateLifecycle, type ProjectState } from "@inventio/schema";
 import { reviewBacklog, unassessedClaimSources } from "../engine/validate.js";
 import { RESEARCH_MANAGER_EXAMPLES, W000_VOICE_EXAMPLE } from "./managerExamples.js";
-import { TEX_LAYOUT_GUIDANCE } from "./shared.js";
+import { withMathematicalWritingGuidance } from "./shared.js";
 
 /**
  * Complete Research Manager prompt surface (DESIGN §6.2/§6.3/§8.3).
@@ -276,8 +276,6 @@ details; their mathematical meanings are:
 Write any mathematics in your text as LaTeX delimited by $ … $ inline and
 $$ … $$ for display; never \\( … \\) or \\[ … \\], which do not render.
 
-${TEX_LAYOUT_GUIDANCE}
-
 Reply with ONLY one JSON object per the output schema: set "action" and fill
 exactly that one field, all other action fields null.`;
 
@@ -323,7 +321,6 @@ and \`notes\`. The owner edits W000 directly in the preview; do not generate a
 separate questionnaire.
 
 Write mathematics as LaTeX delimited by $ … $ inline and $$ … $$ for display.
-${TEX_LAYOUT_GUIDANCE}
 Because the reply is JSON, double every TeX backslash (for example
 \`\\\\frac\`, never \`\\frac\`) so JSON cannot turn it into a control character.`;
 
@@ -340,8 +337,6 @@ suggested and say so plainly in the statement.
 
 Change nothing else. This is the text the owner will read, edit, and confirm,
 and it becomes the immutable problem for the whole project.
-
-${TEX_LAYOUT_GUIDANCE}
 
 In the internal \`notes\` field, list in one line each how each answer changed
 the statement.
@@ -386,7 +381,6 @@ context for the next round. The owner's original comment remains separately
 available and must not be paraphrased out of existence.
 
 Write mathematics as LaTeX delimited by $ … $ inline and $$ … $$ for display.
-${TEX_LAYOUT_GUIDANCE}
 Because the reply is JSON, double every TeX backslash (for example
 \`\\\\frac\`, never \`\\frac\`) so JSON cannot turn it into a control character.`;
 
@@ -480,8 +474,6 @@ summary, abstracts, and conclusion blocks—must read as mathematical notes for
 a colleague. Do not narrate how the work was assigned or managed, and do not
 expose internal field names in that prose.
 
-${TEX_LAYOUT_GUIDANCE}
-
 ## Internal response format
 
 The JSON schema uses implementation names. Fill them as follows without using
@@ -521,8 +513,6 @@ scoped candidate that two independent referee reports passed (say so, with the
 candidate version and report IDs); results asserted in a write-up but never
 independently reviewed; and conjecture. A reader must be able to tell at a
 glance which is which.
-
-${TEX_LAYOUT_GUIDANCE}
 
 Write mathematics as LaTeX delimited by $ … $ inline and $$ … $$ for display;
 never \\( … \\) or \\[ … \\], which do not render for the reader.`;
@@ -756,7 +746,7 @@ export function ledgerSummary(state: ProjectState): string {
       return counts;
     }, {});
     out.push(
-      `Status: ${["VERIFIED", "UNVERIFIED", "REFUTED", "SUPERSEDED"]
+      `Status: ${["VERIFIED", "UNVERIFIED", "FAILED", "REFUTED", "SUPERSEDED"]
         .map((status) => `${status} ${claimCounts[status] ?? 0}`)
         .join("; ")}. UNVERIFIED means not independently checked, not an established result; change a status only when another investigation actually checks the claim.`,
     );
@@ -875,7 +865,7 @@ export function decisionPacketFiles(
   },
 ): Record<string, string> {
   const files: Record<string, string> = {
-    "AGENTS.md": NEXT_MOVE_CONTRACT,
+    "AGENTS.md": withMathematicalWritingGuidance(NEXT_MOVE_CONTRACT),
     "problem.md": state.problem.confirmedMarkdown ?? state.statement,
     "current-record.md": ledgerSummary(state),
     "working-library.md": workingLibraryMarkdown(state),
@@ -933,7 +923,7 @@ export function continuationRevisionPacketFiles(
   const direction = continuationDirectionMarkdown(state);
   if (!direction) throw new Error("continuation revision requires active owner direction");
   const files: Record<string, string> = {
-    "AGENTS.md": CONTINUATION_REVISION_CONTRACT,
+    "AGENTS.md": withMathematicalWritingGuidance(CONTINUATION_REVISION_CONTRACT),
     "revision-id.md": `# Revised view identifier\n\n${revisionId}\n`,
     "problem.md": state.problem.confirmedMarkdown ?? state.statement,
     "current-record.md": ledgerSummary(state),
@@ -951,7 +941,7 @@ export function continuationRevisionPacketFiles(
 /** Builds the initial W000 directory before raw source files are copied in. */
 export function intakePacketFiles(statement: string, contextMarkdown: string): Record<string, string> {
   return {
-    "AGENTS.md": INTAKE_CONTRACT,
+    "AGENTS.md": withMathematicalWritingGuidance(INTAKE_CONTRACT),
     "w000-voice-example.md": W000_VOICE_EXAMPLE,
     "statement.md": statement,
     "context.md": contextMarkdown.trim() || "(No separate background notes supplied.)",
@@ -973,7 +963,7 @@ export function revisionPacketFiles(
       `### ${q.question}\n\n- why it matters: ${q.why}\n- your suggested reading: ${q.suggested}\n- owner's answer: ${q.answer === null || q.answer === "" ? "(no answer — use your suggested reading and say so)" : q.answer}`,
   );
   return {
-    "AGENTS.md": REVISION_CONTRACT,
+    "AGENTS.md": withMathematicalWritingGuidance(REVISION_CONTRACT),
     "statement.md": statement,
     "normalized-previous.md": normalized,
     "answers.md": `# Clarifications\n\n${lines.join("\n\n")}\n`,
@@ -990,7 +980,7 @@ export function curationPacketFiles(
   digest: string | null,
 ): Record<string, string> {
   const files: Record<string, string> = {
-    "AGENTS.md": CURATION_CONTRACT,
+    "AGENTS.md": withMathematicalWritingGuidance(CURATION_CONTRACT),
     "problem.md": state.problem.confirmedMarkdown ?? state.statement,
     "current-record.md": ledgerSummary(state),
     "working-library.md": workingLibraryMarkdown(state),
@@ -1040,7 +1030,7 @@ export function finalPacketFiles(
   digest: string | null,
 ): Record<string, string> {
   const files: Record<string, string> = {
-    "AGENTS.md": FINAL_CONTRACT,
+    "AGENTS.md": withMathematicalWritingGuidance(FINAL_CONTRACT),
     "problem.md": state.problem.confirmedMarkdown ?? state.statement,
     "current-record.md": ledgerSummary(state),
     "result-context.md":
@@ -1069,7 +1059,7 @@ export function publicationPacketFiles(
 ): Record<string, string> {
   const checkpoint = state.terminalHistory.at(-1);
   const files: Record<string, string> = {
-    "AGENTS.md": PUBLICATION_CONTRACT,
+    "AGENTS.md": withMathematicalWritingGuidance(PUBLICATION_CONTRACT),
     "problem.md": state.problem.confirmedMarkdown ?? state.statement,
     "stopping-report.md": stoppingReport,
     "research-record-index.md": recordIndex,

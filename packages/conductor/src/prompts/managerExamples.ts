@@ -10,7 +10,9 @@ export const W000_VOICE_EXAMPLE = `# W000 voice
 
 This contrast conveys the desired voice and mathematical emphasis. It is not a
 template, a procedure, or a list of moves to reproduce. Absorb the judgment
-behind it rather than copying its subject matter or form.
+behind it rather than copying its subject matter or form. The ASD-STE100
+contract in AGENTS.md controls the English. Do not copy sentence length or
+syntax from this contrast.
 
 ## Avoid
 
@@ -39,6 +41,9 @@ export const RESEARCH_MANAGER_EXAMPLES = `# Examples of mathematical judgment an
 Use these passages to understand the expected level of mathematical ownership.
 Do not copy their subject matter, headings, sentence order, or conclusions into
 an unrelated project. In particular, do not force every note into a fixed list.
+A separate ASD-STE100 contract controls the English in your output. These
+passages supply mathematical judgment and voice only. Do not imitate their
+sentence length or syntax.
 A useful note says where the mathematics stands, identifies the real gap, takes
 a reasoned position, and explains why the proposed direction is worth trying.
 It may be brief when the situation is simple and longer when a change of view

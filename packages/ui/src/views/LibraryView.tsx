@@ -150,11 +150,14 @@ function counts(state: ProjectState): Record<Section, number> {
     claims: Object.values(state.claims).filter(
       (claim) =>
         state.config.workflow === "trajectories-v2"
-          ? claim.status === "UNVERIFIED"
+          ? claim.status === "UNVERIFIED" || claim.status === "NEEDS_REVISION"
           : claim.status === "VERIFIED" || claim.status === "UNVERIFIED",
     ).length,
     "failed-claims": Object.values(state.claims).filter(
-      (claim) => claim.status === "REFUTED" || claim.status === "SUPERSEDED",
+      (claim) =>
+        claim.status === "FAILED" ||
+        claim.status === "REFUTED" ||
+        claim.status === "SUPERSEDED",
     ).length,
     writeups: artifactsOf(state, "writeup").length,
     verifications: state.verificationOrder.length,
@@ -438,7 +441,14 @@ function ArtifactSection({
 
 // --------------------------------------------------------------------- claims
 
-const CLAIM_STATUSES: ClaimStatus[] = ["VERIFIED", "UNVERIFIED", "REFUTED", "SUPERSEDED"];
+const CLAIM_STATUSES: ClaimStatus[] = [
+  "VERIFIED",
+  "UNVERIFIED",
+  "NEEDS_REVISION",
+  "FAILED",
+  "REFUTED",
+  "SUPERSEDED",
+];
 
 function ClaimsSection({
   slug,
@@ -453,7 +463,11 @@ function ClaimsSection({
 }): JSX.Element {
   const guard = useActionGuard(slug);
   const run = useApiAction();
-  const [statuses, setStatuses] = useState<ClaimStatus[]>(["VERIFIED", "UNVERIFIED"]);
+  const [statuses, setStatuses] = useState<ClaimStatus[]>([
+    "VERIFIED",
+    "UNVERIFIED",
+    "NEEDS_REVISION",
+  ]);
   const [query, setQuery] = useState("");
   const [note, setNote] = useState("");
   const statusCounts = useMemo(
@@ -463,7 +477,14 @@ function ClaimsSection({
           counts[claim.status] += 1;
           return counts;
         },
-        { VERIFIED: 0, UNVERIFIED: 0, REFUTED: 0, SUPERSEDED: 0 },
+        {
+          VERIFIED: 0,
+          UNVERIFIED: 0,
+          NEEDS_REVISION: 0,
+          FAILED: 0,
+          REFUTED: 0,
+          SUPERSEDED: 0,
+        },
       ),
     [state.claims],
   );
@@ -507,8 +528,10 @@ function ClaimsSection({
       <div className="queue-summary small">
         <strong>Claim ledger:</strong> {statusCounts.UNVERIFIED} unverified leads — {queueBreakdown.untriaged} still
         need source-attempt triage, {queueBreakdown.focusedFollowup} have a focused follow-up, {queueBreakdown.carried}
-        are carried toward review, and {queueBreakdown.other} are background/reference leads. {statusCounts.VERIFIED}{" "}
-        exact statements independently checked, {statusCounts.REFUTED} refuted, {statusCounts.SUPERSEDED} retired.
+        are carried toward review, and {queueBreakdown.other} are background/reference leads. {statusCounts.NEEDS_REVISION}{" "}
+        submissions need a clearer self-contained write-up. {statusCounts.VERIFIED}{" "}
+        exact statements independently checked, {statusCounts.FAILED} submitted proofs failed, {statusCounts.REFUTED}{" "}
+        statements refuted, and {statusCounts.SUPERSEDED} duplicates retired.
         A claim label applies only to its exact statement and never passes or fails a candidate. UNVERIFIED means
         “worth remembering,” not “probably true”; new broad work is held behind triage and independent review of
         concrete results.
@@ -610,14 +633,14 @@ function ClaimsSection({
                             title={guard.title ?? "a justification note is required"}
                             onClick={() => {
                               void run(
-                                () => api.setClaimStatus(slug, claim.id, "REFUTED", note.trim()),
-                                `${claim.id} marked REFUTED`,
+                                () => api.setClaimStatus(slug, claim.id, "FAILED", note.trim()),
+                                `${claim.id} marked FAILED`,
                               ).then((ok) => {
                                 if (ok) setNote("");
                               });
                             }}
                           >
-                            Mark REFUTED
+                            Mark proof failed
                           </button>
                           <button
                             type="button"
@@ -931,7 +954,7 @@ const FACT_STATUS_COLOR: Record<FactState["status"], string> = {
 };
 
 function claimSection(claim: ClaimState): Section {
-  return claim.status === "REFUTED" || claim.status === "SUPERSEDED"
+  return claim.status === "FAILED" || claim.status === "REFUTED" || claim.status === "SUPERSEDED"
     ? "failed-claims"
     : "claims";
 }
@@ -962,6 +985,9 @@ function VerificationList({ slug, state, claim }: { slug: string; state: Project
               <span className={`chip${check.verdict === "PASS" ? " ok" : check.verdict === "FAIL" || check.verdict === "ERROR" ? " danger-badge" : ""}`}>
                 {verificationDisplayStatus(check)}
               </span>
+              {check.finding && check.finding !== "NONE" ? (
+                <span className="chip">{check.finding.replaceAll("_", " ")}</span>
+              ) : null}
               <span className="small muted">{check.summaryMarkdown || "Waiting for an independent reading."}</span>
             </Link>
           ))}
@@ -1053,7 +1079,7 @@ function TrajectoryClaimsSection({
     .filter((claim): claim is ClaimState => claim !== undefined)
     .filter((claim) =>
       archived
-        ? claim.status === "REFUTED" || claim.status === "SUPERSEDED"
+        ? claim.status === "FAILED" || claim.status === "REFUTED" || claim.status === "SUPERSEDED"
         : claim.status === "UNVERIFIED",
     )
     .filter((claim) =>

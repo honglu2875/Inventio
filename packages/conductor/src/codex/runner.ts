@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { createWriteStream, mkdirSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import type { ReasoningEffort, Usage } from "@inventio/schema";
 import { Usage as UsageSchema } from "@inventio/schema";
@@ -15,6 +15,18 @@ import { Usage as UsageSchema } from "@inventio/schema";
 
 export type SandboxMode = "read-only" | "workspace-write";
 
+export type FilesystemPermission = "read" | "write" | "deny";
+
+/**
+ * A named Codex permission profile supplied on the command line. Unlike the
+ * legacy `--sandbox workspace-write` mode, an explicit profile does not grant
+ * read access to the repository that happens to contain `cwd`.
+ */
+export interface PermissionProfile {
+  name: string;
+  filesystem: Readonly<Record<string, FilesystemPermission>>;
+}
+
 export interface McpAttachment {
   serverName: string;
   url: string;
@@ -29,6 +41,8 @@ export interface RunCodexOptions {
   cwd: string;
   prompt: string;
   sandbox: SandboxMode;
+  /** Mutually exclusive with the legacy sandbox flag on a fresh session. */
+  permissionProfile?: PermissionProfile;
   eventsArchiveFile: string;
   model?: string | null;
   effort?: ReasoningEffort;
@@ -74,13 +88,22 @@ export interface RunCodexResult {
  * 0.149.0 (a one-word reply reported 15,548 input tokens; small real worker
  * turns land near 33,000 with a packet attached).
  *
- * The streamed item events only reflect OUTPUT, so an estimator built from
- * them alone under-counts by roughly this much on every turn and a budget cap
- * would never fire on short tasks. Seeding the estimate with this constant
- * plus the packet size makes the mid-flight estimate track reality closely
- * enough to enforce a cap; exact usage still reconciles at turn.completed.
+ * The streamed item events omit repeated model-context consumption, so an
+ * estimator built from their byte size alone badly under-counts long tasks.
+ * Seeding the estimate with this constant plus the packet size covers the
+ * initial call; completed tool/message items receive a calibrated per-step
+ * allowance below. Exact usage still reconciles at turn.completed.
  */
 export const CODEX_TURN_BASE_TOKENS = 16_000;
+
+/**
+ * The JSONL stream omits the repeatedly consumed model context during a long
+ * tool-using turn. Across the smoke run, completed items cost about 5,500–8,600
+ * billable tokens apiece after cache discounts. A 6,500-token step allowance,
+ * plus the visible event bytes, tracked complete trajectories within a useful
+ * emergency-guard band without multiplying a large final answer itself.
+ */
+export const CODEX_COMPLETED_ITEM_BASE_TOKENS = 6_500;
 
 export const ZERO_USAGE: Usage = {
   input_tokens: 0,
@@ -98,6 +121,46 @@ export function addUsage(a: Usage, b: Usage): Usage {
   };
 }
 
+function resolveExecutable(bin: string): string {
+  const candidates = bin.includes(path.sep)
+    ? [path.resolve(bin)]
+    : (process.env.PATH ?? "")
+        .split(path.delimiter)
+        .filter(Boolean)
+        .map((directory) => path.join(directory, bin));
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return realpathSync(candidate);
+  }
+  throw new Error(`cannot resolve executable ${bin} for a restricted permission profile`);
+}
+
+function tomlString(value: string): string {
+  return JSON.stringify(value);
+}
+
+/** Build the two strict-config overrides needed to select a custom profile. */
+export function permissionProfileArgs(
+  profile: PermissionProfile,
+  executable: string,
+): string[] {
+  if (!/^[A-Za-z0-9_-]+$/.test(profile.name)) {
+    throw new Error(`invalid permission profile name ${profile.name}`);
+  }
+  const filesystem = new Map(Object.entries(profile.filesystem));
+  // Codex's Linux sandbox re-executes the standalone binary inside its own
+  // boundary. Grant that single resolved file, never its containing tree.
+  filesystem.set(realpathSync(executable), "read");
+  const entries = [...filesystem.entries()]
+    .map(([root, access]) => `${tomlString(root)}=${tomlString(access)}`)
+    .join(",");
+  return [
+    "-c",
+    `permissions.${profile.name}={filesystem={${entries}}}`,
+    "-c",
+    `default_permissions=${tomlString(profile.name)}`,
+  ];
+}
+
 export function buildArgs(opts: RunCodexOptions): string[] {
   const args: string[] = ["exec"];
   if (opts.resumeThreadId) {
@@ -105,7 +168,12 @@ export function buildArgs(opts: RunCodexOptions): string[] {
   }
   args.push("--json", "--ignore-user-config", "--strict-config", "--skip-git-repo-check");
   if (!opts.resumeThreadId) {
-    args.push("-C", opts.cwd, "-s", opts.sandbox);
+    args.push("-C", opts.cwd);
+    if (opts.permissionProfile) {
+      args.push(...permissionProfileArgs(opts.permissionProfile, resolveExecutable(opts.bin)));
+    } else {
+      args.push("-s", opts.sandbox);
+    }
   }
   if (opts.model) args.push("-m", opts.model);
   if (opts.effort) args.push("-c", `model_reasoning_effort="${opts.effort}"`);
@@ -220,6 +288,9 @@ export function runCodex(opts: RunCodexOptions): Promise<RunCodexResult> {
       if (typeof ev.type === "string" && ev.type.startsWith("item.")) {
         const item = ev["item"] as { type?: string; text?: string; command?: string } | undefined;
         estimatedTokens += Math.ceil(line.length / 4);
+        if (ev.type === "item.completed") {
+          estimatedTokens += CODEX_COMPLETED_ITEM_BASE_TOKENS;
+        }
         if (ev.type === "item.completed" && item?.type === "agent_message" && typeof item.text === "string") {
           lastAgentMessage = item.text;
         }

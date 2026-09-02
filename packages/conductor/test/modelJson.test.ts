@@ -20,6 +20,27 @@ describe("model JSON TeX integrity", () => {
     expect(parsed.prose).toBe("first\ntext on the next line");
   });
 
+  it("does not turn a display line break before an exponential into \\ne", () => {
+    const raw = String.raw`{"proof":"Expand\n\\[\nA=\ne^{\\delta D}-2\n\\]\nDone."}`;
+    const parsed = parseModelJson(raw) as { proof: string };
+
+    expect(parsed.proof).toBe("Expand\n\\[\nA=\ne^{\\delta D}-2\n\\]\nDone.");
+    expect(parsed.proof).not.toContain(String.raw`A=\ne^`);
+  });
+
+  it("does not turn a display line break before an ordinary u into Greek nu", () => {
+    const raw = String.raw`{"proof":"Define\n\\[\nA=\nu=(\\Lambda-1)F_t.\n\\]"}`;
+    const parsed = parseModelJson(raw) as { proof: string };
+
+    expect(parsed.proof).toBe("Define\n\\[\nA=\nu=(\\Lambda-1)F_t.\n\\]");
+    expect(parsed.proof).not.toContain(String.raw`A=\nu=`);
+  });
+
+  it("preserves properly escaped Greek nu and not-equal commands", () => {
+    const raw = JSON.stringify({ proof: String.raw`\[\nu\ne0\]` });
+    expect(parseModelJson(raw)).toEqual({ proof: String.raw`\[\nu\ne0\]` });
+  });
+
   it("leaves correctly doubled TeX escapes byte-stable", () => {
     const raw = JSON.stringify({ math: String.raw`\frac{\theta}{\rho}` });
     expect(protectModelJsonTex(raw)).toBe(raw);

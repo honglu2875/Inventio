@@ -282,16 +282,21 @@ export class EngineManager {
 
   /** Load and start every project on disk (terminal ones just stay readable). */
   openAll(): void {
+    const opened: ProjectEngine[] = [];
     for (const slug of listProjectSlugs(this.root)) {
       if (this.engines.has(slug)) continue;
       const engine = ProjectEngine.load(this.deps(), slug);
       this.engines.set(slug, engine);
+      opened.push(engine);
       this.wireMemory(engine);
       // A loaded engine rebuilds its config from the event log, which predates
       // any upload; re-register the mount so earlier uploads stay reachable.
       if (existsSync(sourcesDir(engine.paths.dir))) this.syncUploadsMount(engine);
-      engine.start();
     }
+    // Acquire every project before any loop can spend quota. If a later load
+    // discovers another live owner, main() closes the already-open leases and
+    // no partially opened server has begun research work.
+    for (const engine of opened) engine.start();
   }
 
   // ------------------------------------------------------- uploaded sources

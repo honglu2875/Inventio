@@ -1157,12 +1157,14 @@ body.resizing {
 }
 
 /* Positions animate, except while the user is panning (§5). */
-.ops-canvas.is-panning .react-flow__node {
+.ops-canvas.is-panning .react-flow__node,
+.research-map-flow.is-panning .react-flow__node {
   transition: none !important;
 }
 
 /* Compact mode below zoom 0.5: glyph + ring only (§5). */
-.ops-canvas.is-compact .node-detail {
+.ops-canvas.is-compact .node-detail,
+.research-map-flow.is-compact .node-detail {
   display: none;
 }
 
@@ -1295,6 +1297,19 @@ body.resizing {
 
 .task-id {
   font-weight: 600;
+}
+
+.map-wave-id {
+  flex: none;
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.map-fact-count {
+  color: var(--ok);
 }
 
 .task-method {
@@ -1457,6 +1472,23 @@ body.resizing {
   font-size: 11px;
   line-height: 1.25;
   overflow: hidden;
+}
+
+.milestone-step {
+  margin-left: auto;
+  font-size: 9px;
+}
+
+.milestone-excerpt {
+  margin-top: 4px;
+  font-size: 10px;
+  line-height: 1.25;
+  overflow: hidden;
+}
+
+.milestone-excerpt .math-text,
+.milestone-excerpt p {
+  margin: 0;
 }
 
 .claim-top {
@@ -2202,7 +2234,47 @@ body.resizing {
 }
 
 .trajectory-evidence-toolbar {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+}
+
+.research-map-summary {
+  min-width: 0;
+}
+
+.research-map-summary p {
+  max-width: 920px;
+  margin: 3px 0 0;
+  color: var(--muted);
+}
+
+.research-map-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-width: 0;
+}
+
+.map-check-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.map-check-option:hover {
+  color: var(--text);
+}
+
+.map-check-option input {
+  margin: 0;
+  accent-color: var(--accent);
 }
 
 @media (max-width: 850px) {
@@ -2214,6 +2286,16 @@ body.resizing {
     padding: 8px 0 0;
     border-left: 0;
     border-top: 1px solid var(--border);
+  }
+
+  .trajectory-evidence-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .research-map-controls {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    min-width: 0;
   }
 }
 

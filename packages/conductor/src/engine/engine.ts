@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   ActiveModelSettings,
   ActionEnvelope,
+  ClaimComparisonOutput,
   CrossExamAnswer,
   ContinuationRevisionOutput,
   CurationOutput,
@@ -58,7 +59,8 @@ import {
   writeProjectFile,
   type ProjectPaths,
 } from "../store/projectStore.js";
-import { runStructured } from "../codex/structured.js";
+import { runStructured, type StructuredRunResult } from "../codex/structured.js";
+import { parseModelJson } from "../codex/modelJson.js";
 import {
   addUsage,
   CODEX_TURN_BASE_TOKENS,
@@ -96,12 +98,14 @@ import {
   REVISION_PROMPT,
 } from "../prompts/researchManager.js";
 import {
+  CLAIM_COMPARISON_PROMPT,
   SUMMARY_REVIEW_PROMPT,
   TRAJECTORY_FINAL_PROMPT,
   TRAJECTORY_INTAKE_PROMPT,
   TRAJECTORY_RESTART_PROMPT,
   TRAJECTORY_WORKER_PROMPT,
   VERIFICATION_PROMPT,
+  claimComparisonFiles,
   latestMathematicalView,
   summaryReviewFiles,
   trajectoryFinalFiles,
@@ -171,6 +175,89 @@ function effectiveWorkerModel(config: ProjectConfig, role: WorkerRole): ModelCho
     : configured;
 }
 
+type TaskAccountingBasis = "reported" | "estimated" | "mixed";
+
+interface TaskAccounting {
+  /** Exact usage from every run that reached turn.completed, if any did. */
+  reportedUsage: Usage | null;
+  /** Exact spend plus conservative estimates for runs that never reported. */
+  chargedTokens: number;
+  basis: TaskAccountingBasis;
+}
+
+function taskAccountingBasis(hasReported: boolean, hasEstimated: boolean): TaskAccountingBasis {
+  return hasReported && hasEstimated ? "mixed" : hasReported ? "reported" : "estimated";
+}
+
+/** Add one resumed model call to the cumulative charge already on the task. */
+function resumedTaskAccounting(
+  previousCharge: number,
+  previousBasis: TaskAccountingBasis,
+  current: TaskAccounting,
+  cumulativeReportedUsage: Usage,
+): TaskAccounting {
+  const hasPrevious = previousCharge > 0;
+  const hasReported =
+    (hasPrevious && previousBasis !== "estimated") || current.basis !== "estimated";
+  const hasEstimated =
+    (hasPrevious && previousBasis !== "reported") || current.basis !== "reported";
+  return {
+    reportedUsage: hasReported ? cumulativeReportedUsage : null,
+    chargedTokens: previousCharge + current.chargedTokens,
+    basis: taskAccountingBasis(hasReported, hasEstimated),
+  };
+}
+
+/**
+ * A structured call may contain retries. Some can report exact usage while a
+ * final timed-out run cannot, so account each constituent run independently.
+ */
+function structuredTaskAccounting<T>(result: StructuredRunResult<T>): TaskAccounting {
+  const reportedRuns = result.runs.filter((run) => run.usage !== null);
+  const estimatedTokens = result.runs
+    .filter((run) => run.usage === null)
+    .reduce((total, run) => total + Math.max(0, Math.floor(run.estimatedTokens)), 0);
+  const reportedTokens = usageSpend(result.usage);
+  return {
+    reportedUsage: reportedRuns.length > 0 ? result.usage : null,
+    chargedTokens: reportedTokens + estimatedTokens,
+    basis:
+      reportedRuns.length > 0 && estimatedTokens > 0
+        ? "mixed"
+        : reportedRuns.length > 0
+          ? "reported"
+          : "estimated",
+  };
+}
+
+function stripJsonFence(text: string): string {
+  const trimmed = text.trim();
+  const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
+  return fenced ? fenced[1]! : trimmed;
+}
+
+/**
+ * Interrupted structured calls often leave their last draft as JSON. Keep it
+ * unvalidated partial work, but show the mathematical prose rather than JSON
+ * field names and escaping in the round summary and task inspector.
+ */
+function readablePartialWork(text: string): string {
+  const raw = text.trim();
+  if (raw === "") return "";
+  try {
+    const parsed = parseModelJson(stripJsonFence(raw));
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return raw;
+    const record = parsed as Record<string, unknown>;
+    const parts = [record.summaryMarkdown, record.writeupMarkdown]
+      .filter((value): value is string => typeof value === "string" && value.trim() !== "")
+      .map((value) => value.trim())
+      .filter((value, index, values) => values.indexOf(value) === index);
+    return parts.length > 0 ? parts.join("\n\n") : raw;
+  } catch {
+    return raw;
+  }
+}
+
 function validateTaskDispositions(out: CurationResult, outcomes: TaskOutcome[]): string[] {
   const expected = new Set(outcomes.map((outcome) => outcome.taskId));
   const seen = new Set<string>();
@@ -209,6 +296,36 @@ function abstractSentenceCount(text: string): number {
   const marked = compact.match(/[.!?]+(?=\s|$)/g)?.length ?? 0;
   return Math.max(1, marked + (/[.!?]+$/.test(compact) ? 0 : 1));
 }
+
+function summaryAbstractViolations(text: string): string[] {
+  const violations: string[] = [];
+  const trimmed = text.trim();
+  if (trimmed.length > 480) violations.push("abstract exceeds 480 characters");
+  if (abstractSentenceCount(trimmed) > 4) violations.push("abstract exceeds four sentences");
+  if (/(?:^|\n)\s*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s)/m.test(trimmed)) {
+    violations.push("abstract contains a heading, list, or outline");
+  }
+  const withoutClosingMarks = trimmed.replace(/[\s"'’”`*_)$\]}]+$/g, "");
+  if (!/[.!?]$/.test(withoutClosingMarks)) {
+    violations.push("abstract does not end with a complete sentence");
+  }
+  return violations;
+}
+
+function normalizeMathematicalViewMarkdown(waveId: string, markdown: string): string {
+  const lines = markdown.trim().split("\n");
+  const first = lines[0]?.trim() ?? "";
+  if (
+    /^#\s+(?:W\d+(?:\.\d+)?\b.*|(?:current\s+)?mathematical\s+view\b.*)$/i.test(first)
+  ) {
+    lines.shift();
+    while (lines[0]?.trim() === "") lines.shift();
+  }
+  return [`# ${waveId} — Current mathematical view`, "", ...lines].join("\n").trim();
+}
+
+const VERIFIER_FILESYSTEM_ISOLATION = "packet-only-v1";
+const MAX_VERIFICATION_PROCESS_REPLACEMENTS = 2;
 
 const CONCLUSION_BLOCK = /(?:^|\n)\s*(?:#{1,6}\s*)?(?:\*\*)?(?:Definition|Theorem|Proposition|Lemma|Corollary|Example|Computation|Obstruction|Question|Heuristic|Remark)\b/im;
 
@@ -437,25 +554,42 @@ export class ProjectEngine extends EventEmitter {
     createProjectDirs(paths);
     writeProjectFile(paths, defaultProjectFile(args.slug, args.title, args.config));
     const log = EventLog.open(paths.eventsFile);
-    const engine = new ProjectEngine(args.slug, deps, log, initialState());
-    engine.emitEvent({
-      type: "project.created",
-      slug: args.slug,
-      title: args.title,
-      statement: args.statement,
-      contextMarkdown: args.contextMarkdown ?? "",
-      config: args.config,
-    });
-    return engine;
+    try {
+      const engine = new ProjectEngine(args.slug, deps, log, initialState());
+      engine.emitEvent({
+        type: "project.created",
+        slug: args.slug,
+        title: args.title,
+        statement: args.statement,
+        contextMarkdown: args.contextMarkdown ?? "",
+        config: args.config,
+      });
+      return engine;
+    } catch (error) {
+      log.close();
+      throw error;
+    }
   }
 
   static load(deps: EngineDeps, slug: string): ProjectEngine {
     const paths = projectPaths(deps.root, slug);
     readProjectFile(paths); // validates presence
     const log = EventLog.open(paths.eventsFile);
-    const state = initialState();
-    for (const e of log.events) applyEvent(state, e);
-    return new ProjectEngine(slug, deps, log, state);
+    try {
+      const state = initialState();
+      for (const e of log.events) applyEvent(state, e);
+      const engine = new ProjectEngine(slug, deps, log, state);
+      engine.repairCollidedTrajectoryWriteups();
+      engine.recoverRejectedTrajectoryReturns();
+      engine.repairCompletedTrajectoryReturns();
+      engine.repairClosedTrajectoryDockets();
+      engine.repairSavedTaskAccounting();
+      engine.closeInterruptedTrajectoryDecisions();
+      return engine;
+    } catch (error) {
+      log.close();
+      throw error;
+    }
   }
 
   // ------------------------------------------------------------------ core
@@ -752,6 +886,12 @@ export class ProjectEngine extends EventEmitter {
         return wave.status === "closed" && !wave.summaryReviewed;
       });
       if (needsSummary) {
+        if (!this.state.waves[needsSummary]!.claimsCompared) {
+          await this.compareTrajectoryClaims(needsSummary);
+          continue;
+        }
+        await this.drainVerifications();
+        if (this.stopped) return;
         await this.reviewTrajectorySummary(needsSummary);
         continue;
       }
@@ -904,12 +1044,304 @@ export class ProjectEngine extends EventEmitter {
     const file = path.join(this.paths.tasksDir, taskId, "output.json");
     if (!existsSync(file)) return null;
     try {
-      const parsed = TrajectoryOutput.safeParse(JSON.parse(readFileSync(file, "utf8")));
+      const parsed = TrajectoryOutput.safeParse(parseModelJson(readFileSync(file, "utf8")));
       if (!parsed.success) return null;
       this.trajectoryOutputs.set(taskId, parsed.data);
       return parsed.data;
     } catch {
       return null;
+    }
+  }
+
+  private readTaskMeta(taskId: string): Record<string, unknown> | null {
+    const file = path.join(this.paths.tasksDir, taskId, "meta.json");
+    if (!existsSync(file)) return null;
+    try {
+      const value: unknown = JSON.parse(readFileSync(file, "utf8"));
+      return value !== null && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * A narrow compatibility repair for returns rejected solely by an older
+   * objective-preparation validator. The model's final JSON must validate
+   * under the current full trajectory schema; otherwise nothing is changed.
+   */
+  private recoverRejectedTrajectoryReturns(): void {
+    if (this.state.config.workflow !== "trajectories-v2") return;
+    for (const task of Object.values(this.state.tasks)) {
+      if (
+        task.status !== "failed" ||
+        task.invalidOutputErrors === null ||
+        !task.error?.startsWith("output invalid after repair:") ||
+        (task.role !== "solver" && task.role !== "explorer") ||
+        task.artifactIds.length > 0
+      ) {
+        continue;
+      }
+      const taskDir = path.join(this.paths.tasksDir, task.id);
+      const candidates = ["output.json", "last-message.json"];
+      let recovered: TrajectoryOutputT | null = null;
+      for (const name of candidates) {
+        const file = path.join(taskDir, name);
+        if (!existsSync(file)) continue;
+        try {
+          const parsed = TrajectoryOutput.safeParse(
+            parseModelJson(stripJsonFence(readFileSync(file, "utf8"))),
+          );
+          if (parsed.success) {
+            recovered = parsed.data;
+            break;
+          }
+        } catch {
+          // A malformed or still-invalid return remains failed and inspectable.
+        }
+      }
+      if (!recovered) continue;
+
+      writeFileAtomic(path.join(taskDir, "output.json"), JSON.stringify(recovered, null, 2));
+      this.trajectoryOutputs.set(task.id, recovered);
+      const meta = this.readTaskMeta(task.id) ?? {};
+      writeFileAtomic(
+        path.join(taskDir, "meta.json"),
+        JSON.stringify(
+          {
+            ...meta,
+            status: "completed",
+            recoveredFromRejectedOutput: true,
+            recoveredAt: new Date().toISOString(),
+          },
+          null,
+          2,
+        ),
+      );
+      this.emitEvent({
+        type: "task.completed",
+        taskId: task.id,
+        usage: this.readTrajectoryMetaUsage(task.id),
+        clearInvalidOutput: true,
+      });
+    }
+  }
+
+  /** Finish the idempotent materialization half of any recovered completion. */
+  private repairCompletedTrajectoryReturns(): void {
+    if (this.state.config.workflow !== "trajectories-v2") return;
+    for (const waveId of this.state.waveOrder) {
+      const wave = this.state.waves[waveId]!;
+      for (const entry of wave.roster) {
+        const task = this.state.tasks[entry.taskId];
+        if (
+          task?.status !== "completed" ||
+          (entry.role !== "solver" && entry.role !== "explorer")
+        ) {
+          continue;
+        }
+        const output = this.readTrajectoryOutput(entry.taskId);
+        if (output) this.materializeTrajectoryReturn(waveId, entry, output);
+      }
+    }
+  }
+
+  private recordTaskAccounting(taskId: string, accounting: TaskAccounting): void {
+    const task = this.state.tasks[taskId];
+    if (!task || accounting.chargedTokens <= task.chargedTokens) return;
+    this.emitEvent({
+      type: "task.accounted",
+      taskId,
+      chargedTokens: accounting.chargedTokens,
+      basis: accounting.basis,
+    });
+  }
+
+  /**
+   * Backfill terminal calls written before estimated fallback accounting was
+   * durable. Exact meta usage wins; otherwise the last progress estimate is
+   * recorded. No completed task is ever charged twice.
+   */
+  private repairSavedTaskAccounting(): void {
+    for (const task of Object.values(this.state.tasks)) {
+      if (task.status === "queued") continue;
+      const meta = this.readTaskMeta(task.id);
+      const parsedUsage = UsageSchema.safeParse(meta?.usage);
+      const reported = parsedUsage.success ? usageSpend(parsedUsage.data) : 0;
+      const tokenAccounting =
+        meta?.tokenAccounting !== null && typeof meta?.tokenAccounting === "object"
+          ? (meta.tokenAccounting as Record<string, unknown>)
+          : null;
+      const savedCharge =
+        typeof meta?.chargedTokens === "number" && Number.isFinite(meta.chargedTokens)
+          ? Math.max(0, Math.floor(meta.chargedTokens))
+          : typeof tokenAccounting?.actual === "number" &&
+              Number.isFinite(tokenAccounting.actual) &&
+              tokenAccounting.actual > 0
+            ? Math.floor(tokenAccounting.actual)
+            : null;
+      const chargedTokens = savedCharge ?? (reported > 0 ? reported : Math.floor(task.estimatedTokens));
+      const basis: TaskAccountingBasis =
+        meta?.accountingBasis === "mixed" || meta?.accountingBasis === "estimated"
+          ? meta.accountingBasis
+          : reported > 0
+            ? "reported"
+            : "estimated";
+      this.recordTaskAccounting(task.id, {
+        reportedUsage: parsedUsage.success && reported > 0 ? parsedUsage.data : null,
+        chargedTokens,
+        basis,
+      });
+    }
+  }
+
+  /** A previous process cannot still own a model call after this engine loads. */
+  private closeInterruptedTrajectoryDecisions(): void {
+    if (this.state.config.workflow !== "trajectories-v2") return;
+    for (const decisionId of [...this.state.decisionOrder]) {
+      const decision = this.state.decisions[decisionId]!;
+      if (
+        decision.status !== "requested" ||
+        (decision.kind !== "curation" &&
+          decision.kind !== "final" &&
+          decision.kind !== "next_move")
+      ) {
+        continue;
+      }
+      this.emitEvent({ type: "decision.proposed", decisionId, action: null, usage: null });
+      this.emitEvent({
+        type: "decision.rejected",
+        decisionId,
+        violations: [
+          "The model call ended with the previous conductor process; Inventio will retry it automatically from the unchanged mathematical record.",
+        ],
+      });
+    }
+  }
+
+  private trajectoryWaveDocket(waveId: string): string {
+    const wave = this.state.waves[waveId]!;
+    const lines = [`# Research round ${waveId}`, ""];
+    for (const entry of wave.roster) {
+      const task = this.state.tasks[entry.taskId]!;
+      const output = this.readTrajectoryOutput(entry.taskId);
+      const partialFile = path.join(this.paths.tasksDir, entry.taskId, "salvage.md");
+      const partial =
+        !output && existsSync(partialFile)
+          ? readablePartialWork(readFileSync(partialFile, "utf8")).slice(0, 1_600)
+          : "";
+      lines.push(
+        `## ${entry.taskId} — ${entry.role} (${task.status})`,
+        "",
+        output?.summaryMarkdown ??
+          (partial !== ""
+            ? [
+                "Partial notes preserved when the research session ended before a structured return; they have not been independently checked:",
+                "",
+                partial,
+              ].join("\n")
+            : task.error ?? task.interruptReason ?? "No mathematical return was completed."),
+        "",
+      );
+    }
+    return lines.join("\n");
+  }
+
+  /** Refresh old closed-round summaries when a return or partial note was recovered. */
+  private repairClosedTrajectoryDockets(): void {
+    if (this.state.config.workflow !== "trajectories-v2") return;
+    for (const waveId of this.state.waveOrder) {
+      const wave = this.state.waves[waveId]!;
+      if (wave.status !== "closed") continue;
+      const docketMarkdown = this.trajectoryWaveDocket(waveId);
+      if (docketMarkdown === wave.docketMarkdown) continue;
+      this.emitEvent({ type: "wave.closed", waveId, docketMarkdown });
+    }
+  }
+
+  /**
+   * Repair projects written by the early trajectories-v2 allocator bug.
+   *
+   * Those logs reused A001 for every Solver and E001 for every Explorer. The
+   * task-local structured returns are durable, so replay can reconstruct the
+   * intended write-ups without rewriting history: each recovered file is
+   * followed by a fresh artifact event, and affected claim source labels are
+   * corrected by their own audit events. The historical first-record order is
+   * used so recovered identifiers retain completion order. Once repaired,
+   * repeated loads are byte- and event-idempotent.
+   */
+  private repairCollidedTrajectoryWriteups(): void {
+    if (this.state.config.workflow !== "trajectories-v2") return;
+
+    const owners = new Map<string, Set<string>>();
+    const orderedTasks: Record<"solver" | "explorer", string[]> = {
+      solver: [],
+      explorer: [],
+    };
+    const seenTasks = new Set<string>();
+    for (const event of this.log.events) {
+      if (event.type !== "artifact.recorded" || event.kind !== "writeup" || !event.taskId) {
+        continue;
+      }
+      const role = this.state.tasks[event.taskId]?.role;
+      if (role !== "solver" && role !== "explorer") continue;
+      const artifactOwners = owners.get(event.artifactId) ?? new Set<string>();
+      artifactOwners.add(event.taskId);
+      owners.set(event.artifactId, artifactOwners);
+      if (!seenTasks.has(event.taskId)) {
+        seenTasks.add(event.taskId);
+        orderedTasks[role].push(event.taskId);
+      }
+    }
+    if (![...owners.values()].some((artifactOwners) => artifactOwners.size > 1)) return;
+
+    for (const role of ["solver", "explorer"] as const) {
+      const idKind: IdKind = role === "solver" ? "attempt" : "exploration";
+      for (const [index, taskId] of orderedTasks[role].entries()) {
+        const task = this.state.tasks[taskId];
+        const output = task?.status === "completed" ? this.readTrajectoryOutput(taskId) : null;
+        if (!task || !output) continue;
+
+        const artifactId = makeId(idKind, index + 1);
+        const relPath = path.join("writeups", `${artifactId}.md`);
+        const markdown = output.writeupMarkdown.trim() + "\n";
+        const absolutePath = path.join(this.paths.dir, relPath);
+        const current = this.state.artifacts[artifactId];
+        const fileMatches =
+          existsSync(absolutePath) && readFileSync(absolutePath, "utf8") === markdown;
+        if (
+          current?.kind !== "writeup" ||
+          current.taskId !== taskId ||
+          current.path !== relPath ||
+          !fileMatches
+        ) {
+          writeFileAtomic(absolutePath, markdown);
+          this.emitEvent({
+            type: "artifact.recorded",
+            artifactId,
+            kind: "writeup",
+            taskId,
+            path: relPath,
+            conclusion: output.conclusion,
+          });
+        }
+
+        for (const claimId of this.state.claimOrder) {
+          const claim = this.state.claims[claimId]!;
+          if (claim.sourceTaskId !== taskId) continue;
+          const suffix = claim.provenance.match(/, result \d+$/)?.[0];
+          if (!suffix || !claim.provenance.includes(`(from ${taskId})`)) continue;
+          const repaired = `${artifactId} (from ${taskId})${suffix}`;
+          if (claim.provenance === repaired) continue;
+          this.emitEvent({
+            type: "claim.provenanceRepaired",
+            claimId,
+            from: claim.provenance,
+            to: repaired,
+          });
+        }
+      }
     }
   }
 
@@ -933,19 +1365,11 @@ export class ProjectEngine extends EventEmitter {
     );
     await Promise.all(jobs);
     if (this.stopped || this.state.waves[waveId]!.status === "closed") return;
-    const lines = [`# Research round ${waveId}`, ""];
-    for (const entry of wave.roster) {
-      const task = this.state.tasks[entry.taskId]!;
-      const output = this.readTrajectoryOutput(entry.taskId);
-      lines.push(
-        `## ${entry.taskId} — ${entry.role} (${task.status})`,
-        "",
-        output?.summaryMarkdown ?? task.error ?? task.interruptReason ?? "No mathematical return was completed.",
-        "",
-      );
-    }
-    this.emitEvent({ type: "wave.closed", waveId, docketMarkdown: lines.join("\n") });
-    this.launchPendingVerifications();
+    this.emitEvent({
+      type: "wave.closed",
+      waveId,
+      docketMarkdown: this.trajectoryWaveDocket(waveId),
+    });
   }
 
   private async executeTrajectoryTask(waveId: string, entry: RosterEntry): Promise<void> {
@@ -995,6 +1419,16 @@ export class ProjectEngine extends EventEmitter {
 
     const taskDir = path.join(this.paths.tasksDir, task.id);
     const packetDir = path.join(taskDir, "packet");
+    const previousMeta = resuming ? this.readTaskMeta(task.id) : null;
+    const previousUsageResult = UsageSchema.safeParse(previousMeta?.usage);
+    const previousUsage = previousUsageResult.success ? previousUsageResult.data : ZERO_USAGE;
+    const previousCharge = resuming ? task.chargedTokens : 0;
+    const previousBasis: TaskAccountingBasis =
+      previousMeta?.accountingBasis === "reported" ||
+      previousMeta?.accountingBasis === "estimated" ||
+      previousMeta?.accountingBasis === "mixed"
+        ? previousMeta.accountingBasis
+        : "estimated";
     let manifest = task.packetManifest;
     if (!resuming) {
       try {
@@ -1079,7 +1513,14 @@ export class ProjectEngine extends EventEmitter {
                 },
               }
             : {}),
-          maxEstimatedTokens: () => this.state.tasks[entry.taskId]!.budgetTokens * 1.1,
+          // The configured number is a planning target, not an exact live
+          // meter. Exact usage arrives only at turn completion; interrupt at
+          // 150% as an emergency ceiling while preserving long trajectories.
+          maxEstimatedTokens: () =>
+            Math.max(
+              1,
+              this.state.tasks[entry.taskId]!.budgetTokens * 1.5 - previousCharge,
+            ),
           baseEstimatedTokens: CODEX_TURN_BASE_TOKENS + Math.ceil(packetSize / 4),
           wallClockMs:
             this.deps.taskWallClockMsOverride ??
@@ -1099,7 +1540,7 @@ export class ProjectEngine extends EventEmitter {
               this.emitEvent({
                 type: "task.progress",
                 taskId: entry.taskId,
-                estimatedTokens,
+                estimatedTokens: previousCharge + estimatedTokens,
                 lastItem,
               });
             }
@@ -1111,6 +1552,14 @@ export class ProjectEngine extends EventEmitter {
             this.emitEvent({ type: "task.outputInvalid", taskId: entry.taskId, errors }),
         },
       );
+      const currentAccounting = structuredTaskAccounting(result);
+      const cumulativeUsage = addUsage(previousUsage, result.usage);
+      const accounting = resumedTaskAccounting(
+        previousCharge,
+        previousBasis,
+        currentAccounting,
+        cumulativeUsage,
+      );
 
       writeFileAtomic(
         path.join(taskDir, "meta.json"),
@@ -1121,7 +1570,20 @@ export class ProjectEngine extends EventEmitter {
             status: result.status,
             model: model.model,
             effort: model.effort,
-            usage: result.usage,
+            usage: cumulativeUsage,
+            usageReported: accounting.reportedUsage !== null,
+            estimatedTokens: accounting.chargedTokens,
+            chargedTokens: accounting.chargedTokens,
+            accountingBasis: accounting.basis,
+            tokenAccounting: {
+              kind: "soft-target",
+              target: this.state.tasks[entry.taskId]!.budgetTokens,
+              actual: accounting.chargedTokens,
+              exceededBy: Math.max(
+                0,
+                accounting.chargedTokens - this.state.tasks[entry.taskId]!.budgetTokens,
+              ),
+            },
             finishedAt: new Date().toISOString(),
           },
           null,
@@ -1132,22 +1594,29 @@ export class ProjectEngine extends EventEmitter {
       if (result.status === "completed" && result.output) {
         writeFileAtomic(path.join(taskDir, "output.json"), JSON.stringify(result.output, null, 2));
         this.trajectoryOutputs.set(entry.taskId, result.output);
-        this.emitEvent({ type: "task.completed", taskId: entry.taskId, usage: result.usage });
+        this.emitEvent({ type: "task.completed", taskId: entry.taskId, usage: cumulativeUsage });
+        this.recordTaskAccounting(entry.taskId, accounting);
         this.materializeTrajectoryReturn(waveId, entry, result.output);
       } else if (result.status === "interrupted") {
         if (result.lastAgentMessage) {
           writeFileAtomic(path.join(taskDir, "salvage.md"), result.lastAgentMessage);
         }
+        this.recordTaskAccounting(entry.taskId, accounting);
+        // A process reload is a pause, not a mathematical outcome. Keep the
+        // durable task running so the next engine resumes the same Codex
+        // thread; explicit user interrupts still become terminal below.
+        if (this.stopped && result.interruptReason === "killed") return;
         this.emitEvent({
           type: "task.interrupted",
           taskId: entry.taskId,
           reason: result.interruptReason ?? "interrupted",
-          usage: result.usage,
+          usage: accounting.reportedUsage,
         });
       } else {
         this.emitEvent({
           type: "task.failed",
           taskId: entry.taskId,
+          usage: accounting.reportedUsage,
           error:
             (result.validationErrors
               ? `output invalid after repair: ${result.validationErrors.join("; ")}`
@@ -1155,6 +1624,7 @@ export class ProjectEngine extends EventEmitter {
             result.errorDetail ??
             "research process failed",
         });
+        this.recordTaskAccounting(entry.taskId, accounting);
       }
     } finally {
       this.killHandles.delete(entry.taskId);
@@ -1248,23 +1718,148 @@ export class ProjectEngine extends EventEmitter {
           }
         }
       }
-      this.ensureClaimVerifications(claim.id);
     }
-    this.launchPendingVerifications();
+  }
+
+  /**
+   * Compare statements once per round before any new proof is sent for
+   * checking. This call cannot edit claims or steer research; it only records
+   * conservative identity relations between exact mathematical statements.
+   */
+  private async compareTrajectoryClaims(waveId: string): Promise<void> {
+    const wave = this.state.waves[waveId];
+    if (!wave || wave.claimsCompared) return;
+    const currentIds = this.state.claimOrder.filter(
+      (claimId) => this.state.claims[claimId]?.sourceWaveId === waveId,
+    );
+    const comparable = currentIds.some((claimId) => {
+      const claim = this.state.claims[claimId]!;
+      return this.state.claimOrder.some((otherId) => {
+        if (otherId === claimId) return false;
+        const other = this.state.claims[otherId]!;
+        return (
+          other.kind === claim.kind &&
+          other.targetFactId === claim.targetFactId &&
+          other.relationToGoal === claim.relationToGoal &&
+          !claim.equivalentIds.includes(otherId)
+        );
+      });
+    });
+
+    if (comparable) {
+      const decisionId = this.allocId("decision");
+      this.emitEvent({ type: "decision.requested", decisionId, kind: "curation", waveId });
+      const call = await this.runResearchManagerCall(
+        decisionId,
+        claimComparisonFiles(this.state, waveId),
+        CLAIM_COMPARISON_PROMPT,
+        ClaimComparisonOutput,
+        {
+          model: this.state.config.models.summaryReader,
+          isolatedTask: true,
+          memoryAccess: false,
+          webSearch: false,
+        },
+      );
+      if (this.stopped) return;
+      this.emitEvent({
+        type: "decision.proposed",
+        decisionId,
+        action: call.output,
+        usage: call.usage,
+      });
+
+      if (call.output) {
+        const current = new Set(currentIds);
+        const groups: string[][] = [];
+        for (const proposed of call.output.equivalentClaimGroups) {
+          const ids = [...new Set(proposed.map((id) => id.trim()))].filter(
+            (id) => this.state.claims[id] !== undefined,
+          );
+          if (ids.length < 2 || !ids.some((id) => current.has(id))) continue;
+          const first = this.state.claims[ids[0]!]!;
+          if (
+            ids.some((id) => {
+              const claim = this.state.claims[id]!;
+              return (
+                claim.kind !== first.kind ||
+                claim.targetFactId !== first.targetFactId ||
+                claim.relationToGoal !== first.relationToGoal
+              );
+            })
+          ) {
+            continue;
+          }
+          groups.push(ids);
+        }
+        const accepted = { equivalentClaimGroups: groups };
+        this.emitEvent({ type: "decision.accepted", decisionId, action: accepted });
+        for (const ids of groups) {
+          for (let leftIndex = 0; leftIndex < ids.length; leftIndex += 1) {
+            for (let rightIndex = leftIndex + 1; rightIndex < ids.length; rightIndex += 1) {
+              const left = this.state.claims[ids[leftIndex]!]!;
+              const right = this.state.claims[ids[rightIndex]!]!;
+              if (left.equivalentIds.includes(right.id)) continue;
+              this.emitEvent({
+                type: "claim.equivalent",
+                leftClaimId: left.id,
+                rightClaimId: right.id,
+                reason: `The pre-review comparison found the mathematical statements identical (${waveId}).`,
+                by: "summary_reader",
+              });
+            }
+          }
+        }
+      } else {
+        this.emitEvent({
+          type: "decision.rejected",
+          decisionId,
+          violations: [call.error ?? "claim comparison failed"],
+        });
+      }
+    }
+
+    this.emitEvent({ type: "wave.claimsCompared", waveId });
+    this.repairTrajectoryInvariants();
+  }
+
+  /** Only one proof in an identical-statement group is checked at a time. */
+  private claimVerificationRepresentative(claimId: string): string | null {
+    const component = this.equivalentClaimComponent(claimId)
+      .filter((id) => this.state.claims[id]?.status === "UNVERIFIED")
+      .sort(
+        (left, right) =>
+          this.state.claimOrder.indexOf(left) - this.state.claimOrder.indexOf(right),
+      );
+    if (component.length === 0) return null;
+    const alreadyStarted = component.find(
+      (id) => (this.state.claims[id]?.verificationIds.length ?? 0) > 0,
+    );
+    return alreadyStarted ?? component[0]!;
   }
 
   private ensureClaimVerifications(claimId: string): void {
     const claim = this.state.claims[claimId];
     if (!claim || claim.status !== "UNVERIFIED") return;
+    if (this.claimVerificationRepresentative(claimId) !== claimId) return;
     const target =
       claim.verificationPolicy?.verifiersPerClaim ??
       this.state.config.trajectory.verifiersPerClaim;
-    for (let ordinal = claim.verificationIds.length + 1; ordinal <= target; ordinal += 1) {
+    const usefulOrPending = claim.verificationIds.filter((verificationId) => {
+      const verification = this.state.verifications[verificationId];
+      return verification?.status !== "completed" || verification.verdict !== "ERROR";
+    }).length;
+    const maxAttempts = target + MAX_VERIFICATION_PROCESS_REPLACEMENTS;
+    const needed = Math.max(
+      0,
+      Math.min(target - usefulOrPending, maxAttempts - claim.verificationIds.length),
+    );
+    for (let offset = 0; offset < needed; offset += 1) {
       this.emitEvent({
         type: "verification.requested",
         verificationId: this.allocId("verification"),
         claimId,
-        ordinal,
+        ordinal: claim.verificationIds.length + 1,
       });
     }
   }
@@ -1286,6 +1881,7 @@ export class ProjectEngine extends EventEmitter {
             type: "verification.completed",
             verificationId,
             verdict: "ERROR",
+            finding: null,
             summaryMarkdown: `The verification process failed: ${String(error).slice(0, 1_500)}`,
             artifactPath: null,
             usage: null,
@@ -1311,11 +1907,30 @@ export class ProjectEngine extends EventEmitter {
     const dir = path.join(this.paths.verificationsDir, verificationId);
     const packetDir = path.join(dir, "packet");
     const outputFile = path.join(dir, "output.json");
-    if (existsSync(outputFile)) {
+    const recoveredMeta = this.readVerificationMeta(dir);
+    if (
+      existsSync(outputFile) &&
+      recoveredMeta.filesystemIsolation === VERIFIER_FILESYSTEM_ISOLATION
+    ) {
       try {
-        const recovered = VerificationOutput.safeParse(
-          JSON.parse(readFileSync(outputFile, "utf8")),
-        );
+        const recoveredJson = JSON.parse(readFileSync(outputFile, "utf8")) as unknown;
+        // A check may have written output.json immediately before a server
+        // upgrade added finding categories. Preserve that durable result.
+        const compatible =
+          recoveredJson !== null &&
+          typeof recoveredJson === "object" &&
+          !("finding" in recoveredJson) &&
+          ((recoveredJson as { verdict?: unknown }).verdict === "PASS" ||
+            (recoveredJson as { verdict?: unknown }).verdict === "FAIL")
+            ? {
+                ...recoveredJson,
+                finding:
+                  (recoveredJson as { verdict: "PASS" | "FAIL" }).verdict === "PASS"
+                    ? "NONE"
+                    : "PROOF_GAP",
+              }
+            : recoveredJson;
+        const recovered = VerificationOutput.safeParse(compatible);
         if (recovered.success) {
           const relPath = path.join("verifications", verificationId, "report.md");
           writeFileAtomic(
@@ -1326,9 +1941,10 @@ export class ProjectEngine extends EventEmitter {
             type: "verification.completed",
             verificationId,
             verdict: recovered.data.verdict,
+            finding: recovered.data.finding,
             summaryMarkdown: recovered.data.summaryMarkdown,
             artifactPath: relPath,
-            usage: this.readVerificationMetaUsage(dir),
+            usage: recoveredMeta.usage,
           });
           this.evaluateTrajectoryClaim(claim.id);
           return;
@@ -1376,6 +1992,13 @@ export class ProjectEngine extends EventEmitter {
         cwd: packetDir,
         prompt: VERIFICATION_PROMPT,
         sandbox: "workspace-write",
+        permissionProfile: {
+          name: "inventio_verifier",
+          filesystem: {
+            ":minimal": "read",
+            [packetDir]: "write",
+          },
+        },
         webSearch: this.state.config.allowWebSearch,
         isolatedTask: true,
         eventsArchiveFile: path.join(dir, "codex-events.jsonl"),
@@ -1401,6 +2024,7 @@ export class ProjectEngine extends EventEmitter {
         JSON.stringify(
           {
             workflow: "trajectories-v2",
+            filesystemIsolation: VERIFIER_FILESYSTEM_ISOLATION,
             status: result.status,
             model: model.model,
             effort: model.effort,
@@ -1419,6 +2043,7 @@ export class ProjectEngine extends EventEmitter {
         type: "verification.completed",
         verificationId,
         verdict: result.output.verdict,
+        finding: result.output.finding,
         summaryMarkdown: result.output.summaryMarkdown,
         artifactPath: relPath,
         usage: result.usage,
@@ -1428,6 +2053,7 @@ export class ProjectEngine extends EventEmitter {
         type: "verification.completed",
         verificationId,
         verdict: "ERROR",
+        finding: null,
         summaryMarkdown:
           result.errorDetail ??
           result.validationErrors?.join("; ") ??
@@ -1440,49 +2066,79 @@ export class ProjectEngine extends EventEmitter {
     this.evaluateTrajectoryClaim(claim.id);
   }
 
-  private readVerificationMetaUsage(dir: string): Usage {
+  private readVerificationMeta(dir: string): {
+    usage: Usage;
+    filesystemIsolation: string | null;
+  } {
     const file = path.join(dir, "meta.json");
-    if (!existsSync(file)) return ZERO_USAGE;
+    if (!existsSync(file)) {
+      return { usage: ZERO_USAGE, filesystemIsolation: null };
+    }
     try {
-      const value = JSON.parse(readFileSync(file, "utf8")) as { usage?: unknown };
+      const value = JSON.parse(readFileSync(file, "utf8")) as {
+        usage?: unknown;
+        filesystemIsolation?: unknown;
+      };
       const parsed = UsageSchema.safeParse(value.usage);
-      return parsed.success ? parsed.data : ZERO_USAGE;
+      return {
+        usage: parsed.success ? parsed.data : ZERO_USAGE,
+        filesystemIsolation:
+          typeof value.filesystemIsolation === "string" ? value.filesystemIsolation : null,
+      };
     } catch {
-      return ZERO_USAGE;
+      return { usage: ZERO_USAGE, filesystemIsolation: null };
     }
   }
 
   private evaluateTrajectoryClaim(claimId: string): void {
     const claim = this.state.claims[claimId];
     if (!claim || claim.status !== "UNVERIFIED") return;
+    // A crashed or malformed verifier is operational noise, not mathematical
+    // evidence. Replace it with a fresh independent check before evaluating
+    // the configured W-out-of-V rule.
+    this.ensureClaimVerifications(claimId);
     const results = claim.verificationIds
       .map((id) => this.state.verifications[id]!)
       .filter((verification) => verification.status === "completed");
     const passes = results.filter((verification) => verification.verdict === "PASS").length;
-    const failures = results.filter((verification) => verification.verdict === "FAIL").length;
-    const errors = results.filter((verification) => verification.verdict === "ERROR").length;
+    const failedChecks = results.filter((verification) => verification.verdict === "FAIL");
+    const failures = failedChecks.length;
     const { passesRequired, verifiersPerClaim } =
       claim.verificationPolicy ?? this.state.config.trajectory;
     if (passes >= passesRequired) {
       this.promoteTrajectoryClaim(claim.id);
       return;
     }
-    const remainingChecks = Math.max(0, verifiersPerClaim - results.length);
-    if (passes + remainingChecks < passesRequired) {
+    const pending = claim.verificationIds.some(
+      (id) => this.state.verifications[id]?.status !== "completed",
+    );
+    const completedMathematicalChecks = passes + failures;
+    if (!pending && completedMathematicalChecks >= verifiersPerClaim && passes < passesRequired) {
       const detail = [
         `${passes} PASS`,
         `${failures} FAIL`,
-        ...(errors > 0 ? [`${errors} process error${errors === 1 ? "" : "s"}`] : []),
       ].join(", ");
+      const mathematicalFailure = failedChecks.some(
+        (verification) =>
+          verification.finding === null ||
+          verification.finding === "INCORRECT" ||
+          verification.finding === "PROOF_GAP",
+      );
+      const nextStatus = mathematicalFailure ? "FAILED" : "NEEDS_REVISION";
+      const findingDetail = [...new Set(failedChecks.map((verification) => verification.finding).filter(Boolean))]
+        .join(", ");
       this.emitEvent({
         type: "claim.status",
         claimId: claim.id,
         from: "UNVERIFIED",
-        to: "REFUTED",
-        justification: `received ${detail}; ${passesRequired} passes out of ${verifiersPerClaim} checks are no longer possible`,
+        to: nextStatus,
+        justification:
+          nextStatus === "NEEDS_REVISION"
+            ? `the submitted text received ${detail} (${findingDetail || "incomplete presentation"}); revise the missing dependency or notation before checking it again`
+            : `the submitted proof received ${detail}; ${passesRequired} passes out of ${verifiersPerClaim} independent checks are no longer possible. This does not assert that the statement itself is false`,
         by: "conductor",
       });
-      if (claim.kind === "correction" && claim.targetFactId) {
+      if (nextStatus === "FAILED" && claim.kind === "correction" && claim.targetFactId) {
         this.emitEvent({
           type: "fact.suspicionCleared",
           factId: claim.targetFactId,
@@ -1526,18 +2182,18 @@ export class ProjectEngine extends EventEmitter {
         for (const siblingId of this.equivalentClaimComponent(claim.id)) {
           if (siblingId === claim.id) continue;
           const sibling = this.state.claims[siblingId]!;
-          if (sibling.status !== "UNVERIFIED") continue;
+          if (sibling.status !== "UNVERIFIED" && sibling.status !== "NEEDS_REVISION") continue;
           this.emitEvent({
             type: "claim.status",
             claimId: sibling.id,
-            from: "UNVERIFIED",
+            from: sibling.status,
             to: "SUPERSEDED",
             justification: `the identical statement was established as ${factId}; its distinct proof remains in ${sibling.path ?? sibling.provenance}`,
             by: "conductor",
           });
         }
       } else if (
-        claim.status === "REFUTED" &&
+        (claim.status === "FAILED" || claim.status === "REFUTED") &&
         claim.kind === "correction" &&
         claim.targetFactId &&
         this.state.facts[claim.targetFactId]?.status === "SUSPICIOUS"
@@ -1628,11 +2284,11 @@ export class ProjectEngine extends EventEmitter {
     for (const siblingId of component) {
       if (siblingId === claim.id) continue;
       const sibling = this.state.claims[siblingId]!;
-      if (sibling.status !== "UNVERIFIED") continue;
+      if (sibling.status !== "UNVERIFIED" && sibling.status !== "NEEDS_REVISION") continue;
       this.emitEvent({
         type: "claim.status",
         claimId: sibling.id,
-        from: "UNVERIFIED",
+        from: sibling.status,
         to: "SUPERSEDED",
         justification: `the identical statement was established as ${factId}; its distinct proof remains in ${sibling.path ?? sibling.provenance}`,
         by: "conductor",
@@ -1641,13 +2297,13 @@ export class ProjectEngine extends EventEmitter {
   }
 
   private async drainVerifications(): Promise<void> {
-    for (const claimId of this.state.claimOrder) this.ensureClaimVerifications(claimId);
     while (!this.stopped) {
+      for (const claimId of this.state.claimOrder) this.evaluateTrajectoryClaim(claimId);
+      for (const claimId of this.state.claimOrder) this.ensureClaimVerifications(claimId);
       this.launchPendingVerifications();
       const active = [...this.verificationPromises.values()];
       if (active.length === 0) return;
       await Promise.allSettled(active);
-      for (const claimId of this.state.claimOrder) this.evaluateTrajectoryClaim(claimId);
     }
   }
 
@@ -1701,40 +2357,26 @@ export class ProjectEngine extends EventEmitter {
     let reason = call.error ?? "The summary reader returned no revision; the preceding view is retained.";
     let source: "summary_reader" | "fallback" = "fallback";
     if (call.output) {
-      const validRevision =
-        !call.output.changed ||
-        (call.output.markdown.length <= 16_000 &&
-          abstractSentenceCount(call.output.abstract) <= 4);
+      const revisionViolations = [
+        ...(call.output.markdown.length > 16_000
+          ? ["mathematical view exceeds 16,000 characters"]
+          : []),
+        ...summaryAbstractViolations(call.output.abstract),
+      ];
+      const validRevision = revisionViolations.length === 0;
       if (validRevision) {
         this.emitEvent({ type: "decision.accepted", decisionId, action: call.output });
         source = "summary_reader";
-        changed = call.output.changed;
+        const abstractChanged = call.output.abstract.trim() !== current.abstract.trim();
+        changed = call.output.changed || abstractChanged;
         reason = call.output.reason || (changed ? "The mathematical picture changed." : "No material change.");
-        if (changed) {
+        if (call.output.changed) {
           markdown = call.output.markdown;
-          abstract = call.output.abstract;
         }
-        for (const group of call.output.equivalentClaimGroups) {
-          const ids = [...new Set(group)].filter((id) => this.state.claims[id] !== undefined);
-          for (let i = 0; i < ids.length; i += 1) {
-            for (let j = i + 1; j < ids.length; j += 1) {
-              const left = this.state.claims[ids[i]!]!;
-              const right = this.state.claims[ids[j]!]!;
-              if (left.equivalentIds.includes(right.id)) continue;
-              this.emitEvent({
-                type: "claim.equivalent",
-                leftClaimId: left.id,
-                rightClaimId: right.id,
-                reason: `The end-of-round mathematical reading identified the statements as identical (${waveId}).`,
-                by: "summary_reader",
-              });
-            }
-          }
-        }
+        abstract = call.output.abstract;
       } else {
-        reason =
-          "The proposed edit exceeded the concise W000 limits, so the preceding mathematical view was retained.";
-        this.emitEvent({ type: "decision.rejected", decisionId, violations: [reason] });
+        reason = `The proposed edit was not a complete concise mathematical view: ${revisionViolations.join("; ")}. The preceding view was retained.`;
+        this.emitEvent({ type: "decision.rejected", decisionId, violations: revisionViolations });
       }
     } else {
       this.emitEvent({
@@ -2906,8 +3548,18 @@ export class ProjectEngine extends EventEmitter {
     }
 
     const taskDir = path.join(this.paths.tasksDir, entry.taskId);
+    const previousMeta = resuming ? this.readTaskMeta(task.id) : null;
+    const previousUsageResult = UsageSchema.safeParse(previousMeta?.usage);
+    const previousUsage = previousUsageResult.success ? previousUsageResult.data : ZERO_USAGE;
+    const previousCharge = resuming ? task.chargedTokens : 0;
+    const previousBasis: TaskAccountingBasis =
+      previousMeta?.accountingBasis === "reported" ||
+      previousMeta?.accountingBasis === "estimated" ||
+      previousMeta?.accountingBasis === "mixed"
+        ? previousMeta.accountingBasis
+        : "estimated";
     let packetDir: string;
-    let manifest: string[] = [];
+    let manifest: string[] = resuming ? task.packetManifest : [];
     try {
       if (resuming) {
         packetDir = path.join(taskDir, "packet");
@@ -2953,7 +3605,10 @@ export class ProjectEngine extends EventEmitter {
       : "assignment.md";
 
     try {
-      let accumulatedUsage: Usage = ZERO_USAGE;
+      let accumulatedUsage: Usage = previousUsage;
+      let accumulatedCharge = previousCharge;
+      let sawReportedUsage = previousCharge > 0 && previousBasis !== "estimated";
+      let sawEstimatedUsage = previousCharge > 0 && previousBasis !== "reported";
       const runOptions: RunCodexOptions = {
         bin: this.deps.codexBin,
         cwd: packetDir,
@@ -2982,7 +3637,7 @@ export class ProjectEngine extends EventEmitter {
         maxEstimatedTokens: () =>
           Math.max(
             1,
-            this.state.tasks[entry.taskId]!.budgetTokens * 1.1 - usageSpend(accumulatedUsage),
+            this.state.tasks[entry.taskId]!.budgetTokens * 1.1 - accumulatedCharge,
           ),
         baseEstimatedTokens: CODEX_TURN_BASE_TOKENS + Math.ceil(packetSize / 4),
         wallClockMs:
@@ -2999,7 +3654,12 @@ export class ProjectEngine extends EventEmitter {
           const last = this.lastProgressAt.get(entry.taskId) ?? 0;
           if (now - last >= (this.deps.progressThrottleMs ?? 2000)) {
             this.lastProgressAt.set(entry.taskId, now);
-            this.emitEvent({ type: "task.progress", taskId: entry.taskId, estimatedTokens, lastItem });
+            this.emitEvent({
+              type: "task.progress",
+              taskId: entry.taskId,
+              estimatedTokens: accumulatedCharge + estimatedTokens,
+              lastItem,
+            });
           }
         },
       };
@@ -3013,6 +3673,10 @@ export class ProjectEngine extends EventEmitter {
           },
         );
         accumulatedUsage = addUsage(accumulatedUsage, next.usage);
+        const accounting = structuredTaskAccounting(next);
+        accumulatedCharge += accounting.chargedTokens;
+        sawReportedUsage ||= accounting.reportedUsage !== null;
+        sawEstimatedUsage ||= accounting.basis !== "reported";
         return next;
       };
 
@@ -3084,6 +3748,14 @@ export class ProjectEngine extends EventEmitter {
             model: model.model,
             effort: model.effort,
             usage: accumulatedUsage,
+            usageReported: sawReportedUsage,
+            chargedTokens: accumulatedCharge,
+            accountingBasis:
+              sawReportedUsage && sawEstimatedUsage
+                ? "mixed"
+                : sawReportedUsage
+                  ? "reported"
+                  : "estimated",
             finishedAt: new Date().toISOString(),
           },
           null,
@@ -3095,21 +3767,33 @@ export class ProjectEngine extends EventEmitter {
         writeFileAtomic(path.join(taskDir, "output.json"), JSON.stringify(result.output, null, 2));
         this.taskOutputs.set(entry.taskId, result.output);
         this.emitEvent({ type: "task.completed", taskId: entry.taskId, usage: accumulatedUsage });
+        this.recordTaskAccounting(entry.taskId, {
+          reportedUsage: sawReportedUsage ? accumulatedUsage : null,
+          chargedTokens: accumulatedCharge,
+          basis: sawReportedUsage && sawEstimatedUsage ? "mixed" : sawReportedUsage ? "reported" : "estimated",
+        });
         this.materializeTaskReturn(waveId, entry, result.output, packetDir);
       } else if (result.status === "interrupted") {
         if (result.lastAgentMessage) {
           writeFileAtomic(path.join(taskDir, "salvage.md"), result.lastAgentMessage);
         }
+        this.recordTaskAccounting(entry.taskId, {
+          reportedUsage: sawReportedUsage ? accumulatedUsage : null,
+          chargedTokens: accumulatedCharge,
+          basis: taskAccountingBasis(sawReportedUsage, sawEstimatedUsage),
+        });
+        if (this.stopped && result.interruptReason === "killed") return;
         this.emitEvent({
           type: "task.interrupted",
           taskId: entry.taskId,
           reason: result.interruptReason ?? "interrupted",
-          usage: accumulatedUsage,
+          usage: sawReportedUsage ? accumulatedUsage : null,
         });
       } else {
         this.emitEvent({
           type: "task.failed",
           taskId: entry.taskId,
+          usage: sawReportedUsage ? accumulatedUsage : null,
           error:
             (usabilityProblems.length > 0
               ? `returned work unusable after unblock and fresh replacement: ${usabilityProblems.join("; ")}`
@@ -3117,6 +3801,11 @@ export class ProjectEngine extends EventEmitter {
             (result.validationErrors ? `output invalid after repair: ${result.validationErrors.join("; ")}` : null) ??
             result.errorDetail ??
             "unknown failure",
+        });
+        this.recordTaskAccounting(entry.taskId, {
+          reportedUsage: sawReportedUsage ? accumulatedUsage : null,
+          chargedTokens: accumulatedCharge,
+          basis: sawReportedUsage && sawEstimatedUsage ? "mixed" : sawReportedUsage ? "reported" : "estimated",
         });
       }
     } finally {
@@ -3452,7 +4141,7 @@ export class ProjectEngine extends EventEmitter {
     usage: Usage | null,
   ): void {
     const relPath = path.join("artifacts", "mathematical-view", `${waveId}.md`);
-    const text = markdown.trim() + "\n";
+    const text = normalizeMathematicalViewMarkdown(waveId, markdown) + "\n";
     writeFileAtomic(path.join(this.paths.mathematicalViewsDir, `${waveId}.md`), text);
     this.emitEvent({
       type: "summary.recorded",
@@ -3741,8 +4430,8 @@ export class ProjectEngine extends EventEmitter {
    * Without this, acceptance is unreachable by any legal Research Manager action: no
    * action promotes a claim, so a candidate with a non-empty `usedClaimIds`
    * would re-review itself until the budget ran out (observed in the first
-   * real-quota run). Only UNVERIFIED claims move — a REFUTED or SUPERSEDED
-   * claim, including one a human refuted, is never resurrected here.
+   * real-quota run). Only UNVERIFIED claims move — a FAILED, REFUTED, or
+   * SUPERSEDED claim is never resurrected here.
    */
   private promoteClaimsVerifiedByReview(candidateId: string): void {
     const candidate = this.state.candidates[candidateId];
@@ -4375,6 +5064,8 @@ export class ProjectEngine extends EventEmitter {
       autonomy: parsed.autonomy,
       allowWebSearch: parsed.allowWebSearch,
       totalTokens: parsed.totalTokens,
+      workerTokenLimit:
+        parsed.workerTokenLimit ?? this.state.config.budget.defaultTaskTokens,
       maxWaves: parsed.maxWaves,
       trajectory: parsed.trajectory ?? this.state.config.trajectory,
     };
@@ -4420,6 +5111,7 @@ export class ProjectEngine extends EventEmitter {
       current.autonomy === next.autonomy &&
       current.allowWebSearch === next.allowWebSearch &&
       current.totalTokens === next.totalTokens &&
+      current.workerTokenLimit === next.workerTokenLimit &&
       current.maxWaves === next.maxWaves &&
       trajectoryUnchanged
     ) {
@@ -4484,7 +5176,11 @@ export class ProjectEngine extends EventEmitter {
     this.emitEvent({ type: "task.extended", taskId, addTokens, by });
   }
 
-  humanClaimStatus(claimId: string, to: "VERIFIED" | "REFUTED", note: string): void {
+  humanClaimStatus(
+    claimId: string,
+    to: "VERIFIED" | "FAILED" | "REFUTED",
+    note: string,
+  ): void {
     const claim = this.state.claims[claimId];
     if (!claim) throw new Error(`unknown claim ${claimId}`);
     this.emitEvent({ type: "claim.status", claimId, from: claim.status, to, justification: note, by: "human" });
@@ -4640,21 +5336,29 @@ export class ProjectEngine extends EventEmitter {
       reason: cleanReason,
       by: taskId,
     });
-    this.ensureClaimVerifications(correctionClaimId);
-    this.launchPendingVerifications();
     return { correctionClaimId };
   }
 
   /** Convenience for HTTP/tests: expose one task's execution surfaces. */
-  taskDetail(taskId: string): { task: TaskState; outputPath: string; packetDir: string; archive: string } {
+  taskDetail(taskId: string): {
+    task: TaskState;
+    outputPath: string;
+    packetDir: string;
+    archive: string;
+    partialWorkMarkdown: string | null;
+  } {
     const task = this.state.tasks[taskId];
     if (!task) throw new Error(`unknown task ${taskId}`);
     const dir = path.join(this.paths.tasksDir, taskId);
+    const partialFile = path.join(dir, "salvage.md");
     return {
       task,
       outputPath: path.join(dir, "output.json"),
       packetDir: path.join(dir, "packet"),
       archive: path.join(dir, "codex-events.jsonl"),
+      partialWorkMarkdown: existsSync(partialFile)
+        ? readablePartialWork(readFileSync(partialFile, "utf8"))
+        : null,
     };
   }
 }

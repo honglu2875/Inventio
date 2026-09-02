@@ -38,6 +38,58 @@ function sameTrajectory(
   );
 }
 
+export function parseIntegerDraft(value: string): number | null {
+  if (value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+/**
+ * Keep the text being edited separate from the saved numeric value. Converting
+ * an empty field with `Number("")` would immediately turn it into zero, which
+ * makes replacing (for example) 2 with 4 feel like typing 04.
+ */
+function IntegerDraftInput({
+  value,
+  min,
+  max,
+  disabled,
+  onChange,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  disabled: boolean;
+  onChange: (value: number) => void;
+}): JSX.Element {
+  const [text, setText] = useState(String(value));
+
+  useEffect(() => {
+    setText(String(value));
+  }, [value]);
+
+  return (
+    <input
+      className="input mono"
+      type="number"
+      inputMode="numeric"
+      min={min}
+      max={max}
+      value={text}
+      disabled={disabled}
+      onChange={(event) => {
+        const next = event.target.value;
+        setText(next);
+        const parsed = parseIntegerDraft(next);
+        if (parsed !== null) onChange(parsed);
+      }}
+      onBlur={() => {
+        if (parseIntegerDraft(text) === null) setText(String(value));
+      }}
+    />
+  );
+}
+
 export function WebSearchPermissionControl({
   enabled,
   disabled,
@@ -102,6 +154,10 @@ function SettingsForm({ slug, state }: { slug: string; state: ProjectState }): J
   const [saving, setSaving] = useState(false);
   const isTrajectory = state.config.workflow === "trajectories-v2";
   const modelRoles = isTrajectory ? TRAJECTORY_MODEL_ROLES : ACTIVE_MODEL_ROLES;
+  const savedWorkerTokenLimit =
+    saved.workerTokenLimit ?? state.config.budget.defaultTaskTokens;
+  const draftWorkerTokenLimit =
+    draft.workerTokenLimit ?? state.config.budget.defaultTaskTokens;
 
   useEffect(() => {
     setDraft(saved);
@@ -124,6 +180,7 @@ function SettingsForm({ slug, state }: { slug: string; state: ProjectState }): J
       saved.autonomy === draft.autonomy &&
       saved.allowWebSearch === draft.allowWebSearch &&
       saved.totalTokens === draft.totalTokens &&
+      savedWorkerTokenLimit === draftWorkerTokenLimit &&
       saved.maxWaves === draft.maxWaves &&
       sameTrajectory(saved.trajectory, draft.trajectory);
     if (saving || guard.disabled || unchanged || resourceError !== null) return;
@@ -140,6 +197,7 @@ function SettingsForm({ slug, state }: { slug: string; state: ProjectState }): J
     saved.autonomy !== draft.autonomy ||
     saved.allowWebSearch !== draft.allowWebSearch ||
     saved.totalTokens !== draft.totalTokens ||
+    savedWorkerTokenLimit !== draftWorkerTokenLimit ||
     saved.maxWaves !== draft.maxWaves ||
     !sameTrajectory(saved.trajectory, draft.trajectory);
   const spentTokens = state.budget.spentTokens + state.budget.plannerSpentTokens;
@@ -149,46 +207,48 @@ function SettingsForm({ slug, state }: { slug: string; state: ProjectState }): J
       ? "The token ceiling must be a positive whole number."
       : draft.totalTokens < spentTokens
         ? `The token ceiling cannot be below ${spentTokens.toLocaleString("en-US")} tokens already spent.`
-        : !Number.isSafeInteger(draft.maxWaves) || draft.maxWaves <= 0
-          ? "The maximum number of rounds must be a positive whole number."
-          : draft.maxWaves < state.waveOrder.length
-            ? `The maximum cannot be below ${state.waveOrder.length} rounds already used.`
-            : hasOpenRound &&
-                (draft.totalTokens < saved.totalTokens || draft.maxWaves < saved.maxWaves)
-              ? "Resource ceilings cannot be lowered while a research round is open."
-              : isTrajectory && draft.trajectory === undefined
-                ? "Trajectory settings are missing."
-                : isTrajectory &&
-                    (!Number.isSafeInteger(draft.trajectory!.solversPerWave) ||
-                      draft.trajectory!.solversPerWave < 0 ||
-                      draft.trajectory!.solversPerWave > 8 ||
-                      !Number.isSafeInteger(draft.trajectory!.explorersPerWave) ||
-                      draft.trajectory!.explorersPerWave < 0 ||
-                      draft.trajectory!.explorersPerWave > 8)
-                  ? "Solver and Explorer counts must be whole numbers from 0 to 8."
+        : !Number.isSafeInteger(draftWorkerTokenLimit) || draftWorkerTokenLimit < 60_000
+          ? "The per-trajectory token limit must be a whole number of at least 60,000."
+          : !Number.isSafeInteger(draft.maxWaves) || draft.maxWaves <= 0
+            ? "The maximum number of rounds must be a positive whole number."
+            : draft.maxWaves < state.waveOrder.length
+              ? `The maximum cannot be below ${state.waveOrder.length} rounds already used.`
+              : hasOpenRound &&
+                  (draft.totalTokens < saved.totalTokens || draft.maxWaves < saved.maxWaves)
+                ? "Resource ceilings cannot be lowered while a research round is open."
+                : isTrajectory && draft.trajectory === undefined
+                  ? "Trajectory settings are missing."
                   : isTrajectory &&
-                      draft.trajectory!.solversPerWave +
-                        draft.trajectory!.explorersPerWave <
-                        1
-                    ? "At least one Solver or Explorer is required per round."
+                      (!Number.isSafeInteger(draft.trajectory!.solversPerWave) ||
+                        draft.trajectory!.solversPerWave < 0 ||
+                        draft.trajectory!.solversPerWave > 8 ||
+                        !Number.isSafeInteger(draft.trajectory!.explorersPerWave) ||
+                        draft.trajectory!.explorersPerWave < 0 ||
+                        draft.trajectory!.explorersPerWave > 8)
+                    ? "Solver and Explorer counts must be whole numbers from 0 to 8."
                     : isTrajectory &&
                         draft.trajectory!.solversPerWave +
-                          draft.trajectory!.explorersPerWave >
-                          8
-                      ? "At most eight research trajectories may start per round."
+                          draft.trajectory!.explorersPerWave <
+                          1
+                      ? "At least one Solver or Explorer is required per round."
                       : isTrajectory &&
-                          (!Number.isSafeInteger(draft.trajectory!.verifiersPerClaim) ||
-                            draft.trajectory!.verifiersPerClaim < 1 ||
-                            draft.trajectory!.verifiersPerClaim > 8 ||
-                            !Number.isSafeInteger(draft.trajectory!.passesRequired) ||
-                            draft.trajectory!.passesRequired < 1 ||
-                            draft.trajectory!.passesRequired > 8)
-                        ? "Verification counts must be whole numbers from 1 to 8."
+                          draft.trajectory!.solversPerWave +
+                            draft.trajectory!.explorersPerWave >
+                            8
+                        ? "At most eight research trajectories may start per round."
                         : isTrajectory &&
-                            draft.trajectory!.passesRequired >
-                              draft.trajectory!.verifiersPerClaim
-                          ? "Required passes cannot exceed the number of independent checks."
-                          : null;
+                            (!Number.isSafeInteger(draft.trajectory!.verifiersPerClaim) ||
+                              draft.trajectory!.verifiersPerClaim < 1 ||
+                              draft.trajectory!.verifiersPerClaim > 8 ||
+                              !Number.isSafeInteger(draft.trajectory!.passesRequired) ||
+                              draft.trajectory!.passesRequired < 1 ||
+                              draft.trajectory!.passesRequired > 8)
+                          ? "Verification counts must be whole numbers from 1 to 8."
+                          : isTrajectory &&
+                              draft.trajectory!.passesRequired >
+                                draft.trajectory!.verifiersPerClaim
+                            ? "Required passes cannot exceed the number of independent checks."
+                            : null;
 
   return (
     <div className="settings-view">
@@ -220,8 +280,9 @@ function SettingsForm({ slug, state }: { slug: string; state: ProjectState }): J
             <div>
               <h2 id="resource-settings-title">Research allowance</h2>
               <p>
-                These are the effective token ceiling and maximum number of research rounds,
-                including any extensions made while continuing from an earlier report.
+                These are the effective project ceiling, per-trajectory limit, and maximum number
+                of research rounds, including extensions made while continuing from an earlier
+                report.
               </p>
             </div>
             <div className="resource-settings-grid">
@@ -237,6 +298,18 @@ function SettingsForm({ slug, state }: { slug: string; state: ProjectState }): J
                       ...current,
                       totalTokens: Number(event.target.value),
                     }))
+                  }
+                />
+              </label>
+              <label className="policy-choice">
+                <span>Solver/Explorer limit</span>
+                <IntegerDraftInput
+                  min={60_000}
+                  max={Number.MAX_SAFE_INTEGER}
+                  value={draftWorkerTokenLimit}
+                  disabled={guard.disabled || saving}
+                  onChange={(value) =>
+                    setDraft((current) => ({ ...current, workerTokenLimit: value }))
                   }
                 />
               </label>
@@ -259,7 +332,7 @@ function SettingsForm({ slug, state }: { slug: string; state: ProjectState }): J
           </div>
           <div className={`settings-help${resourceError === null ? "" : " settings-error"}`}>
             {resourceError ??
-              `${spentTokens.toLocaleString("en-US")} tokens spent; ${state.waveOrder.length} research rounds used.`}
+              `${spentTokens.toLocaleString("en-US")} tokens spent; each future Solver or Explorer may use up to ${draftWorkerTokenLimit.toLocaleString("en-US")} tokens, subject to the remaining project allowance; ${state.waveOrder.length} research rounds used.`}
           </div>
         </section>
 
@@ -284,19 +357,17 @@ function SettingsForm({ slug, state }: { slug: string; state: ProjectState }): J
                 ).map(([key, label, min]) => (
                   <label className="policy-choice" key={key}>
                     <span>{label}</span>
-                    <input
-                      className="input mono"
-                      type="number"
+                    <IntegerDraftInput
                       min={min}
                       max={8}
                       value={draft.trajectory![key]}
                       disabled={guard.disabled || saving}
-                      onChange={(event) =>
+                      onChange={(value) =>
                         setDraft((current) => ({
                           ...current,
                           trajectory: {
                             ...(current.trajectory ?? state.config.trajectory),
-                            [key]: Number(event.target.value),
+                            [key]: value,
                           },
                         }))
                       }

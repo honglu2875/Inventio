@@ -71,6 +71,13 @@ function edgeStyle(edge: GraphEdge): {
   switch (edge.type) {
     case "sequence":
       return { style: { ...EDGE_BASE, strokeWidth: 2 }, marker: true, markerColor: "var(--border)" };
+    case "produced":
+      return {
+        style: { ...EDGE_BASE, stroke: "var(--accent)", strokeWidth: 1.75 },
+        marker: true,
+        markerColor: "var(--accent)",
+        ...(edge.label === undefined ? {} : { label: edge.label }),
+      };
     case "frozen-from":
       return {
         style: { ...EDGE_BASE, stroke: "var(--seal)", strokeDasharray: "5 4" },

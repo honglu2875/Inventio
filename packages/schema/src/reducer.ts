@@ -3,6 +3,14 @@ import { usageSpend } from "./events.js";
 import type { ProjectState, TaskState } from "./state.js";
 import { idNumber, parseCandidateId, type IdKind } from "./ids.js";
 
+/** Apply only the not-yet-recorded portion of a cumulative task charge. */
+function accountTask(state: ProjectState, task: TaskState, chargedTokens: number): void {
+  const total = Math.max(0, Math.floor(chargedTokens));
+  if (total <= task.chargedTokens) return;
+  state.budget.spentTokens += total - task.chargedTokens;
+  task.chargedTokens = total;
+}
+
 /**
  * Equivalence is transitive. If independently checked proofs have already
  * produced duplicate facts before that relation is recognized, keep the first
@@ -237,6 +245,9 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
       state.config.allowWebSearch = event.settings.allowWebSearch;
       state.config.budget.totalTokens = event.settings.totalTokens;
       state.budget.totalTokens = event.settings.totalTokens;
+      if (event.settings.workerTokenLimit !== undefined) {
+        state.config.budget.defaultTaskTokens = event.settings.workerTokenLimit;
+      }
       state.config.limits.maxWaves = event.settings.maxWaves;
       if (event.settings.trajectory) {
         state.config.trajectory = { ...event.settings.trajectory };
@@ -399,6 +410,7 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
         docketMarkdown: null,
         resolutionPath: null,
         summaryReviewed: false,
+        claimsCompared: false,
       };
       state.waveOrder.push(event.waveId);
       for (const entry of event.roster) {
@@ -414,6 +426,7 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
           packetManifest: [],
           threadId: null,
           estimatedTokens: 0,
+          chargedTokens: 0,
           lastItem: null,
           usage: null,
           artifactIds: [],
@@ -443,6 +456,11 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
       w.docketMarkdown = event.docketMarkdown;
       return state;
     }
+    case "wave.claimsCompared": {
+      const wave = must(state.waves[event.waveId], `wave ${event.waveId}`);
+      wave.claimsCompared = true;
+      return state;
+    }
     case "task.dispatched": {
       const t = must(state.tasks[event.taskId], `task ${event.taskId}`);
       t.status = "running";
@@ -465,7 +483,10 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
       const t = must(state.tasks[event.taskId], `task ${event.taskId}`);
       t.status = "completed";
       t.usage = event.usage;
-      state.budget.spentTokens += usageSpend(event.usage);
+      t.error = null;
+      t.interruptReason = null;
+      if (event.clearInvalidOutput) t.invalidOutputErrors = null;
+      accountTask(state, t, usageSpend(event.usage));
       return state;
     }
     case "task.outputInvalid": {
@@ -479,7 +500,7 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
       t.interruptReason = event.reason;
       if (event.usage) {
         t.usage = event.usage;
-        state.budget.spentTokens += usageSpend(event.usage);
+        accountTask(state, t, usageSpend(event.usage));
       }
       return state;
     }
@@ -487,6 +508,15 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
       const t = must(state.tasks[event.taskId], `task ${event.taskId}`);
       t.status = "failed";
       t.error = event.error;
+      if (event.usage) {
+        t.usage = event.usage;
+        accountTask(state, t, usageSpend(event.usage));
+      }
+      return state;
+    }
+    case "task.accounted": {
+      const t = must(state.tasks[event.taskId], `task ${event.taskId}`);
+      accountTask(state, t, event.chargedTokens);
       return state;
     }
     case "task.extended": {
@@ -542,8 +572,33 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
 
     // ---- evidence --------------------------------------------------------
     case "artifact.recorded": {
+      const task = event.taskId
+        ? must(state.tasks[event.taskId], `task ${event.taskId}`)
+        : null;
       for (const kind of ["attempt", "exploration", "review"] as const) {
         if (event.kind === kind) bump(state, kind, event.artifactId);
+      }
+      // Long-trajectory write-ups retain the familiar A.../E... identifiers,
+      // even though their presentation kind is the shared `writeup` section.
+      // Advancing the role-specific counter is essential: otherwise every
+      // Solver is allocated A001 and every Explorer E001.
+      if (event.kind === "writeup" && task?.role === "solver") {
+        bump(state, "attempt", event.artifactId);
+      } else if (event.kind === "writeup" && task?.role === "explorer") {
+        bump(state, "exploration", event.artifactId);
+      }
+
+      // Re-recording an id transfers its ownership. This preserves the
+      // existing last-write-wins artifact semantics without leaving the old
+      // task pointing at another task's document after replay.
+      const previous = state.artifacts[event.artifactId];
+      if (previous?.taskId && previous.taskId !== event.taskId) {
+        const previousTask = state.tasks[previous.taskId];
+        if (previousTask) {
+          previousTask.artifactIds = previousTask.artifactIds.filter(
+            (artifactId) => artifactId !== event.artifactId,
+          );
+        }
       }
       state.artifacts[event.artifactId] = {
         id: event.artifactId,
@@ -553,9 +608,8 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
         conclusion: event.conclusion,
         recordedAtSeq: event.seq,
       };
-      if (event.taskId) {
-        const t = must(state.tasks[event.taskId], `task ${event.taskId}`);
-        t.artifactIds.push(event.artifactId);
+      if (task && !task.artifactIds.includes(event.artifactId)) {
+        task.artifactIds.push(event.artifactId);
       }
       return state;
     }
@@ -662,6 +716,16 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
       if (event.to === "VERIFIED") reconcileEquivalentFacts(state, k.id);
       return state;
     }
+    case "claim.provenanceRepaired": {
+      const claim = must(state.claims[event.claimId], `claim ${event.claimId}`);
+      if (claim.provenance !== event.from) {
+        throw new Error(
+          `claim ${event.claimId} provenance is ${claim.provenance}, not ${event.from}`,
+        );
+      }
+      claim.provenance = event.to;
+      return state;
+    }
     case "claim.equivalent": {
       if (event.leftClaimId === event.rightClaimId) {
         throw new Error(`claim ${event.leftClaimId} cannot be equivalent to itself`);
@@ -682,6 +746,7 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
         ordinal: event.ordinal,
         status: "queued",
         verdict: null,
+        finding: null,
         summaryMarkdown: "",
         artifactPath: null,
         usage: null,
@@ -707,6 +772,7 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
       );
       verification.status = "completed";
       verification.verdict = event.verdict;
+      verification.finding = event.finding ?? null;
       verification.summaryMarkdown = event.summaryMarkdown;
       verification.artifactPath = event.artifactPath;
       verification.usage = event.usage;
@@ -763,7 +829,8 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
       if (fact.status === "SUSPICIOUS") {
         const stillOpen = fact.correctionClaimIds.some((claimId) => {
           if (claimId === event.correctionClaimId) return false;
-          return state.claims[claimId]?.status === "UNVERIFIED";
+          const status = state.claims[claimId]?.status;
+          return status === "UNVERIFIED" || status === "NEEDS_REVISION";
         });
         fact.status = stillOpen ? "SUSPICIOUS" : "ACTIVE";
       }

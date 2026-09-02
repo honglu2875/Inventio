@@ -89,6 +89,7 @@ const ProjectSettingsBody = z.object({
   autonomy: z.enum(["auto", "gated"]),
   allowWebSearch: z.boolean(),
   totalTokens: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  workerTokenLimit: z.number().int().min(60_000).max(Number.MAX_SAFE_INTEGER).optional(),
   maxWaves: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   trajectory: z
     .object({
@@ -128,7 +129,7 @@ const ContinueBody = z.object({
   humanRevisionMarkdown: z.string().min(1).max(16_000).optional(),
 });
 const ClaimStatusBody = z.object({
-  to: z.enum(["VERIFIED", "REFUTED"]),
+  to: z.enum(["VERIFIED", "FAILED", "REFUTED"]),
   note: z.string().min(1).max(10_000),
 });
 const IssueBody = z.object({
@@ -549,6 +550,7 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
           packetManifest: detail.task.packetManifest,
           memo: taskMemoFromOutput(output),
           meta: readJsonIfPresent(engine.paths.dir, path.join(taskDir, "meta.json")),
+          partialWorkMarkdown: detail.partialWorkMarkdown,
         };
       }),
   );

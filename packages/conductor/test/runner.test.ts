@@ -88,6 +88,24 @@ describe("runCodex", () => {
     expect(args.join(" ")).not.toContain("not-placed-on-argv");
   });
 
+  it("uses a packet-only permission profile without the broad legacy sandbox", () => {
+    const { baseOpts, packet } = setup([]);
+    const args = buildArgs({
+      ...baseOpts,
+      cwd: packet,
+      sandbox: "workspace-write",
+      permissionProfile: {
+        name: "inventio_verifier",
+        filesystem: { ":minimal": "read", [packet]: "write" },
+      },
+    });
+    const joined = args.join(" ");
+    expect(args).not.toContain("-s");
+    expect(joined).toContain("permissions.inventio_verifier=");
+    expect(joined).toContain(JSON.stringify(packet));
+    expect(joined).toContain('default_permissions="inventio_verifier"');
+  });
+
   it("extracts structured API failures from the JSONL event stream", () => {
     const nested = JSON.stringify({
       type: "error",

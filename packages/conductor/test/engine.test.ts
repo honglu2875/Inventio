@@ -1376,7 +1376,7 @@ describe("ProjectEngine end-to-end (codex-sim)", () => {
     expect(h.state.terminal!.result).toBe("UNCERTAIN");
   }, 30_000);
 
-  it("8. stop mid-task then reload: the interrupted task closes its wave, work is not repeated", async () => {
+  it("8. stop mid-task then reload: the same task resumes and work is not repeated", async () => {
     const T001_THREAD = "th-recovery-t001";
     const h = harness("recovery", [
       plannerCall(INTAKE_MATCH, intakeOutput()),
@@ -1386,14 +1386,13 @@ describe("ProjectEngine end-to-end (codex-sim)", () => {
         delayMs: 60,
         items: Array.from({ length: 8 }, (_, i) => ({ type: "reasoning", text: `step ${i}` })),
       }),
-      // Present but never selected — see the recovery note below.
       {
         match: { resumeOf: T001_THREAD },
-        finalMessage: solverOutput("PROVED", "CONCLUSION: PROVED\n\nResumed after the restart."),
+        finalMessage: solverOutput("UNCERTAIN", "CONCLUSION: UNCERTAIN\n\nResumed after the restart."),
         usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 10, reasoning_output_tokens: 0 },
       },
       plannerCall(CURATION_MATCH, curationOutput()),
-      plannerCall(DECISION_MATCH, terminate("the only attempt was cut short by the restart")),
+      plannerCall(DECISION_MATCH, terminate("the resumed attempt has been recorded")),
       plannerCall(FINAL_MATCH, finalOutput("# Final\n\nRestarted mid-wave.")),
     ]);
 
@@ -1404,21 +1403,13 @@ describe("ProjectEngine end-to-end (codex-sim)", () => {
     );
     await h.stop();
 
-    /*
-     * Observed recovery semantics (engine.ts `stop` + `executeTask`):
-     * stop() kills the child with SIGINT, so the run returns `interrupted`
-     * and the engine records `task.interrupted { reason: "killed" }` BEFORE
-     * stop() resolves — the log is never left with a dangling running task.
-     * Consequently the reloaded engine does not take the §6.8 resume branch
-     * (which only fires for a task still `running` in the log, e.g. after a
-     * hard process kill): it finds a terminal task, closes the wave with the
-     * interrupted outcome, and carries on. That is coherent — the work is
-     * neither repeated nor silently lost — so the resume scenario call above
-     * is deliberately never consumed.
-     */
-    expect(h.state.tasks["T001"]!.status).toBe("interrupted");
-    expect(h.state.tasks["T001"]!.interruptReason).toBe("killed");
+    // A graceful process stop is operational, not a mathematical outcome.
+    // The durable task and thread remain resumable, while partial spend is
+    // accounted before stop() resolves.
+    expect(h.state.tasks["T001"]!.status).toBe("running");
+    expect(h.state.tasks["T001"]!.interruptReason).toBeNull();
     expect(h.state.tasks["T001"]!.threadId).toBe(T001_THREAD);
+    expect(h.state.tasks["T001"]!.chargedTokens).toBeGreaterThan(0);
     expect(h.state.waves["W001"]!.status).toBe("open");
 
     const beforeReload = h.diskState();
@@ -1430,13 +1421,14 @@ describe("ProjectEngine end-to-end (codex-sim)", () => {
 
     expect(h.state.terminal!.result).toBe("UNCERTAIN");
     expect(h.state.waves["W001"]!.status).toBe("closed");
-    expect(h.state.waves["W001"]!.docketMarkdown).toContain("INTERRUPTED (killed)");
+    expect(h.state.tasks["T001"]!.status).toBe("completed");
+    expect(h.read("artifacts/attempts/A001.md")).toContain("Resumed after the restart.");
 
-    // No repeated work: T001 was dispatched exactly once across both boots…
+    // No repeated dispatch: T001 was launched once and continued by thread id.
     const dispatches = h.diskEvents().filter((e) => e.type === "task.dispatched" && e.taskId === "T001");
     expect(dispatches.length).toBe(1);
-    // …and the resume branch was never taken.
-    expect(h.simLog().filter((r) => r.resumeOf !== null)).toEqual([]);
+    expect(h.simLog().filter((r) => r.resumeOf === T001_THREAD)).toHaveLength(1);
+    expect(h.diskEvents().filter((e) => e.type === "task.interrupted" && e.taskId === "T001")).toEqual([]);
     expect(h.diskState()).toEqual(h.state);
   }, 30_000);
 
@@ -1477,10 +1469,10 @@ describe("ProjectEngine end-to-end (codex-sim)", () => {
     );
     await h.stop();
 
-    // Simulate `kill -9` of the conductor: the log ends with T001 still
-    // `running` and holding a thread id, which is the real §6.8 crash state
-    // (a graceful stop would have appended task.interrupted).
-    h.truncateLogFrom((e) => e.type === "task.interrupted");
+    // Simulate `kill -9` in the narrow interval after task metadata reached
+    // disk but before the cumulative accounting event was appended. The log
+    // still ends with a running task and durable thread id.
+    h.truncateLogFrom((e) => e.type === "task.accounted" && e.taskId === "T001");
     await h.reload();
     expect(h.state.tasks["T001"]!.status).toBe("running");
     expect(h.state.tasks["T001"]!.threadId).toBe(T001_THREAD);

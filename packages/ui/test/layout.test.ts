@@ -175,24 +175,55 @@ describe("layoutEvidence", () => {
 });
 
 describe("layoutTrajectoryEvidence", () => {
-  it("lays out the v2 mathematical record as problem, claims, checks, then facts", () => {
+  it("lays out each research path as problem, trajectory, turning point, claim, check, then fact", () => {
     const graph: Graph = {
       nodes: [
         n("problem", "problem"),
-        n("K001", "claim"),
-        n("V001", "verification"),
-        n("F001", "fact"),
+        n("T001", "task"),
+        n("MS001", "milestone", undefined, { taskId: "T001" }),
+        n("K001", "claim", undefined, { sourceTaskId: "T001" }),
+        n("V001", "verification", undefined, { claimId: "K001" }),
+        n("F001", "fact", undefined, { claimId: "K001" }),
       ],
       edges: [
-        e("r", "problem", "K001", "relation"),
+        e("r", "problem", "T001", "relation"),
+        e("s", "T001", "MS001", "sequence"),
+        e("o", "MS001", "K001", "produced"),
         e("v", "K001", "V001", "verifies"),
         e("p", "K001", "F001", "promotes"),
       ],
     };
     const placed = byId(layoutTrajectoryEvidence(graph));
-    expect(placed.get("problem")!.x).toBeLessThan(placed.get("K001")!.x);
+    expect(placed.get("problem")!.x).toBeLessThan(placed.get("T001")!.x);
+    expect(placed.get("T001")!.x).toBeLessThan(placed.get("MS001")!.x);
+    expect(placed.get("MS001")!.x).toBeLessThan(placed.get("K001")!.x);
     expect(placed.get("K001")!.x).toBeLessThan(placed.get("V001")!.x);
     expect(placed.get("V001")!.x).toBeLessThan(placed.get("F001")!.x);
     expect(layoutTrajectoryEvidence(graph)).toEqual(layoutTrajectoryEvidence(graph));
+  });
+
+  it("reserves enough vertical room for every check before placing the next claim", () => {
+    const graph: Graph = {
+      nodes: [
+        n("problem", "problem"),
+        n("T001", "task"),
+        n("K001", "claim", undefined, { sourceTaskId: "T001" }),
+        n("K002", "claim", undefined, { sourceTaskId: "T001" }),
+        n("V001", "verification", undefined, { claimId: "K001" }),
+        n("V002", "verification", undefined, { claimId: "K001" }),
+        n("V003", "verification", undefined, { claimId: "K001" }),
+      ],
+      edges: [
+        e("r", "problem", "T001", "relation"),
+        e("p1", "T001", "K001", "produced"),
+        e("p2", "T001", "K002", "produced"),
+        e("v1", "K001", "V001", "verifies"),
+        e("v2", "K001", "V002", "verifies"),
+        e("v3", "K001", "V003", "verifies"),
+      ],
+    };
+    const placed = byId(layoutTrajectoryEvidence(graph));
+    const lastCheck = placed.get("V003")!;
+    expect(placed.get("K002")!.y).toBeGreaterThan(lastCheck.y + lastCheck.h);
   });
 });

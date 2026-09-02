@@ -41,6 +41,8 @@ export const TASK_STATUS_COLOR: Record<TaskStatus, string> = {
 export const CLAIM_STATUS_COLOR: Record<ClaimStatus, string> = {
   VERIFIED: "var(--ok)",
   UNVERIFIED: "var(--warn)",
+  NEEDS_REVISION: "var(--warn)",
+  FAILED: "var(--danger)",
   REFUTED: "var(--danger)",
   SUPERSEDED: "var(--muted)",
 };
@@ -48,6 +50,8 @@ export const CLAIM_STATUS_COLOR: Record<ClaimStatus, string> = {
 export const CLAIM_STATUS_GLYPH: Record<ClaimStatus, string> = {
   VERIFIED: "✓",
   UNVERIFIED: "?",
+  NEEDS_REVISION: "△",
+  FAILED: "×",
   REFUTED: "✗",
   SUPERSEDED: "≡",
 };
@@ -60,7 +64,6 @@ export function verificationDisplayStatus(
 
 /** v2 treats a claim as statement + alleged proof; a failed proof need not refute the statement. */
 export function trajectoryClaimStatusLabel(status: ClaimStatus): string {
-  if (status === "REFUTED") return "FAILED";
   if (status === "SUPERSEDED") return "DUPLICATE";
   return status;
 }
@@ -72,8 +75,12 @@ export function claimStatusMeaning(status: ClaimStatus): string {
       return "The exact statement was independently checked. This does not verify a candidate or any stronger result that uses it.";
     case "UNVERIFIED":
       return "This is a recorded lead, not an established fact. It still needs an independent check before it can support a proof.";
+    case "NEEDS_REVISION":
+      return "An independent reader could not check the submitted text because a dependency or piece of notation was missing. This is not a mathematical refutation; the write-up can be revised.";
+    case "FAILED":
+      return "This statement-and-proof submission did not pass independent checking. The failure does not imply that the statement is false; another proof may still establish it.";
     case "REFUTED":
-      return "The exact statement failed an independent check and must not be used as a valid premise.";
+      return "A concrete mathematical disproof says this statement is false; it must not be used as a premise.";
     case "SUPERSEDED":
       return "A later or more precise statement replaced this one; consult the recorded reason before reusing it.";
   }

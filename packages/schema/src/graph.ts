@@ -72,8 +72,7 @@ export function deriveOpsGraph(state: ProjectState): Graph {
     const wave = state.waves[waveId]!;
     const spend = wave.taskIds.reduce((acc, tid) => {
       const t = state.tasks[tid]!;
-      const u = t.usage;
-      return acc + (u ? Math.max(0, u.input_tokens - u.cached_input_tokens) + u.output_tokens : t.estimatedTokens);
+      return acc + (t.status === "running" ? Math.max(t.chargedTokens, t.estimatedTokens) : t.chargedTokens);
     }, 0);
     nodes.push({
       id: waveId,
@@ -97,6 +96,7 @@ export function deriveOpsGraph(state: ProjectState): Graph {
           direction: t.direction,
           budgetTokens: t.budgetTokens,
           estimatedTokens: t.estimatedTokens,
+          chargedTokens: t.chargedTokens,
           usage: t.usage,
           reviewOf: t.reviewOf,
           conclusion: firstConclusion(state, t.artifactIds),
@@ -211,7 +211,10 @@ export function deriveOpsGraph(state: ProjectState): Graph {
       data: {
         counts: {
           FACTS: state.factOrder.filter((id) => state.facts[id]?.status === "ACTIVE").length,
-          CLAIMS: state.claimOrder.filter((id) => state.claims[id]?.status === "UNVERIFIED").length,
+          CLAIMS: state.claimOrder.filter((id) => {
+            const status = state.claims[id]?.status;
+            return status === "UNVERIFIED" || status === "NEEDS_REVISION";
+          }).length,
         },
       },
     });
@@ -319,12 +322,31 @@ export function deriveEvidenceGraph(state: ProjectState, candidateIdArg?: string
   return { nodes, edges };
 }
 
+export interface TrajectoryEvidenceOptions {
+  /** Include every Solver/Explorer session instead of only current research paths. */
+  includeAllTrajectories?: boolean;
+  /** Include the sparse turning points recorded during each long session. */
+  includeMilestones?: boolean;
+  /** Expand each claim's individual independent checks. */
+  includeVerifications?: boolean;
+}
+
 /**
- * Active mathematical evidence for trajectories-v2. The projection omits
- * failed and duplicate claims from the working graph; their complete history
- * remains in the Library.
+ * Current mathematical record for trajectories-v2, retaining the route by
+ * which each claim was reached. Failed and duplicate claims stay out of this
+ * working projection; their complete history remains in the Library.
+ *
+ * The defaults preserve the complete semantic projection. A UI may hide
+ * individual verification nodes (the aggregate remains on each claim) or ask
+ * for all research trajectories as progressive-disclosure choices.
  */
-export function deriveTrajectoryEvidenceGraph(state: ProjectState): Graph {
+export function deriveTrajectoryEvidenceGraph(
+  state: ProjectState,
+  options: TrajectoryEvidenceOptions = {},
+): Graph {
+  const includeAllTrajectories = options.includeAllTrajectories ?? false;
+  const includeMilestones = options.includeMilestones ?? true;
+  const includeVerifications = options.includeVerifications ?? true;
   const nodes: GraphNode[] = [
     {
       id: "problem",
@@ -340,9 +362,128 @@ export function deriveTrajectoryEvidenceGraph(state: ProjectState): Graph {
   });
   const includedClaims = new Set<string>();
   for (const claimId of state.claimOrder) {
-    if (state.claims[claimId]?.status === "UNVERIFIED") includedClaims.add(claimId);
+    const status = state.claims[claimId]?.status;
+    if (status === "UNVERIFIED" || status === "NEEDS_REVISION") includedClaims.add(claimId);
   }
   for (const factId of activeFactIds) includedClaims.add(state.facts[factId]!.claimId);
+
+  const includedTaskIds = new Set<string>();
+  for (const claimId of includedClaims) {
+    const taskId = state.claims[claimId]?.sourceTaskId;
+    if (taskId && state.tasks[taskId]) includedTaskIds.add(taskId);
+  }
+
+  const researchTask = (taskId: string): boolean => {
+    const role = state.tasks[taskId]?.role;
+    return role === "solver" || role === "explorer";
+  };
+  if (includeAllTrajectories) {
+    for (const waveId of state.waveOrder) {
+      for (const taskId of state.waves[waveId]?.taskIds ?? []) {
+        if (researchTask(taskId)) includedTaskIds.add(taskId);
+      }
+    }
+  } else {
+    // Keep the live round visible before it has had a chance to produce claims.
+    const currentWaveId = [...state.waveOrder]
+      .reverse()
+      .find((waveId) => state.waves[waveId]?.status !== "closed");
+    if (currentWaveId) {
+      for (const taskId of state.waves[currentWaveId]?.taskIds ?? []) {
+        if (researchTask(taskId)) includedTaskIds.add(taskId);
+      }
+    }
+    // A fresh or claim-free record should still show the latest completed work.
+    if (includedTaskIds.size === 0) {
+      const latestWaveId = state.waveOrder.at(-1);
+      for (const taskId of latestWaveId ? state.waves[latestWaveId]?.taskIds ?? [] : []) {
+        if (researchTask(taskId)) includedTaskIds.add(taskId);
+      }
+    }
+  }
+
+  const claimIdsByTask = new Map<string, string[]>();
+  for (const claimId of includedClaims) {
+    const taskId = state.claims[claimId]?.sourceTaskId;
+    if (!taskId) continue;
+    const ids = claimIdsByTask.get(taskId) ?? [];
+    ids.push(claimId);
+    claimIdsByTask.set(taskId, ids);
+  }
+  const factCountByTask = new Map<string, number>();
+  for (const factId of activeFactIds) {
+    const taskId = state.claims[state.facts[factId]!.claimId]?.sourceTaskId;
+    if (taskId) factCountByTask.set(taskId, (factCountByTask.get(taskId) ?? 0) + 1);
+  }
+
+  const trajectoryTail = new Map<string, string>();
+  for (const waveId of state.waveOrder) {
+    const wave = state.waves[waveId];
+    if (!wave) continue;
+    for (const taskId of wave.taskIds) {
+      if (!includedTaskIds.has(taskId)) continue;
+      const task = state.tasks[taskId]!;
+      nodes.push({
+        id: task.id,
+        type: "task",
+        label: `${task.id} ${task.methodTag}`,
+        data: {
+          role: task.role,
+          status: task.status,
+          waveId: task.waveId,
+          methodTag: task.methodTag,
+          direction: task.direction,
+          budgetTokens: task.budgetTokens,
+          spend:
+            task.status === "running"
+              ? Math.max(task.chargedTokens, task.estimatedTokens)
+              : task.chargedTokens,
+          lastItemPreview: task.lastItem?.preview ?? "",
+          conclusion: firstConclusion(state, task.artifactIds),
+          milestoneCount: task.milestoneIds.length,
+          claimCount: claimIdsByTask.get(task.id)?.length ?? 0,
+          factCount: factCountByTask.get(task.id) ?? 0,
+          researchMap: true,
+        },
+      });
+      edges.push({
+        id: `trajectory:problem:${task.id}`,
+        source: "problem",
+        target: task.id,
+        type: "relation",
+      });
+      let tail = task.id;
+      if (includeMilestones) {
+        const milestones = task.milestoneIds
+          .map((milestoneId) => state.milestones[milestoneId])
+          .filter((milestone) => milestone !== undefined);
+        milestones.forEach((milestone, index) => {
+          nodes.push({
+            id: milestone.id,
+            type: "milestone",
+            label: milestone.title,
+            data: {
+              taskId: task.id,
+              title: milestone.title,
+              markdown: milestone.markdown,
+              recordedAt: milestone.recordedAt,
+              ordinal: index + 1,
+              total: milestones.length,
+              researchMap: true,
+            },
+          });
+          edges.push({
+            id: `trajectory-step:${tail}:${milestone.id}`,
+            source: tail,
+            target: milestone.id,
+            type: "sequence",
+          });
+          tail = milestone.id;
+        });
+      }
+      trajectoryTail.set(task.id, tail);
+    }
+  }
 
   for (const claimId of state.claimOrder) {
     if (!includedClaims.has(claimId)) continue;
@@ -359,20 +500,42 @@ export function deriveTrajectoryEvidenceGraph(state: ProjectState): Graph {
         statement: claim.statement,
         status: claim.status,
         relationToGoal: claim.relationToGoal,
+        sourceTaskId: claim.sourceTaskId,
+        sourceWaveId: claim.sourceWaveId,
         passCount: checks.filter((check) => check.verdict === "PASS").length,
         checkCount: checks.length,
         passesRequired:
           claim.verificationPolicy?.passesRequired ?? state.config.trajectory.passesRequired,
       },
     });
-    edges.push({
-      id: `relation:problem:${claim.id}`,
-      source: "problem",
-      target: claim.id,
-      type: "relation",
-      label: claim.relationToGoal,
-    });
-    for (const verification of checks) {
+    const source = claim.sourceTaskId ? trajectoryTail.get(claim.sourceTaskId) : undefined;
+    edges.push(
+      source
+        ? {
+            id: `produced:${source}:${claim.id}`,
+            source,
+            target: claim.id,
+            type: "produced",
+            label: claim.relationToGoal,
+          }
+        : {
+            id: `relation:problem:${claim.id}`,
+            source: "problem",
+            target: claim.id,
+            type: "relation",
+            label: claim.relationToGoal,
+          },
+    );
+    for (const dependencyId of claim.dependsOn) {
+      if (!includedClaims.has(dependencyId)) continue;
+      edges.push({
+        id: `claim-dependency:${claim.id}:${dependencyId}`,
+        source: claim.id,
+        target: dependencyId,
+        type: "depends-on",
+      });
+    }
+    for (const verification of includeVerifications ? checks : []) {
       const checkLabel = verification.verdict ?? (verification.status === "running" ? "RUNNING" : "QUEUED");
       nodes.push({
         id: verification.id,
@@ -383,6 +546,7 @@ export function deriveTrajectoryEvidenceGraph(state: ProjectState): Graph {
           ordinal: verification.ordinal,
           status: verification.status,
           verdict: verification.verdict,
+          finding: verification.finding,
           summary: verification.summaryMarkdown,
         },
       });

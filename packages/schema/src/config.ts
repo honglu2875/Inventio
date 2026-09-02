@@ -68,16 +68,18 @@ export type ActiveModelSettings = z.infer<typeof ActiveModelSettings>;
 /**
  * Project-wide choices that the owner may revise while a project exists.
  *
- * Keep this projection smaller than ProjectConfig: owner source collections,
- * task-level limits, and protocol constants have their own audited lifecycles.
- * These are the effective choices exposed at project creation or in Settings,
- * so they move together through one event-sourced boundary.
+ * Keep this projection smaller than ProjectConfig: owner source collections
+ * and protocol constants have their own audited lifecycles. These are the
+ * effective choices exposed in Settings, so they move together through one
+ * event-sourced boundary.
  */
 export const ProjectSettings = z.object({
   models: ActiveModelSettings,
   autonomy: z.enum(["auto", "gated"]),
   allowWebSearch: z.boolean(),
   totalTokens: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  /** Optional only so settings events written before this field existed replay. */
+  workerTokenLimit: z.number().int().min(60_000).max(Number.MAX_SAFE_INTEGER).optional(),
   maxWaves: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   trajectory: z
     .object({
@@ -171,6 +173,7 @@ export function projectSettingsFromConfig(config: ProjectConfig): ProjectSetting
     autonomy: config.autonomy,
     allowWebSearch: config.allowWebSearch,
     totalTokens: config.budget.totalTokens,
+    workerTokenLimit: config.budget.defaultTaskTokens,
     maxWaves: config.limits.maxWaves,
     trajectory: config.trajectory,
   });
