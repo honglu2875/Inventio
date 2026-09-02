@@ -101,8 +101,8 @@ values and put them in tokens.css as `--role-solver` etc.
 
 Status ring colors: queued `--queued`, running `--running` (with a 2s CSS
 pulse animation on the ring), completed `--ok`, interrupted `--warn`,
-failed `--danger`. Claim status: VERIFIED `--ok`, UNVERIFIED `--warn`,
-REFUTED `--danger`, SUPERSEDED `--muted`. Issue severity: CRITICAL
+failed `--danger`. Claim status: VERIFIED `--ok`, UNVERIFIED and
+NEEDS_REVISION `--warn`, FAILED and REFUTED `--danger`, SUPERSEDED `--muted`. Issue severity: CRITICAL
 `--danger`, MAJOR `--warn`, MINOR `--muted`. Review PASS `--ok` / FAIL
 `--danger`.
 
@@ -352,7 +352,7 @@ and cannot fold the tabs into a scrollbar.
 Task inspector footer (running tasks): `Interrupt` (danger, confirm) and
 `Extend budget +25%` buttons. Candidate footer: `Raise issue` (severity /
 location / text form). Claim rows (in Evidence/Library): `Mark VERIFIED` /
-`Mark REFUTED` with a required note dialog. Card rows: `Quarantine` with
+`Mark proof failed` with a required note dialog. Card rows: `Quarantine` with
 note. All human actions POST, then rely on SSE for the state change
 (optimistic UI is forbidden — the event stream is the truth).
 

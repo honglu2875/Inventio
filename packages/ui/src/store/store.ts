@@ -1,6 +1,12 @@
 import { create } from "zustand";
 import { produce, setAutoFreeze } from "immer";
-import { applyEvent, initialState, type Event, type ProjectState } from "@inventio/schema";
+import {
+  applyEvent,
+  EVENT_TYPES,
+  initialState,
+  type Event,
+  type ProjectState,
+} from "@inventio/schema";
 import { defaultCollapsed, reconcileCollapse, runningWaveIds } from "../lib/collapse";
 
 /**
@@ -13,6 +19,11 @@ import { defaultCollapsed, reconcileCollapse, runningWaveIds } from "../lib/coll
 // auto-freezing of the whole state tree is the one avoidable cost. Nothing
 // outside `produce` ever mutates state.
 setAutoFreeze(false);
+
+// Network messages are deliberately decoded as plain JSON in connect.ts. A
+// server can briefly be newer than an already-open browser after a hot deploy,
+// so reject an unknown discriminant before `applyEvent` advances the sequence.
+const KNOWN_EVENT_TYPES = new Set<string>(EVENT_TYPES);
 
 export type ConnectionState = "connecting" | "live" | "reconnecting" | "fixture";
 
@@ -64,7 +75,12 @@ export interface UiStore {
 
   ensureSlot: (slug: string) => void;
   setSnapshot: (slug: string, state: ProjectState) => void;
-  applyEvents: (slug: string, batch: Event[]) => void;
+  /**
+   * Fold a streamed batch. Returns false when the local reducer cannot
+   * understand an event so the connection layer can replace this possibly
+   * stale client state with a fresh server snapshot.
+   */
+  applyEvents: (slug: string, batch: Event[]) => boolean;
   setConnection: (slug: string, connection: ConnectionState) => void;
   setSlotError: (slug: string, error: string | null) => void;
   resetSlot: (slug: string) => void;
@@ -186,9 +202,9 @@ export const useStore = create<UiStore>()((set, get) => ({
   },
 
   applyEvents: (slug, batch) => {
-    if (batch.length === 0) return;
+    if (batch.length === 0) return true;
     const slot = get().projects[slug];
-    if (!slot) return;
+    if (!slot) return false;
     const base = slot.state ?? initialState();
 
     const outcome: { failure: string | null } = { failure: null };
@@ -197,6 +213,11 @@ export const useStore = create<UiStore>()((set, get) => ({
       for (const event of batch) {
         // Replay overlap after a reconnect: the server resends from `since`.
         if (event.seq <= draft.seq) continue;
+        const eventType = (event as { type?: unknown }).type;
+        if (typeof eventType !== "string" || !KNOWN_EVENT_TYPES.has(eventType)) {
+          outcome.failure = `event ${event.seq} (${String(eventType)}): event type is not supported by this UI build`;
+          break;
+        }
         try {
           applyEvent(draft, event);
           applied.push(event);
@@ -209,7 +230,7 @@ export const useStore = create<UiStore>()((set, get) => ({
       }
     });
     const failure = outcome.failure;
-    if (applied.length === 0 && failure === null) return;
+    if (applied.length === 0 && failure === null) return true;
 
     const running = runningWaveIds(next);
     const prevCollapse = get().collapse[slug] ?? readCollapse(slug);
@@ -241,7 +262,7 @@ export const useStore = create<UiStore>()((set, get) => ({
       },
       ...(collapseChanged ? { collapse: { ...s.collapse, [slug]: collapsed } } : {}),
     }));
-    if (failure !== null) get().pushToast(`reducer stopped: ${failure}`, "error");
+    return failure === null;
   },
 
   setConnection: (slug, connection) => {

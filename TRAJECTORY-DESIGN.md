@@ -33,20 +33,74 @@ versions can still be replayed without reinterpretation.
    milestones. At the end it returns a write-up and a short, parseable list of
    genuinely useful claims. Every claim must contain a self-contained statement
    and a complete alleged proof. Assumptions, vague ideas, and repetitive
-   instance-by-instance observations are not claims.
-5. Each new claim is checked independently by `V` Verifiers. It becomes a fact
-   after at least `W` passes (`1 <= W <= V`). Verification runs concurrently
-   with later research whenever capacity permits. A claim that can no longer
-   reach `W` passes is marked failed and hidden from the default library view.
-6. Equivalent claims are linked transitively while retaining their distinct
-   proofs. If one becomes a fact, the other active versions leave the claim
-   pool and point to that fact.
-7. At the end of a round, a strong summary reader may make a small revision to
+   instance-by-instance observations are not claims. Before persistence, the
+   structured return is checked for damaged TeX, unmatched mathematical
+   delimiters, internal project references, and references to omitted
+   surrounding work. An invalid return receives one repair turn in the same
+   trajectory; these checks do not judge its mathematical method or conclusion.
+5. Once a round's claims are present, one narrow comparison identifies
+   statements with the same hypotheses, scope, and conclusion. It cannot edit
+   claims, assess proofs, or choose research directions. Equivalent claims are
+   linked transitively while their distinct proofs remain inspectable. Only one
+   proof in an equivalence class is checked at a time; if it fails, the next
+   proof may be checked, and if one succeeds the remaining versions point to
+   the resulting fact.
+6. Each selected claim is checked independently by up to `V` Verifiers. It
+   becomes a fact after at least `W` passes (`1 <= W <= V`). Checks run
+   concurrently with one another. A claim that can no longer reach `W` passes
+   is `FAILED` when a mathematical error or proof gap was found. Missing
+   dependencies or damaged/undefined presentation instead produce
+   `NEEDS_REVISION`, which is retained as an unresolved write-up rather than a
+   mathematical refutation. `REFUTED` remains reserved for a concrete disproof
+   of the statement.
+7. After the round's checks have reached durable outcomes, a strong summary
+   reader may make a small revision to
    `W000` only when the new work materially changes the mathematical picture.
    This is editorial maintenance, not a planning or management layer.
-8. The next round starts after its research trajectories and summary review
-   finish. After the final round, outstanding verification finishes before the
-   project result is written.
+8. The next round starts after its research trajectories, statement comparison,
+   checks, and summary review finish. Thus every saved round view describes a
+   fixed review state. After the final round, the project result is written from
+   the same settled record.
+
+## Mathematical English
+
+Every generated project `AGENTS.md` includes one shared ASD-STE100 Simplified
+Technical English contract. The contract applies to all model-authored prose,
+including W000, milestones, write-ups, claims, proofs, checks, summaries,
+stopping reports, and publication manuscripts. Recovery turns use the same
+contract.
+
+Established mathematical nouns and verbs are permitted technical terms. The
+model must use short and direct prose, stable terminology, clear referents,
+and gradual exposition. Mathematical rigor and self-containedness have
+priority. The model must not change hypotheses, quantifiers, dependencies, or
+logical scope to shorten a sentence. Formulas, code, JSON keys, citations,
+proper names, and literal source text are outside the controlled-prose rules.
+
+## Process recovery
+
+- Exactly one Inventio process may own a project's event log. A per-project
+  process lease prevents a hot-reload predecessor and its replacement from
+  assigning the same sequence numbers. Every append also checks that no
+  outside writer changed the file. Locks left by a crashed PID are reclaimed;
+  a failed server startup closes all leases it already acquired.
+- The historical agreeing-terminal fork that exposed this requirement is
+  recoverable: startup selects the replacement process's contiguous tail only
+  when both branches report the same result and report path, and retains the
+  original bytes beside the repaired log. Any divergent or non-terminal fork
+  remains a loud error rather than a guessed merge.
+- Stopping or reloading the Inventio server is not a research outcome. An
+  active Solver or Explorer remains `running`, its latest partial draft and
+  cumulative spend are saved, and the next process resumes the same Codex
+  thread. A deliberate task interrupt, wall-clock timeout, or token ceiling is
+  still recorded as an interrupted trajectory.
+- If the process dies between writing task metadata and appending its
+  accounting event, startup repairs the cumulative charge before resuming. If
+  a valid structured return reached disk before its completion event, startup
+  accepts that return instead of repeating the research.
+- Partial structured drafts remain explicitly unchecked. Round summaries and
+  the task inspector show their mathematical prose, rather than raw JSON, but
+  never turn them into claims or facts.
 
 ## Facts and corrections
 
@@ -54,8 +108,9 @@ Claims and facts are plain Markdown files and remain retrievable through tools.
 A worker that finds a concrete contradiction or disproof may flag one fact once
 with a short mathematical reason. The flag creates a new correction claim and
 uses the same independent verification process. A passing correction retracts
-the fact; a failing correction clears the warning. This is deliberately narrow:
-mere doubt is not a correction claim.
+the fact; a mathematically failing correction clears the warning. A correction
+that needs a more complete write-up leaves the warning visible. This is
+deliberately narrow: mere doubt is not a correction claim.
 
 ## Roles
 
@@ -75,7 +130,7 @@ council in `trajectories-v2`.
 The existing project, graph, work, and library views remain. For a v2 project:
 
 - the project graph shows rounds, long trajectories, and their milestones;
-- the library is organized as Facts, Active claims, Failed claims, Write-ups,
-  and Verifications;
+- the library is organized as Facts, Active claims (including claims needing a
+  revised write-up), Failed claims, Write-ups, and Verifications;
 - the Summary view shows the current `W000` and its short revision history;
 - legacy manager, candidate, and council terminology is not shown.

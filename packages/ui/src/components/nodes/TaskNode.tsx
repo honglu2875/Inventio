@@ -1,6 +1,6 @@
 import type { NodeProps } from "@xyflow/react";
 import type { TaskStatus, WorkerRole } from "@inventio/schema";
-import { readNumber, readString } from "../../lib/dataread";
+import { readBool, readNumber, readString } from "../../lib/dataread";
 import { formatExact, formatTokens, truncate } from "../../lib/format";
 import {
   ROLE_COLOR,
@@ -25,16 +25,23 @@ export default function TaskNode({ id, data }: NodeProps): JSX.Element {
   const budget = readNumber(data, "budgetTokens");
   const spend = readNumber(data, "spend");
   const milestoneCount = readNumber(data, "milestoneCount");
+  const claimCount = readNumber(data, "claimCount");
+  const factCount = readNumber(data, "factCount");
+  const waveId = readString(data, "waveId");
+  const direction = readString(data, "direction", methodTag);
+  const researchMap = readBool(data, "researchMap");
   const { frac, color } = gauge(spend, budget);
+  const overTarget = budget > 0 && spend > budget;
   const ringColor = TASK_STATUS_COLOR[status];
 
   return (
-    <div className={`node-card node-task status-${status}`}>
+    <div className={`node-card node-task status-${status}`} title={direction}>
       <div className="task-top">
         <span className="role-glyph" style={{ color: ROLE_COLOR[role] }} title={role}>
           {ROLE_GLYPH[role]}
         </span>
         <span className="task-id mono">{id}</span>
+        {researchMap && waveId !== "" ? <span className="map-wave-id mono">{waveId}</span> : null}
         <span className="task-method node-detail" title={methodTag}>
           {truncate(methodTag, 16)}
         </span>
@@ -49,7 +56,7 @@ export default function TaskNode({ id, data }: NodeProps): JSX.Element {
             <TokenGauge
               frac={frac}
               color={color}
-              label={`${formatExact(spend)} / ${formatExact(budget)} tokens`}
+              label={`${formatExact(spend)} actual / ${formatExact(budget)} soft token target`}
             />
           </span>
         </span>
@@ -64,7 +71,18 @@ export default function TaskNode({ id, data }: NodeProps): JSX.Element {
             {status} · {formatTokens(spend)}
           </span>
         )}
+        {overTarget ? (
+          <span className="mono preview" style={{ color: "var(--danger)" }}>
+            target +{formatTokens(spend - budget)}
+          </span>
+        ) : null}
         {milestoneCount > 0 ? <span className="mono muted preview">◇ {milestoneCount}</span> : null}
+        {researchMap && claimCount > 0 ? (
+          <span className="mono muted preview">{claimCount} claim{claimCount === 1 ? "" : "s"}</span>
+        ) : null}
+        {researchMap && factCount > 0 ? (
+          <span className="mono preview map-fact-count">✓ {factCount}</span>
+        ) : null}
       </div>
       <NodeHandles />
     </div>

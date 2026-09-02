@@ -53,18 +53,27 @@ browser ── REST + SSE ──> deterministic runtime ──> long Solver/Expl
   throughout the project, while the event log retains the revision history.
 - **Claims become facts only after independent checks.** A trajectory returns a
   complete write-up and a small list of worthwhile new mathematical statements,
-  each with a self-contained alleged proof. The configured `V` Verifiers check
-  each claim independently; at least `W` passes are required to record it as a
-  fact. Failed and duplicate claims leave the active view but remain inspectable.
+  each with a self-contained alleged proof. Damaged or non-standalone claim text
+  gets one repair turn in its originating trajectory. Identical statements are
+  linked before review, and one proof at a time receives up to `V` independent
+  checks; at least `W` passes are required to record it as a fact. A missing
+  dependency or malformed presentation is kept as `NEEDS_REVISION`, distinct
+  from a mathematical proof failure. Failed and duplicate claims remain
+  inspectable.
   A later trajectory may raise one concrete correction to an accepted fact,
   which goes through the same process.
 - **Long work stays inspectable.** Trajectories can mark sparse mathematical
   milestones, use a private writable calculation directory, search or open the
   project library and original sources, and leave both a readable final
   write-up and their complete Codex event archive.
-- **The current view changes slowly.** After a round, a strong summary reader
-  may make a small edit to W000 only when the new results materially change the
-  mathematical picture. It cannot choose work or brief the next round.
+- **Research prose uses controlled English.** Every model-authored abstract,
+  claim, proof, note, report, and manuscript follows Inventio's mathematical
+  application of ASD-STE100 Simplified Technical English. Exact mathematical
+  terms, hypotheses, quantifiers, and proof dependencies always take priority.
+- **The current view changes slowly.** After a round's checks settle, a strong
+  summary reader may make a small edit to W000 only when the new results
+  materially change the mathematical picture. It cannot choose work or brief
+  the next round.
 - **Everything is an event.** `projects/<slug>/events.jsonl` is the
   operational truth; Markdown artifacts are the mathematical evidence. The UI
   runs the same reducer as the backend, so the graph can't disagree with the
@@ -149,6 +158,11 @@ project directory, point Inventio at it explicitly:
 ```bash
 INVENTIO_ROOT=/absolute/path/to/projects npm run dev
 ```
+
+Only one Inventio server may use a given project root at a time. Each project
+has a process-owned event-log lock; a second server exits instead of risking
+two writers assigning the same event number. Locks from a crashed process are
+reclaimed automatically on the next start.
 
 Legacy projects may also contain configured source mounts. New projects retain
 their original objective, notes, and uploads directly in the project and expose

@@ -1,5 +1,5 @@
 import type { ProjectState, WorkerRole } from "@inventio/schema";
-import { TEX_LAYOUT_GUIDANCE } from "./shared.js";
+import { withMathematicalWritingGuidance } from "./shared.js";
 
 /**
  * Central prompt surface for trajectories-v2.
@@ -11,6 +11,9 @@ import { TEX_LAYOUT_GUIDANCE } from "./shared.js";
  *   TRAJECTORY_WORKER_PROMPT, once for every Solver/Explorer in a round.
  * - engine/engine.ts executeVerification(): verificationFiles() and
  *   VERIFICATION_PROMPT, independently V times for every new claim.
+ * - engine/engine.ts compareTrajectoryClaims(): claimComparisonFiles() and
+ *   CLAIM_COMPARISON_PROMPT, once before a round's proofs are checked when
+ *   there are statements worth comparing.
  * - engine/engine.ts reviewTrajectorySummary(): summaryReviewFiles() and
  *   SUMMARY_REVIEW_PROMPT, once after a completed round; this call may make a
  *   small edit to W000 but cannot select or brief workers.
@@ -39,7 +42,7 @@ export function trajectoryIntakeFiles(
   contextMarkdown: string,
 ): Record<string, string> {
   return {
-    "AGENTS.md": `# Initial mathematical reading
+    "AGENTS.md": withMathematicalWritingGuidance(`# Initial mathematical reading
 
 Read the original objective, background, and every usable item listed in
 raw-materials/index.md. Form a mathematically engaged understanding of what is
@@ -59,10 +62,8 @@ ambiguities, clarifications, and notes empty. Give each source in
 raw-materials/index.md one concise sourceSummaries entry so the original can be
 found later; summaries aid navigation and do not replace the source.
 
-${TEX_LAYOUT_GUIDANCE}
-
 Return only the JSON object required by the output schema. Because the reply is
-JSON, double TeX backslashes so they survive JSON decoding.`,
+JSON, double TeX backslashes so they survive JSON decoding.`),
     "statement.md": statement,
     "context.md": contextMarkdown.trim() || "(No separate background notes supplied.)",
   };
@@ -107,6 +108,44 @@ export function trajectoryKnowledgeIndex(state: ProjectState): string {
   if (claims.length === 0) out.push("(none)");
   for (const claim of claims) {
     out.push(`- **${claim.id}** [${claim.relationToGoal}] ${claim.title || compact(claim.statement, 120)} — ${compact(claim.statement, 420)}`);
+  }
+  out.push("", "## Claims needing a revised write-up", "");
+  const needsRevision = state.claimOrder
+    .map((id) => state.claims[id]!)
+    .filter((claim) => claim.status === "NEEDS_REVISION");
+  if (needsRevision.length === 0) out.push("(none)");
+  for (const claim of needsRevision) {
+    out.push(`- **${claim.id}** ${claim.title || compact(claim.statement, 120)} — ${compact(claim.statement, 420)}`);
+  }
+  out.push("");
+  return out.join("\n");
+}
+
+/**
+ * Editorial index used only for finding duplicate mathematical statements.
+ * Failed proofs remain visible here because a later proof may establish the
+ * same theorem; facts point back to their source K ID so the reader never has
+ * to guess whether an F ID is legal in the comparison result.
+ */
+export function trajectoryClaimStatementIndex(state: ProjectState): string {
+  const out = [
+    "# Claim statement index",
+    "",
+    "Use only K claim IDs when grouping identical statements. FAILED means the submitted proof did not pass; it does not mean the statement is false. NEEDS_REVISION means the submitted text was not complete enough to check. REFUTED is reserved for a concrete disproof.",
+    "",
+  ];
+  if (state.claimOrder.length === 0) out.push("(none)");
+  for (const claimId of state.claimOrder) {
+    const claim = state.claims[claimId]!;
+    const facts = state.factOrder
+      .map((factId) => state.facts[factId]!)
+      .filter((fact) => fact.claimId === claim.id)
+      .map((fact) => `${fact.id} [${fact.status}]`);
+    const factSuffix = facts.length > 0 ? `; recorded as ${facts.join(", ")}` : "";
+    out.push(
+      `- **${claim.id}** [${claim.status}; ${claim.relationToGoal}; ${claim.kind}] ${claim.title || "Untitled result"}${factSuffix}`,
+      `  ${compact(claim.statement, 700)}`,
+    );
   }
   out.push("");
   return out.join("\n");
@@ -156,8 +195,6 @@ export function trajectoryWorkerFiles(
     "",
     "Write mathematics for another mathematician. Explain the governing idea, retain exact hypotheses and notation, and distinguish proof from evidence or conjecture. Actively test your own proposed argument. Keep useful failures and obstructions in the write-up; they need not become claims.",
     "",
-    TEX_LAYOUT_GUIDANCE,
-    "",
     "## Final response",
     "",
     "Return only the JSON object required by the output schema. The readable \`writeupMarkdown\` is your mathematical handoff. The short \`summaryMarkdown\` should say what actually changed.",
@@ -169,7 +206,7 @@ export function trajectoryWorkerFiles(
   ].join("\n");
 
   return {
-    "AGENTS.md": agents,
+    "AGENTS.md": withMathematicalWritingGuidance(agents),
     "problem.md": state.problem.confirmedMarkdown ?? state.statement,
     "current-mathematical-view.md": `# Current mathematical view\n\n${view.markdown}`,
     "mathematical-library.md": trajectoryKnowledgeIndex(state),
@@ -192,7 +229,7 @@ export function verificationFiles(
   claimMarkdown: string,
 ): Record<string, string> {
   return {
-    "AGENTS.md": `# Independent verification — ${claimId}\n\nYou are an independent mathematical verifier. Decide whether the supplied statement follows from the supplied proof exactly as written. The claim is intentionally self-contained and no other project argument is authoritative. Try seriously to falsify it: inspect every hypothesis, implication, cited result, boundary case, and computation that matters. You may use web search to check an external theorem when enabled, and may calculate under scratch/. Do not silently repair a gap.\n\nPASS means the statement and complete proof are correct, and that any claimed relation to the original problem is exact. Missing information, an unjustified imported result, an overstated relation to the goal, or a substantive gap means FAIL, with the precise reason. Expository preferences alone do not cause FAIL.\n\nReturn only the JSON object required by the output schema.`,
+    "AGENTS.md": withMathematicalWritingGuidance(`# Independent verification — ${claimId}\n\nYou are an independent mathematical verifier. Decide whether the supplied statement follows from the supplied proof exactly as written. The claim is intentionally self-contained and no other project argument is authoritative. The current directory is the complete project material authorized for this check: do not attempt to inspect parent directories, neighboring checks, other project write-ups, or the repository. Try seriously to falsify the claim by inspecting every hypothesis, implication, cited result, boundary case, and computation that matters. You may use web search to check an external theorem when enabled, and may calculate under scratch/. Do not silently repair a gap.\n\nPASS means the statement and complete proof are correct, and that any claimed relation to the original problem is exact. For PASS use finding NONE. For FAIL, classify the principal reason without softening the verdict: INCORRECT for a false step or counterexample; PROOF_GAP for a substantive missing implication; MISSING_DEPENDENCY when a needed theorem, hypothesis, definition, or calculation was not actually supplied; PRESENTATION only when damaged or undefined notation prevents the mathematical content from being checked. Expository preferences alone do not cause FAIL.\n\nReturn only the JSON object required by the output schema.`),
     "problem.md": problemMarkdown,
     "claim.md": claimMarkdown,
   };
@@ -201,6 +238,27 @@ export function verificationFiles(
 export const VERIFICATION_PROMPT =
   "Independently check claim.md as described in AGENTS.md. Return only the required JSON object.";
 
+/** Compare statements before spending independent checks on their proofs. */
+export function claimComparisonFiles(
+  state: ProjectState,
+  waveId: string,
+): Record<string, string> {
+  const currentIds = state.claimOrder.filter(
+    (claimId) => state.claims[claimId]?.sourceWaveId === waveId,
+  );
+  return {
+    "AGENTS.md": withMathematicalWritingGuidance(`# Compare mathematical statements\n\nCompare the statements in claim-statement-index.md only to identify exact mathematical identity: the same hypotheses, quantifiers, scope, and conclusion. Different wording and notation may express the same statement. Do not group implications, special cases, generalizations, compatible examples, or results that merely serve the same purpose. Do not assess proof quality, revise a statement, choose a research direction, or infer a stronger theorem. Distinct proofs remain separate claim files.\n\nEvery returned group must contain at least one claim from current-round-claims.md. Use only K claim IDs. Return only the JSON object required by the output schema.`),
+    "problem.md": state.problem.confirmedMarkdown ?? state.statement,
+    "current-round-claims.md": currentIds.length > 0
+      ? `# Claims from ${waveId}\n\n${currentIds.map((id) => `- ${id}`).join("\n")}\n`
+      : `# Claims from ${waveId}\n\n(none)\n`,
+    "claim-statement-index.md": trajectoryClaimStatementIndex(state),
+  };
+}
+
+export const CLAIM_COMPARISON_PROMPT =
+  "Compare only the mathematical statements as described in AGENTS.md and return only the required JSON object.";
+
 export function summaryReviewFiles(
   state: ProjectState,
   waveId: string,
@@ -208,7 +266,7 @@ export function summaryReviewFiles(
 ): Record<string, string> {
   const current = latestMathematicalView(state);
   return {
-    "AGENTS.md": `# Small revision of the current mathematical view\n\nRead the current view and the completed round as a mathematician. Change the view only when a new result, obstruction, example, or correction materially changes the mathematical picture. This is not a planning step: do not choose directions, assign researchers, narrate the workflow, or expand the document merely because new text exists. Preserve its natural research voice and keep the abstract within four concise sentences. If no change is warranted, return the current abstract and markdown verbatim with changed=false.\n\nYou may also group claim IDs that state mathematically identical results. Group only genuine identity of statements, not implication, thematic similarity, or compatible examples. Distinct proofs remain distinct claims.\n\nReturn only the JSON object required by the output schema.`,
+    "AGENTS.md": withMathematicalWritingGuidance(`# Small revision of the current mathematical view\n\nRead the current view and the completed round as a mathematician. Change the view only when a new result, obstruction, example, or correction materially changes the mathematical picture. This is not a planning step: do not choose directions, assign researchers, narrate the workflow, or expand the document merely because new text exists. Preserve its natural research voice. The abstract must be plain prose of at most four complete sentences and 480 characters; never end it mid-word or spill an outline into it. If no mathematical change is warranted, return the current abstract and markdown verbatim with changed=false. You may instead make one meaning-preserving ASD-STE100 correction when the current view predates the shared English contract. Do not make repeated stylistic rewrites after the view follows that contract. An already malformed abstract may also be repaired editorially.\n\nReturn only the JSON object required by the output schema.`),
     "problem.md": state.problem.confirmedMarkdown ?? state.statement,
     "current-mathematical-view.md": `ABSTRACT:\n${current.abstract}\n\nVIEW:\n${current.markdown}`,
     "completed-round.md": `# Completed research round ${waveId}\n\n${roundSummaries}`,
@@ -232,14 +290,16 @@ export function trajectoryFinalFiles(state: ProjectState, result: string, reason
     .map((fact) => {
       const challenges = fact.correctionClaimIds
         .map((id) => state.claims[id])
-        .filter((claim) => claim?.status === "UNVERIFIED")
+        .filter(
+          (claim) => claim?.status === "UNVERIFIED" || claim?.status === "NEEDS_REVISION",
+        )
         .map((claim) => `- ${claim!.id}: ${compact(claim!.proofMarkdown, 800)}`)
         .join("\n");
       return `## ${fact.id}: ${fact.title}\n\n${fact.statement}\n\n${challenges || "- A concrete challenge is still being checked."}`;
     })
     .join("\n\n");
   return {
-    "AGENTS.md": `# Final mathematical report\n\nWrite a concise, self-contained account of what the investigation established and what remains. The deterministic verification record has already fixed the result shown in stopping-status.md; do not elevate an unverified claim or a fact with an unresolved challenge. Explain useful new partial results and failed approaches mathematically, without referring to internal workflow vocabulary, task IDs, token budgets, or software. Return only {\"finalMarkdown\": \"...\"}.`,
+    "AGENTS.md": withMathematicalWritingGuidance(`# Final mathematical report\n\nWrite a concise, self-contained account of what the investigation established and what remains. The deterministic verification record has already fixed the result shown in stopping-status.md; do not elevate an unverified claim or a fact with an unresolved challenge. Explain useful new partial results and failed approaches mathematically, without referring to internal workflow vocabulary, task IDs, token budgets, or software. Return only {\"finalMarkdown\": \"...\"}.`),
     "problem.md": state.problem.confirmedMarkdown ?? state.statement,
     "stopping-status.md": `RESULT: ${result}\nREASON: ${reason}`,
     "current-mathematical-view.md": view.markdown,

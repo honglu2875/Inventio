@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Background,
@@ -8,12 +8,14 @@ import {
   ReactFlowProvider,
   useReactFlow,
   type Node,
+  type Viewport,
 } from "@xyflow/react";
 import {
   candidateLifecycle,
   deriveEvidenceGraph,
   deriveTrajectoryEvidenceGraph,
   latestActiveCandidateId,
+  type Graph,
   type ProjectState,
 } from "@inventio/schema";
 import { EVIDENCE_NODE_TYPES } from "../components/nodes";
@@ -31,19 +33,30 @@ import { useProjectState } from "../store/hooks";
  */
 
 const PRO_OPTIONS = { hideAttribution: true } as const;
+const NO_HIGHLIGHTED_EDGES: ReadonlySet<string> = new Set<string>();
 
-function TrajectoryEvidenceCanvas({ state }: { state: ProjectState }): JSX.Element {
+function TrajectoryEvidenceCanvas({ graph }: { graph: Graph }): JSX.Element {
   const [params, setParams] = useSearchParams();
   const sel = params.get("sel");
   const { setCenter } = useReactFlow();
   const cache = useRef<Map<string, Node>>(new Map());
-  const graph = useMemo(() => deriveTrajectoryEvidenceGraph(state), [state]);
+  const [compact, setCompact] = useState(false);
+  const [panning, setPanning] = useState(false);
+  const [hovered, setHovered] = useState<string | null>(null);
   const layout = useMemo(() => layoutTrajectoryEvidence(graph), [graph]);
   const nodes = useMemo(
     () => stabilizeNodes(cache.current, buildNodes(graph, layout, { selectedId: sel })),
     [graph, layout, sel],
   );
-  const edges = useMemo(() => buildEdges(graph), [graph]);
+  const highlighted = useMemo(() => {
+    if (hovered === null) return NO_HIGHLIGHTED_EDGES;
+    return new Set(
+      graph.edges
+        .filter((edge) => edge.source === hovered || edge.target === hovered)
+        .map((edge) => edge.id),
+    );
+  }, [graph, hovered]);
+  const edges = useMemo(() => buildEdges(graph, { highlighted }), [graph, highlighted]);
   const boxes = useMemo(
     () => new Map(layout.nodes.map((node) => [node.id, node])),
     [layout],
@@ -55,8 +68,12 @@ function TrajectoryEvidenceCanvas({ state }: { state: ProjectState }): JSX.Eleme
       return next;
     }, { replace: false });
   }, [setParams]);
+  const onMove = useCallback((_event: unknown, viewport: Viewport) => {
+    setCompact(viewport.zoom < 0.5);
+  }, []);
   return (
     <ReactFlow
+      className={`research-map-flow${compact ? " is-compact" : ""}${panning ? " is-panning" : ""}`}
       nodes={nodes}
       edges={edges}
       nodeTypes={EVIDENCE_NODE_TYPES}
@@ -68,12 +85,17 @@ function TrajectoryEvidenceCanvas({ state }: { state: ProjectState }): JSX.Eleme
       maxZoom={1.6}
       fitView
       proOptions={PRO_OPTIONS}
+      onMove={onMove}
+      onMoveStart={() => setPanning(true)}
+      onMoveEnd={() => setPanning(false)}
       onNodeClick={(_event, node) => select(node.id)}
       onNodeDoubleClick={(_event, node) => {
         const box = boxes.get(node.id);
         if (!box) return;
         void setCenter(box.x + box.w / 2, box.y + box.h / 2, { zoom: 1, duration: 300 });
       }}
+      onNodeMouseEnter={(_event, node) => setHovered(node.id)}
+      onNodeMouseLeave={() => setHovered(null)}
     >
       <Background gap={24} size={1} />
       <Controls showInteractive={false} />
@@ -83,31 +105,100 @@ function TrajectoryEvidenceCanvas({ state }: { state: ProjectState }): JSX.Eleme
 }
 
 function TrajectoryEvidence({ state }: { state: ProjectState }): JSX.Element {
-  const activeClaims = state.claimOrder.filter((id) => state.claims[id]?.status === "UNVERIFIED").length;
+  const [params, setParams] = useSearchParams();
+  const allTrajectories = params.get("scope") === "all";
+  const showMilestones = params.get("milestones") !== "0";
+  const showChecks = params.get("checks") === "1";
+  const graph = useMemo(
+    () =>
+      deriveTrajectoryEvidenceGraph(state, {
+        includeAllTrajectories: allTrajectories,
+        includeMilestones: showMilestones,
+        includeVerifications: showChecks,
+      }),
+    [state, allTrajectories, showMilestones, showChecks],
+  );
+  const activeClaims = state.claimOrder.filter((id) => {
+    const status = state.claims[id]?.status;
+    return status === "UNVERIFIED" || status === "NEEDS_REVISION";
+  }).length;
   const activeFacts = state.factOrder.filter((id) => {
     const status = state.facts[id]?.status;
     return status === "ACTIVE" || status === "SUSPICIOUS";
   }).length;
   const queued = state.verificationOrder.filter((id) => state.verifications[id]?.status === "queued").length;
+  const visibleTrajectories = graph.nodes.filter((node) => node.type === "task").length;
+  const setOption = useCallback(
+    (key: "scope" | "milestones" | "checks", value: string | null) => {
+      setParams(
+        (previous) => {
+          const next = new URLSearchParams(previous);
+          if (value === null) next.delete(key);
+          else next.set(key, value);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setParams],
+  );
+  const projectionKey = `${allTrajectories ? "all" : "focused"}:${showMilestones ? "steps" : "no-steps"}:${showChecks ? "checks" : "summary"}`;
   return (
     <div className="evidence-view">
       <div className="evidence-toolbar trajectory-evidence-toolbar">
-        <div className="evidence-status-banner">
+        <div className="research-map-summary">
           <div className="row wrap">
-            <strong>Current mathematical evidence</strong>
+            <strong>Research map</strong>
+            <span className="chip">{visibleTrajectories} visible trajector{visibleTrajectories === 1 ? "y" : "ies"}</span>
             <span className="chip ok">{activeFacts} fact{activeFacts === 1 ? "" : "s"}</span>
-            <span className="chip">{activeClaims} claim{activeClaims === 1 ? "" : "s"} being checked</span>
+            <span className="chip">{activeClaims} open claim{activeClaims === 1 ? "" : "s"}</span>
             {queued > 0 ? <span className="chip warn">{queued} checks waiting</span> : null}
           </div>
           <p>
-            The graph follows each active claim through its independent checks to an established
-            fact. Failed and duplicate claims remain inspectable in the Library without crowding
-            this working view.
+            Read left to right: independent trajectories → mathematical turning points → claims →
+            independent checks → established facts. Failed and duplicate claims remain in the
+            Library without crowding this working view.
           </p>
+        </div>
+        <div className="research-map-controls" aria-label="Research map display">
+          <div className="segmented" role="group" aria-label="Trajectory scope">
+            <button
+              type="button"
+              className={`segment${allTrajectories ? "" : " on"}`}
+              aria-pressed={!allTrajectories}
+              onClick={() => setOption("scope", null)}
+            >
+              Current paths
+            </button>
+            <button
+              type="button"
+              className={`segment${allTrajectories ? " on" : ""}`}
+              aria-pressed={allTrajectories}
+              onClick={() => setOption("scope", "all")}
+            >
+              All trajectories
+            </button>
+          </div>
+          <label className="map-check-option">
+            <input
+              type="checkbox"
+              checked={showMilestones}
+              onChange={(event) => setOption("milestones", event.target.checked ? null : "0")}
+            />
+            Turning points
+          </label>
+          <label className="map-check-option">
+            <input
+              type="checkbox"
+              checked={showChecks}
+              onChange={(event) => setOption("checks", event.target.checked ? "1" : null)}
+            />
+            Individual checks
+          </label>
         </div>
       </div>
       <div className="canvas evidence-canvas">
-        <ReactFlowProvider><TrajectoryEvidenceCanvas state={state} /></ReactFlowProvider>
+        <ReactFlowProvider key={projectionKey}><TrajectoryEvidenceCanvas graph={graph} /></ReactFlowProvider>
       </div>
     </div>
   );
@@ -320,7 +411,7 @@ export default function EvidenceView(): JSX.Element {
           </div>
           <p>{lifecycle.detail}</p>
           <p className="small muted">
-            VERIFIED and REFUTED labels below apply only to the exact individual statement. A
+            VERIFIED, NEEDS REVISION, FAILED, and REFUTED labels below apply only to the exact individual statement. A
             VERIFIED supporting claim does not mean this candidate passed review.
           </p>
         </div>

@@ -1,5 +1,5 @@
 import type { WorkerRole } from "@inventio/schema";
-import { TEX_LAYOUT_GUIDANCE } from "./shared.js";
+import { withMathematicalWritingGuidance } from "./shared.js";
 
 /**
  * Complete worker prompt surface. ProjectEngine asks engine/packets.ts to
@@ -180,8 +180,6 @@ export function renderAgentsMd(spec: PacketRenderSpec, manifest: string[]): stri
   out.push(
     "Write mathematics in LaTeX delimited by $ … $ inline and $$ … $$ for display.",
     "Do not use \\( … \\) or \\[ … \\]; those do not render for the reader.",
-    TEX_LAYOUT_GUIDANCE,
-    "",
     "Write the mathematical body as a note to a colleague. Do not discuss how the work",
     "was assigned or managed, token use, output schemas, or internal filenames there.",
     "Mention an internal ID only when it is needed as a source citation or to",
@@ -213,7 +211,7 @@ export function renderAgentsMd(spec: PacketRenderSpec, manifest: string[]): stri
     "Reserve roughly the final 15% of your allocation for the write-up and summary.",
     "",
   );
-  return out.join("\n");
+  return withMathematicalWritingGuidance(out.join("\n"));
 }
 
 /**

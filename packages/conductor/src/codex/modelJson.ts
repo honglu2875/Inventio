@@ -54,6 +54,16 @@ export function protectModelJsonTex(text: string): string {
     // JSON escape and the first letter of a TeX control word.
     if (next === "b" || next === "f" || next === "n" || next === "r" || next === "t") {
       const { word, end } = controlWordAt(text, i + 1);
+      // A JSON newline immediately followed by ordinary `e` or `u` is byte-
+      // identical to a single-slash TeX `\ne` or `\nu`, anywhere in a string.
+      // Standard JSON semantics win in this irreducibly ambiguous case. An
+      // intended TeX command must carry the required doubled JSON slash; that
+      // representation remains byte-stable below.
+      if (next === "n" && (word === "ne" || word === "nu")) {
+        out += ch + next;
+        i += 2;
+        continue;
+      }
       if (isSilentJsonTexCommand(word)) {
         out += `\\\\${word}`;
         i = end;

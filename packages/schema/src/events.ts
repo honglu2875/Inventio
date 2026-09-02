@@ -30,7 +30,20 @@ export type Result = z.infer<typeof Result>;
 export const PublicationKind = z.enum(["preprint", "research_report"]);
 export type PublicationKind = z.infer<typeof PublicationKind>;
 
-export const ClaimStatus = z.enum(["UNVERIFIED", "VERIFIED", "REFUTED", "SUPERSEDED"]);
+/**
+ * NEEDS_REVISION means missing material or damaged notation prevented a full
+ * check. FAILED means this particular statement-and-proof submission had a
+ * mathematical error or proof gap; it does not assert that the statement is false.
+ * REFUTED is reserved for a concrete mathematical disproof.
+ */
+export const ClaimStatus = z.enum([
+  "UNVERIFIED",
+  "NEEDS_REVISION",
+  "VERIFIED",
+  "FAILED",
+  "REFUTED",
+  "SUPERSEDED",
+]);
 export type ClaimStatus = z.infer<typeof ClaimStatus>;
 
 export const ClaimRelation = z.enum(["PROVES", "DISPROVES", "PARTIAL", "RELATED"]);
@@ -38,6 +51,16 @@ export type ClaimRelation = z.infer<typeof ClaimRelation>;
 
 export const VerificationVerdict = z.enum(["PASS", "FAIL", "ERROR"]);
 export type VerificationVerdict = z.infer<typeof VerificationVerdict>;
+
+/** Why an independent check failed; NONE is required for PASS. */
+export const VerificationFinding = z.enum([
+  "NONE",
+  "INCORRECT",
+  "PROOF_GAP",
+  "MISSING_DEPENDENCY",
+  "PRESENTATION",
+]);
+export type VerificationFinding = z.infer<typeof VerificationFinding>;
 
 export const IssueSeverity = z.enum(["CRITICAL", "MAJOR", "MINOR"]);
 export type IssueSeverity = z.infer<typeof IssueSeverity>;
@@ -287,13 +310,33 @@ export const EventSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("wave.planned"), waveId: z.string(), title: z.string(), decisionId: z.string(), roster: z.array(RosterEntry), reserveTokens: z.number().int().min(0), rationale: z.string() }),
   z.object({ ...base, type: z.literal("wave.softInterrupted"), waveId: z.string(), by: Actor }),
   z.object({ ...base, type: z.literal("wave.closed"), waveId: z.string(), docketMarkdown: z.string() }),
+  z.object({ ...base, type: z.literal("wave.claimsCompared"), waveId: z.string() }),
   z.object({ ...base, type: z.literal("task.dispatched"), taskId: z.string(), waveId: z.string(), role: WorkerRole, methodTag: z.string(), direction: z.string(), packetManifest: z.array(z.string()), budgetTokens: z.number().int().positive() }),
   z.object({ ...base, type: z.literal("task.session"), taskId: z.string(), threadId: z.string() }),
   z.object({ ...base, type: z.literal("task.progress"), taskId: z.string(), estimatedTokens: z.number().min(0), lastItem: z.object({ type: z.string(), preview: z.string() }).nullable() }),
-  z.object({ ...base, type: z.literal("task.completed"), taskId: z.string(), usage: Usage }),
+  z.object({
+    ...base,
+    type: z.literal("task.completed"),
+    taskId: z.string(),
+    usage: Usage,
+    /** Recovery may clear an obsolete validator error; ordinary repair history remains visible. */
+    clearInvalidOutput: z.boolean().optional(),
+  }),
   z.object({ ...base, type: z.literal("task.outputInvalid"), taskId: z.string(), errors: z.array(z.string()) }),
   z.object({ ...base, type: z.literal("task.interrupted"), taskId: z.string(), reason: z.string(), usage: Usage.nullable() }),
-  z.object({ ...base, type: z.literal("task.failed"), taskId: z.string(), error: z.string() }),
+  // `usage` is optional so logs written before failed-call metering still replay.
+  z.object({ ...base, type: z.literal("task.failed"), taskId: z.string(), error: z.string(), usage: Usage.nullable().optional() }),
+  /**
+   * Cumulative task charge, used when Codex ended before reporting exact
+   * usage. Repeating the same total is intentionally idempotent in the reducer.
+   */
+  z.object({
+    ...base,
+    type: z.literal("task.accounted"),
+    taskId: z.string(),
+    chargedTokens: z.number().int().min(0),
+    basis: z.enum(["reported", "estimated", "mixed"]),
+  }),
   z.object({ ...base, type: z.literal("task.extended"), taskId: z.string(), addTokens: z.number().int().positive(), by: Actor }),
   z.object({
     ...base,
@@ -348,6 +391,13 @@ export const EventSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("claim.status"), claimId: z.string(), from: ClaimStatus, to: ClaimStatus, justification: z.string(), by: Actor }),
   z.object({
     ...base,
+    type: z.literal("claim.provenanceRepaired"),
+    claimId: z.string(),
+    from: z.string(),
+    to: z.string(),
+  }),
+  z.object({
+    ...base,
     type: z.literal("claim.equivalent"),
     leftClaimId: z.string(),
     rightClaimId: z.string(),
@@ -371,6 +421,8 @@ export const EventSchema = z.discriminatedUnion("type", [
     type: z.literal("verification.completed"),
     verificationId: z.string(),
     verdict: VerificationVerdict,
+    /** Optional so projects written before failure categories still replay. */
+    finding: VerificationFinding.nullable().optional(),
     summaryMarkdown: z.string(),
     artifactPath: z.string().nullable(),
     usage: Usage.nullable(),

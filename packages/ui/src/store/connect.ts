@@ -20,13 +20,52 @@ export function connectProject(slug: string): () => void {
   let retry: number | undefined;
   let frame = 0;
   let queue: Event[] = [];
+  let snapshotLoading = false;
+
+  const clearScheduledFlush = (): void => {
+    if (frame !== 0) {
+      if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(frame);
+      else clearTimeout(frame);
+    }
+    frame = 0;
+  };
+
+  const closeStream = (): void => {
+    source?.close();
+    source = null;
+  };
+
+  // Assigned below before any stream can deliver an event. Keeping recovery
+  // here lets `flush` and malformed-message handling share the same path.
+  let loadSnapshot: () => void;
+
+  const recoverFromStream = (detail: string): void => {
+    if (disposed) return;
+    closeStream();
+    clearScheduledFlush();
+    queue = [];
+    if (retry !== undefined) {
+      clearTimeout(retry);
+      retry = undefined;
+    }
+    const current = useStore.getState();
+    current.setSlotError(slug, detail);
+    current.setConnection(slug, "reconnecting");
+    loadSnapshot();
+  };
 
   const flush = (): void => {
     frame = 0;
     if (disposed || queue.length === 0) return;
     const batch = queue;
     queue = [];
-    useStore.getState().applyEvents(slug, batch);
+    const applied = useStore.getState().applyEvents(slug, batch);
+    if (!applied) {
+      const detail =
+        useStore.getState().projects[slug]?.lastError ??
+        "the live event stream could not be reduced by this browser";
+      recoverFromStream(detail);
+    }
   };
 
   const schedule = (): void => {
@@ -43,14 +82,14 @@ export function connectProject(slug: string): () => void {
     const es = new EventSource(url);
     source = es;
     es.onopen = (): void => {
-      if (!disposed) useStore.getState().setConnection(slug, "live");
+      if (!disposed && source === es) useStore.getState().setConnection(slug, "live");
     };
     es.onmessage = (message: MessageEvent<string>): void => {
-      if (disposed) return;
+      if (disposed || source !== es) return;
       try {
         queue.push(JSON.parse(message.data) as Event);
       } catch {
-        useStore.getState().setSlotError(slug, "malformed event on the stream");
+        recoverFromStream("malformed event on the stream");
         return;
       }
       schedule();
@@ -58,15 +97,21 @@ export function connectProject(slug: string): () => void {
     es.onerror = (): void => {
       // EventSource reconnects on its own with Last-Event-ID; the server also
       // honors `?since=`. Surface the state, do not tear the socket down.
-      if (!disposed) useStore.getState().setConnection(slug, "reconnecting");
+      if (!disposed && source === es)
+        useStore.getState().setConnection(slug, "reconnecting");
     };
   };
 
-  const loadSnapshot = (): void => {
+  loadSnapshot = (): void => {
+    if (disposed || snapshotLoading) return;
+    snapshotLoading = true;
     void (async () => {
       try {
         const snapshot = await api.snapshot(slug);
         if (disposed) return;
+        closeStream();
+        clearScheduledFlush();
+        queue = [];
         useStore.getState().setSnapshot(slug, snapshot.state);
         openStream(snapshot.seq);
       } catch (err) {
@@ -74,6 +119,8 @@ export function connectProject(slug: string): () => void {
         useStore.getState().setSlotError(slug, errorMessage(err));
         useStore.getState().setConnection(slug, "reconnecting");
         retry = setTimeout(loadSnapshot, SNAPSHOT_RETRY_MS) as unknown as number;
+      } finally {
+        snapshotLoading = false;
       }
     })();
   };
@@ -83,9 +130,8 @@ export function connectProject(slug: string): () => void {
   return (): void => {
     disposed = true;
     if (retry !== undefined) clearTimeout(retry);
-    if (frame !== 0 && typeof cancelAnimationFrame === "function") cancelAnimationFrame(frame);
-    source?.close();
-    source = null;
+    clearScheduledFlush();
+    closeStream();
   };
 }
 

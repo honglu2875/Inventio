@@ -396,6 +396,70 @@ function convertChunk(chunk: string): string {
   return out;
 }
 
+/**
+ * `remark-math` requires a multiline display's `$$` markers to occupy their
+ * own lines. Models also commonly emit the perfectly intelligible form
+ *
+ *     $$first line
+ *     last line.$$
+ *
+ * Canonicalize only that unambiguous, line-start form. Compact `$$x$$`,
+ * unmatched markers, inline prose, and fenced code remain byte-for-byte
+ * unchanged. The caller already separates fenced regions.
+ */
+function canonicalizeDollarDisplayBlocks(chunk: string): string {
+  if (!chunk.includes("$$")) return chunk;
+  const lines = chunk.split("\n");
+  const out: string[] = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    const opener = /^( {0,3})\$\$(?!\$)(.*)$/.exec(line);
+    if (!opener) {
+      out.push(line);
+      continue;
+    }
+
+    const openerTail = opener[2]!;
+    // A second marker on the opener line is already a compact display.
+    if (openerTail.includes("$$")) {
+      out.push(line);
+      continue;
+    }
+
+    let closeIndex = -1;
+    let closeHead = "";
+    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+      const candidateLine = lines[cursor]!;
+      const trimmedCandidate = candidateLine.trim();
+      // A later compact display is a separate expression, not the closer for
+      // an earlier malformed opener. Only a bare `$$` line may begin with the
+      // marker while closing this multiline block.
+      if (trimmedCandidate.startsWith("$$") && trimmedCandidate !== "$$") continue;
+      const candidate = /^(.*?)(?<!\\)\$\$[ \t]*$/.exec(candidateLine);
+      if (!candidate) continue;
+      closeIndex = cursor;
+      closeHead = candidate[1]!;
+      break;
+    }
+    if (closeIndex === -1) {
+      out.push(line);
+      continue;
+    }
+
+    out.push(`${opener[1]}$$`);
+    if (openerTail !== "") out.push(openerTail);
+    for (let cursor = index + 1; cursor < closeIndex; cursor += 1) {
+      out.push(lines[cursor]!);
+    }
+    if (closeHead !== "") out.push(closeHead);
+    out.push(`${opener[1]}$$`);
+    index = closeIndex;
+  }
+
+  return out.join("\n");
+}
+
 // ------------------------------------------------------------- fenced regions
 
 interface Fence {
@@ -432,7 +496,10 @@ export function normalizeTex(src: string): string {
     repaired.includes("\\right");
   if (
     repaired === "" ||
-    (!repaired.includes("\\(") && !repaired.includes("\\[") && !mayNeedAlignmentRepair)
+    (!repaired.includes("\\(") &&
+      !repaired.includes("\\[") &&
+      !repaired.includes("$$") &&
+      !mayNeedAlignmentRepair)
   ) {
     return repaired;
   }
@@ -444,7 +511,7 @@ export function normalizeTex(src: string): string {
 
   const flush = (): void => {
     if (pending.length === 0) return;
-    out.push(convertChunk(pending.join("\n")));
+    out.push(convertChunk(canonicalizeDollarDisplayBlocks(pending.join("\n"))));
     pending = [];
   };
 

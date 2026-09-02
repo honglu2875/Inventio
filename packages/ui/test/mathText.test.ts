@@ -55,6 +55,35 @@ describe("normalizeTex — display math", () => {
     expect(idempotent(src)).toBe("before\n$$\n  X = V(f_1,\\ldots,f_r)\n$$\nafter");
   });
 
+  it("puts attached multiline dollar delimiters on their own lines", () => {
+    const src = String.raw`Before.
+
+$$\left\langle \tau_0(H^2),\tau_1(\beta)\right\rangle_{2,d}
+=-24\,d^2.$$
+
+After.`;
+    const normalized = idempotent(src);
+    expect(normalized).toBe(String.raw`Before.
+
+$$
+\left\langle \tau_0(H^2),\tau_1(\beta)\right\rangle_{2,d}
+=-24\,d^2.
+$$
+
+After.`);
+    expect(normalized).toContain("\n$$\n\nAfter.");
+  });
+
+  it("leaves compact and unmatched dollar displays unchanged", () => {
+    expect(idempotent(String.raw`$$x+y$$`)).toBe(String.raw`$$x+y$$`);
+    expect(idempotent("$$x+y\nwithout a closer")).toBe("$$x+y\nwithout a closer");
+  });
+
+  it("does not use a later compact display to close a malformed opener", () => {
+    const src = "$$unfinished display\n\n$$x+y$$\n\nafter";
+    expect(idempotent(src)).toBe(src);
+  });
+
   it("keeps \\\\ line breaks inside display math", () => {
     expect(idempotent("\\[ a \\\\ b \\]")).toBe("$$ a \\\\ b $$");
   });

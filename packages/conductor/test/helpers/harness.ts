@@ -10,6 +10,7 @@ import {
   type ActionEnvelope,
   type ContinuationRevisionOutput,
   type CurationOutput,
+  type ClaimComparisonOutput,
   type Event,
   type FinalOutput,
   type IntakeOutput,
@@ -62,6 +63,7 @@ export const PUBLICATION_MATCH = "Reassess the concluded mathematics";
 export const WORKER_MATCH = "Work on the question in research-question.md";
 export const TRAJECTORY_WORKER_MATCH = "Work on the original problem in problem.md";
 export const VERIFICATION_MATCH = "Independently check claim.md";
+export const CLAIM_COMPARISON_MATCH = "Compare only the mathematical statements";
 export const SUMMARY_REVIEW_MATCH = "Consider whether the completed round materially changes";
 export const TRAJECTORY_FINAL_MATCH = "Compose the self-contained final mathematical report";
 
@@ -337,9 +339,11 @@ export function trajectoryOutput(
 export function verificationOutput(
   verdict: VerificationOutput["verdict"],
   summaryMarkdown = "The supplied statement and proof are correct.",
+  finding: VerificationOutput["finding"] = verdict === "PASS" ? "NONE" : "PROOF_GAP",
 ): VerificationOutput {
   return {
     verdict,
+    finding,
     summaryMarkdown,
     reportMarkdown: `# Independent verification\n\nVERDICT: ${verdict}\n\n${summaryMarkdown}`,
   };
@@ -353,9 +357,14 @@ export function summaryRevisionOutput(
     abstract: "The objective is to show that the widget is round.",
     markdown: "# Current mathematical view\n\nThe stated objective is to prove that the widget is round.",
     reason: "The round does not yet require an editorial change.",
-    equivalentClaimGroups: [],
     ...over,
   };
+}
+
+export function claimComparisonOutput(
+  equivalentClaimGroups: string[][] = [],
+): ClaimComparisonOutput {
+  return { equivalentClaimGroups };
 }
 
 function substantialTestArtifact(markdown: string): string {
@@ -592,23 +601,13 @@ export class Harness {
 
   /** Replay the on-disk event log into a fresh state (DESIGN §5 fold). */
   diskState(): ProjectState {
-    const log = EventLog.open(this.paths.eventsFile);
-    try {
-      const s = initialState();
-      for (const e of log.events) applyEvent(s, e);
-      return s;
-    } finally {
-      log.close();
-    }
+    const s = initialState();
+    for (const event of EventLog.read(this.paths.eventsFile)) applyEvent(s, event);
+    return s;
   }
 
   diskEvents(): Event[] {
-    const log = EventLog.open(this.paths.eventsFile);
-    try {
-      return [...log.events];
-    } finally {
-      log.close();
-    }
+    return EventLog.read(this.paths.eventsFile);
   }
 
   simLog(): SimLogRow[] {

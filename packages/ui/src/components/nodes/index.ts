@@ -43,6 +43,8 @@ export const EVIDENCE_NODE_TYPES: NodeTypes = {
   problemNode: ProblemNode,
   factNode: FactNode,
   verificationNode: VerificationNode,
+  taskNode: TaskNode,
+  milestoneNode: MilestoneNode,
 };
 
 /** Graph node `type` (schema) → React Flow node type name. */

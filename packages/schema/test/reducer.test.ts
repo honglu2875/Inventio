@@ -215,6 +215,56 @@ describe("reducer", () => {
     expect(state.counters.publication).toBe(1);
   });
 
+  it("accounts terminal work cumulatively without charging reported usage twice", () => {
+    const state = initialState();
+    applyEvent(state, {
+      type: "project.created",
+      slug: "accounting",
+      title: "Accounting",
+      statement: "Prove P.",
+      config: defaultConfig(),
+      seq: 1,
+      ts: "created",
+    });
+    applyEvent(state, {
+      type: "wave.planned",
+      waveId: "W001",
+      title: "Round",
+      decisionId: "DEC001",
+      roster: [{
+        taskId: "T001",
+        role: "solver",
+        methodTag: "direct",
+        direction: "Try a direct proof",
+        briefMarkdown: "Try a direct proof.",
+        tokenBudget: 10_000,
+        computation: false,
+        webSearch: false,
+        reviewOf: null,
+        grants: { artifactIds: [], cardIds: [], sourceMounts: [] },
+      }],
+      reserveTokens: 0,
+      rationale: "test",
+      seq: 2,
+      ts: "planned",
+    });
+    const usage = {
+      input_tokens: 1_000,
+      cached_input_tokens: 200,
+      output_tokens: 300,
+      reasoning_output_tokens: 100,
+    };
+    applyEvent(state, { type: "task.failed", taskId: "T001", error: "late failure", usage, seq: 3, ts: "failed" });
+    expect(state.tasks.T001?.chargedTokens).toBe(1_100);
+    expect(state.budget.spentTokens).toBe(1_100);
+
+    applyEvent(state, { type: "task.accounted", taskId: "T001", chargedTokens: 1_100, basis: "reported", seq: 4, ts: "same" });
+    expect(state.budget.spentTokens).toBe(1_100);
+    applyEvent(state, { type: "task.accounted", taskId: "T001", chargedTokens: 1_450, basis: "mixed", seq: 5, ts: "estimated-tail" });
+    expect(state.tasks.T001?.chargedTokens).toBe(1_450);
+    expect(state.budget.spentTokens).toBe(1_450);
+  });
+
   it("preserves the original intake context and the owner's edited digest and raw memories", () => {
     const state = replay(initialState(), buildCanonicalEvents());
     expect(state.statement).toBe("Prove that P, keeping every hypothesis explicit.");
@@ -398,6 +448,67 @@ describe("reducer", () => {
     const state = initialState();
     applyEvent(state, event);
     expect(state.claims.K001?.sourceTaskId).toBe("T042");
+  });
+
+  it("advances role-specific write-up counters and transfers collided ownership", () => {
+    const state = initialState();
+    applyEvent(state, {
+      seq: 1,
+      ts: "created",
+      type: "project.created",
+      slug: "writeup-ids",
+      title: "Write-up IDs",
+      statement: "Prove P.",
+      config: defaultConfig(),
+    });
+    applyEvent(state, {
+      seq: 2,
+      ts: "planned",
+      type: "wave.planned",
+      waveId: "W001",
+      title: "Two solvers",
+      decisionId: "DEC001",
+      reserveTokens: 0,
+      rationale: "regression fixture",
+      roster: ["T001", "T002"].map((taskId) => ({
+        taskId,
+        role: "solver" as const,
+        methodTag: taskId,
+        direction: "Independent proof",
+        briefMarkdown: "Prove P.",
+        tokenBudget: 100_000,
+        computation: false,
+        webSearch: false,
+        reviewOf: null,
+        grants: { artifactIds: [], cardIds: [], sourceMounts: [] },
+      })),
+    });
+    applyEvent(state, {
+      seq: 3,
+      ts: "first",
+      type: "artifact.recorded",
+      artifactId: "A001",
+      kind: "writeup",
+      taskId: "T001",
+      path: "writeups/A001.md",
+      conclusion: "UNCERTAIN",
+    });
+    expect(state.counters.attempt).toBe(1);
+    expect(state.tasks.T001?.artifactIds).toEqual(["A001"]);
+
+    applyEvent(state, {
+      seq: 4,
+      ts: "collision",
+      type: "artifact.recorded",
+      artifactId: "A001",
+      kind: "writeup",
+      taskId: "T002",
+      path: "writeups/A001.md",
+      conclusion: "UNCERTAIN",
+    });
+    expect(state.tasks.T001?.artifactIds).toEqual([]);
+    expect(state.tasks.T002?.artifactIds).toEqual(["A001"]);
+    expect(state.artifacts.A001?.taskId).toBe("T002");
   });
 });
 

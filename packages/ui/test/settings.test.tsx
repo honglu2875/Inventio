@@ -1,8 +1,14 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { WebSearchPermissionControl } from "../src/views/SettingsView";
+import { parseIntegerDraft, WebSearchPermissionControl } from "../src/views/SettingsView";
 
 describe("project settings", () => {
+  it("allows a number field to be temporarily empty while replacing its value", () => {
+    expect(parseIntegerDraft("")).toBeNull();
+    expect(parseIntegerDraft("4")).toBe(4);
+    expect(parseIntegerDraft("4.5")).toBeNull();
+  });
+
   it("visibly selects the saved Not allowed Web-search state", () => {
     const html = renderToStaticMarkup(
       <WebSearchPermissionControl enabled={false} disabled={false} onChange={() => {}} />,

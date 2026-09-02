@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
-import { candidateLifecycle, type ArtifactMeta, type ProjectState } from "@inventio/schema";
+import {
+  candidateLifecycle,
+  usageSpend,
+  type ArtifactMeta,
+  type ProjectState,
+} from "@inventio/schema";
 import Markdown from "../Markdown";
 import { api, errorMessage, loadArtifact, type ArtifactBody } from "../../lib/api";
 import { formatExact } from "../../lib/format";
@@ -223,6 +228,9 @@ function ClaimBody({ slug, nodeId }: { slug: string; nodeId: string }): JSX.Elem
           <div className="detail-row" key={check!.id}>
             <span className="mono">{check!.id}</span>
             <span className="chip">{verificationDisplayStatus(check!)}</span>
+            {check!.finding && check!.finding !== "NONE" ? (
+              <span className="chip">{check!.finding.replaceAll("_", " ")}</span>
+            ) : null}
             <span className="small muted">{check!.summaryMarkdown}</span>
           </div>
         ))}
@@ -282,14 +290,14 @@ function ClaimBody({ slug, nodeId }: { slug: string; nodeId: string }): JSX.Elem
             title={guard.title ?? "a justification note is required"}
             onClick={() => {
               void run(
-                () => api.setClaimStatus(slug, nodeId, "REFUTED", note.trim()),
-                `${nodeId} marked REFUTED`,
+                () => api.setClaimStatus(slug, nodeId, "FAILED", note.trim()),
+                `${nodeId} marked FAILED`,
               ).then((ok) => {
                 if (ok) setNote("");
               });
             }}
           >
-            Mark REFUTED
+            Mark proof failed
           </button>
           <button
             type="button"
@@ -443,6 +451,61 @@ function ObligationBody({ slug, nodeId }: { slug: string; nodeId: string }): JSX
   );
 }
 
+function TaskWithoutArtifact({
+  slug,
+  taskId,
+  status,
+  error: taskError,
+}: {
+  slug: string;
+  taskId: string;
+  status: ProjectState["tasks"][string]["status"];
+  error: string | null;
+}): JSX.Element {
+  const [partial, setPartial] = useState<string | null | undefined>(undefined);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    setPartial(undefined);
+    setLoadError(null);
+    void api.task(slug, taskId)
+      .then((detail) => {
+        if (live) setPartial(detail.partialWorkMarkdown);
+      })
+      .catch((error: unknown) => {
+        if (live) setLoadError(errorMessage(error));
+      });
+    return () => {
+      live = false;
+    };
+  }, [slug, taskId]);
+
+  if (status === "running" || status === "queued") {
+    return <p className="muted">No artifact yet — the researcher is still working.</p>;
+  }
+  if (loadError) return <div className="banner danger">{loadError}</div>;
+  if (partial === undefined) return <div className="skeleton-bar w90" />;
+  if (partial === null || partial.trim() === "") {
+    return (
+      <div className="detail">
+        {taskError ? <div className="banner danger">{taskError}</div> : null}
+        <p className="muted">No complete research write-up was recorded for this session.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="detail">
+      <div className="banner warn">
+        Partial notes only. The session ended before producing a structured return, and these notes
+        have not been independently checked.
+      </div>
+      {taskError ? <div className="small muted">{taskError}</div> : null}
+      <Markdown>{partial}</Markdown>
+    </div>
+  );
+}
+
 export default function ArtifactTab({
   slug,
   nodeId,
@@ -491,12 +554,15 @@ export default function ArtifactTab({
   const ids = artifactIdsFor(state, kind, nodeId);
   if (ids.length === 0) {
     const task = kind === "task" ? state.tasks[nodeId] : undefined;
-    return (
-      <p className="muted">
-        {task && (task.status === "running" || task.status === "queued")
-          ? "No artifact yet — the worker is still running."
-          : "No artifact recorded for this node."}
-      </p>
+    return task ? (
+      <TaskWithoutArtifact
+        slug={slug}
+        taskId={nodeId}
+        status={task.status}
+        error={task.error}
+      />
+    ) : (
+      <p className="muted">No artifact recorded for this node.</p>
     );
   }
 
@@ -543,8 +609,12 @@ export default function ArtifactTab({
       ) : null}
       {kind === "task" && state.tasks[nodeId] ? (
         <div className="detail-row muted small">
-          budget {formatExact(state.tasks[nodeId]?.budgetTokens ?? 0)} tokens ·{" "}
-          {state.tasks[nodeId]?.status}
+          soft token target {formatExact(state.tasks[nodeId]?.budgetTokens ?? 0)} ·{" "}
+          actual {formatExact(
+            state.tasks[nodeId]?.usage
+              ? usageSpend(state.tasks[nodeId]!.usage!)
+              : state.tasks[nodeId]?.estimatedTokens ?? 0,
+          )} · {state.tasks[nodeId]?.status}
         </div>
       ) : null}
       {meta ? (

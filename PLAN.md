@@ -14,8 +14,8 @@ Rules for whoever (human or agent) picks this up:
 - Record every deliberate divergence from DESIGN.md in the deviation log
   at the bottom, with a reason.
 
-**Status: M0–M26 preserve the released `council-v1` implementation. M27 implements the new `trajectories-v2` workflow on the `long-trajectories` branch and makes it the default for new projects, while old projects remain replay-compatible. Long independent Solver and Explorer sessions now drive each round directly; proposed results become self-contained claims, independent Verifiers apply the configured V/W threshold, accepted claims become facts, later concrete challenges can reopen facts, sparse milestones expose progress, and a strong end-of-round reader may make only a small revision to the common mathematical view. The first live N=2/M=2 smoke test exposed and fixed duplicate trajectory IDs and noninteractive MCP approval; the real-account MCP regression probe now reaches the authenticated server and retrieves a hidden marker. The complete suite passes: 327 tests (schema 34, conductor 166, UI 106, codex-sim 21), all TypeScript packages typecheck, and the production UI builds.**
-Last updated: 2026-08-28 by Codex (long-trajectory refactor).
+**Status: M0–M26 preserve the released `council-v1` implementation. M27 implements the default `trajectories-v2` workflow, M28 makes claim checking and round summaries stable, M29 hardens live-run integrity, M30 gives every mathematical author one rigorous ASD-STE100 English contract, and M31 exposes the per-trajectory token limit as a durable project setting. Existing projects and event logs remain replay-compatible. The complete suite passes: 365 tests (schema 47, conductor 183, UI 114, codex-sim 21), all TypeScript packages typecheck, and the production UI builds.**
+Last updated: 2026-09-01 by Codex.
 
 Quota note: work has been interrupted twice by Opus subagent quota limits. The
 tracker is the recovery point — check the milestone boxes, then
@@ -23,6 +23,114 @@ tracker is the recovery point — check the milestone boxes, then
 where things stand before writing code.
 
 ---
+
+## M31 — Per-project trajectory token limit ✅
+
+- [x] Expose the existing `budget.defaultTaskTokens` value as one project
+      setting instead of creating a second execution limit.
+- [x] Apply the saved value to future Solver and Explorer trajectories. Keep
+      the budget recorded on already-running trajectories unchanged.
+- [x] Validate the setting in the shared schema, HTTP boundary, engine, and UI.
+      Keep older settings events valid when the field is absent.
+- [x] Show the effective limit in Settings and explain that the remaining
+      project allowance can reduce an individual trajectory's allocation.
+- [x] Verify durable event replay and the effective scheduler configuration.
+
+Verify: `npm test`, `npm run typecheck`, `npm run build`, `git diff --check`.
+
+---
+
+## M30 — ASD-STE100 mathematical English ✅
+
+- [x] Make the full ASD-STE100 Simplified Technical English, Issue 9, standard
+      govern model-authored research prose. Permit established mathematical
+      nouns and verbs as technical terms.
+- [x] Give short direct sentences, stable terminology, clear referents, simple
+      verb forms, gradual exposition, American English spelling, and one topic
+      per paragraph as useful examples. State that these examples do not
+      replace or limit the full standard.
+- [x] Make mathematical rigor and self-containedness the explicit priority.
+      The language rules cannot change hypotheses, quantifiers, dependencies,
+      logical scope, formulas, citations, proper names, code, or schema keys.
+- [x] Append the contract to every generated project `AGENTS.md`: v2 intake,
+      Solver, Explorer, Verifier, comparison, summary, and final calls; every
+      legacy Manager and worker call; and post-terminal publication drafting.
+- [x] Let a v2 summary reader make one meaning-preserving style correction to
+      a view that predates the shared contract. Prevent repeated style churn.
+- [x] Mark Research Manager examples as judgment examples rather than syntax
+      templates. Document the standard, its mathematical adaptation, and the
+      complete call coverage in the central prompt guide.
+- [x] Add a source-level regression that fails if a future generated
+      `AGENTS.md` bypasses the shared writing wrapper.
+
+Verify: `npm test`, `npm run typecheck`, `npm run build`, `git diff --check`.
+
+## M29 — Live-run integrity and recovery ✅
+
+- [x] Parse model JSON without allowing legal JSON escapes such as `\f` and
+      `\t` to silently consume the leading slash of TeX commands. Repair known
+      historical control-character damage on read and reject unexplained
+      controls instead of persisting them. Preserve a structural JSON newline
+      before ordinary `e` or `u` anywhere in model text, while retaining a
+      properly escaped `\ne` or `\nu` command byte-for-byte.
+- [x] Validate TeX delimiters by backslash parity, so an aligned-row break such
+      as `\\(k,p,q)` is not mistaken for a mathematical `\(` opener. Recover
+      older full trajectory returns rejected solely by that validator defect,
+      then materialize their write-ups and claims exactly once.
+- [x] Account every Solver and Explorer call, including timeouts, budget stops,
+      retries without a usage report, and recovered historical tasks. Keep the
+      charge cumulative and idempotent across replay and resumed calls.
+- [x] Treat an application stop or hot reload as an operational pause rather
+      than a failed research trajectory. Preserve partial work and spend, leave
+      the task running, and resume the same Codex thread after restart.
+- [x] Fence every project event log to one live Inventio process, detect an
+      outside writer before appending, reclaim crashed-process locks, and
+      release all acquired locks when server startup fails. Recover the one
+      observed agreeing-terminal fork into a contiguous log while retaining
+      the original conflicted bytes; never guess between divergent results.
+- [x] Carry partial work into round summaries and the task inspector with an
+      explicit unchecked warning. Extract readable mathematical prose from a
+      partial structured draft instead of displaying raw JSON.
+- [x] Normalize model-authored multiline `$$` blocks before Markdown parsing,
+      including attached closing markers in stopping reports, without changing
+      compact displays, code, or unmatched input. Exercise the real
+      ReactMarkdown/KaTeX rendering path in regression tests.
+- [x] Reconcile live project evidence after repair: interrupted calls retain
+      nonzero charges, stale round summaries are refreshed, and recovered claims
+      proceed through ordinary independent checks rather than special trust.
+
+Verify: `npm test`, `npm run typecheck`, `npm run build`, `git diff --check`.
+
+## M28 — Claim preparation and stable round summaries ✅
+
+- [x] Check every trajectory claim for transport damage, malformed math
+      delimiters, internal project references, and references to omitted work
+      before persistence. Reuse the existing single structured-output repair
+      turn in the originating trajectory; do not introduce a mathematical
+      editor or a direction-setting prompt.
+- [x] Compare current statements against the existing claim record before
+      proof checking. The narrow comparison call may record exact mathematical
+      identity only; runtime validation rejects unknown IDs, incompatible
+      claim kinds, or different claimed relations to the original problem.
+- [x] Check one proof in an identical-statement group at a time. A failed proof
+      leaves later distinct proofs available, while a successful proof records
+      one fact and retains the others as inspectable duplicates.
+- [x] Add verifier finding categories and the `NEEDS_REVISION` claim state.
+      Missing dependencies and damaged or undefined notation no longer appear
+      as mathematical failures; incorrect steps and substantive proof gaps
+      still do. Existing uncategorized FAIL events retain their earlier meaning.
+- [x] Finish the round's checks before writing its mathematical view, so saved
+      summaries never race a verification result. Checks still run concurrently
+      with one another through the shared process pool.
+- [x] Expose claims needing revision and verifier findings in the library,
+      inspector, graph, compact worker library, and correction warnings.
+- [x] Make live UI event reduction recover from server/browser version skew by
+      replacing stale client state with a fresh snapshot.
+- [x] Add focused regressions for one-turn claim repair, review categories,
+      pre-review equivalence, single-proof scheduling, stable summary order,
+      and client snapshot recovery.
+
+Verify: `npm test`, `npm run typecheck`, `npm run build`, `git diff --check`.
 
 ## M27 — Long independent trajectories ✅
 
@@ -48,10 +156,9 @@ projects and deterministic replay.
       of worthwhile new mathematical statements with self-contained proofs;
       store these as Markdown claims rather than treating assumptions or routine
       examples as results.
-- [x] Run claim verification asynchronously alongside later research. Promote a
-      claim only after W of V independent PASS results; mark an impossible
-      threshold FAILED even when a verifier process itself errors, so unfinished
-      checks cannot accumulate forever.
+- [x] Run independent checks through the shared process pool. Promote a claim
+      only after W of V independent PASS results; operational verifier errors
+      are replaced and never count as mathematical evidence.
 - [x] Record equivalent claims transitively while retaining distinct proofs.
       Once one proof is accepted, remove its equivalents from the active claim
       pool and preserve them as inspectable duplicates.

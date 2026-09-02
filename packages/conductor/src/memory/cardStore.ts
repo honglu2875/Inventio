@@ -382,7 +382,7 @@ export class FileMemoryBackend implements MemoryBackend {
     }
     for (const id of state.claimOrder) {
       const claim = state.claims[id]!;
-      if (claim.status !== "UNVERIFIED") continue;
+      if (claim.status !== "UNVERIFIED" && claim.status !== "NEEDS_REVISION") continue;
       const haystack = `${claim.id}\n${claim.title}\n${claim.statement}`.toLowerCase();
       if (needle && !haystack.includes(needle)) continue;
       rows.push({
@@ -429,7 +429,7 @@ export class FileMemoryBackend implements MemoryBackend {
         continue;
       }
       const claim = state.claims[id];
-      if (!claim || claim.status !== "UNVERIFIED") continue;
+      if (!claim || (claim.status !== "UNVERIFIED" && claim.status !== "NEEDS_REVISION")) continue;
       out.push({
         id,
         kind: "claim",

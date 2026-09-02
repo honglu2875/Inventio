@@ -41,6 +41,7 @@ describe("prompt architecture", () => {
   it("documents every prompt module and removes the legacy locations", () => {
     const guide = readFileSync(path.join(PROMPTS_DIR, "README.md"), "utf8");
     for (const name of [
+      "trajectories.ts",
       "researchManager.ts",
       "workers.ts",
       "shared.ts",
@@ -59,5 +60,22 @@ describe("prompt architecture", () => {
     ]) {
       expect(existsSync(oldPath)).toBe(false);
     }
+  });
+
+  it("appends the shared writing contract to every generated project AGENTS.md", () => {
+    for (const name of ["trajectories.ts", "researchManager.ts"]) {
+      const source = readFileSync(path.join(PROMPTS_DIR, name), "utf8");
+      const assignments = source
+        .split("\n")
+        .filter((line) => line.includes('"AGENTS.md":'));
+
+      expect(assignments.length).toBeGreaterThan(0);
+      for (const assignment of assignments) {
+        expect(assignment).toContain('"AGENTS.md": withMathematicalWritingGuidance(');
+      }
+    }
+
+    const workers = readFileSync(path.join(PROMPTS_DIR, "workers.ts"), "utf8");
+    expect(workers).toContain('return withMathematicalWritingGuidance(out.join("\\n"));');
   });
 });

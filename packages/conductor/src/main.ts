@@ -53,10 +53,18 @@ export async function main(): Promise<void> {
     pool,
     memoryService: memory,
   });
-  manager.openAll();
-
   const app = buildApp(manager, { logger: false });
-  await app.listen({ host, port });
+  try {
+    manager.openAll();
+    await app.listen({ host, port });
+  } catch (error) {
+    // A bind failure or a project owned by another process can happen during
+    // a hot reload. Release every project lease acquired earlier in openAll()
+    // before reporting the startup failure.
+    await manager.shutdown();
+    await memory?.stop();
+    throw error;
+  }
 
   const projects = manager.list();
   console.log(
