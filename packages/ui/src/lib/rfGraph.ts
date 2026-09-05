@@ -94,7 +94,7 @@ function edgeStyle(edge: GraphEdge): {
       };
     }
     case "verifies": {
-      const color = edge.label === "PASS" ? "var(--ok)" : edge.label === "FAIL" ? "var(--danger)" : "var(--muted)";
+      const color = edge.label === "PASS" ? "var(--ok)" : edge.label === "FAIL" ? "var(--danger)" : edge.label === "objection" || edge.label === "UNABLE" ? "var(--warn)" : "var(--muted)";
       return {
         style: { ...EDGE_BASE, stroke: color },
         marker: true,

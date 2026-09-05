@@ -1,3 +1,4 @@
+import { initialResearchState, type ResearchState } from "./research.js";
 import type { VerificationEvidenceSummary } from "./verification-evidence.js";
 import type {
   Ambiguity,
@@ -345,6 +346,7 @@ export interface MathematicalViewState {
 }
 
 export interface ProjectState {
+  research: ResearchState;
   slug: string;
   title: string;
   config: ProjectConfig;
@@ -493,6 +495,7 @@ export function nextContinuationRevisionId(state: ProjectState): string {
 
 export function initialState(): ProjectState {
   return {
+    research: initialResearchState(),
     slug: "",
     title: "",
     // populated by project.created; placeholder keeps the type total

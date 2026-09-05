@@ -1,3 +1,5 @@
+import type { RecallRecord } from "./types.js";
+import { RESEARCH_TOOL_DEFINITIONS } from "../prompts/tools.js";
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import { randomBytes } from "node:crypto";
@@ -381,13 +383,17 @@ export class MemoryService {
     );
 
     server.setRequestHandler(ListToolsRequestSchema, () => ({
-      tools: this.trajectoryAllowed(auth)
+      tools: auth.backend.supportsRecurrentTools?.() ? this.researchTools(auth) : this.trajectoryAllowed(auth)
         ? MODEL_TOOL_DEFINITIONS
         : MODEL_TOOL_DEFINITIONS.filter((tool) => !TRAJECTORY_TOOL_NAMES.has(tool.name)),
     }));
 
     server.setRequestHandler(CallToolRequestSchema, (request) => {
       const { name, arguments: args } = request.params;
+      if (auth.backend.supportsRecurrentTools?.()) {
+        if (!this.researchTools(auth).some(tool => tool.name === name)) return toolError("Tool unavailable to this assignment");
+        if (name.startsWith("research_") || name === "audit_assess") return this.doResearch(auth, name, args);
+      }
       if (name === "knowledge_search") return this.doKnowledgeSearch(auth, args);
       if (name === "knowledge_open") return this.doKnowledgeOpen(auth, args);
       if (name === "writeup_search") return this.doWriteupSearch(auth, args);
@@ -402,6 +408,40 @@ export class MemoryService {
     });
 
     return server;
+  }
+
+  private researchTools(auth: Authorized) {
+    return RESEARCH_TOOL_DEFINITIONS.filter(tool =>
+      (tool.name !== "research_checkpoint" || auth.scope.role === "solver" || auth.scope.role === "explorer") &&
+      (tool.name !== "audit_assess" || auth.scope.role === "auditor"));
+  }
+
+  private doResearch(auth: Authorized, name: string, args: unknown): CallToolResult {
+    if (!isRecord(args)) return toolError("Arguments must be an object");
+    try {
+      let value: unknown;
+      const finite = (key: string, fallback: number): number => {
+        const n = args[key];
+        if (n === undefined) return fallback;
+        if (typeof n !== "number" || !Number.isFinite(n) || !Number.isInteger(n) || n < 0) throw new Error(`${key} must be a nonnegative integer`);
+        return n;
+      };
+      if (name === "research_search") {
+        if (typeof args.query !== "string") throw new Error("query is required");
+        value = auth.backend.searchResearch?.(auth.scope, args.query, finite("limit", 20));
+      } else if (name === "research_open") {
+        if (typeof args.id !== "string") throw new Error("id is required");
+        value = auth.backend.openResearch?.(auth.scope, args.id, finite("start", 0), finite("maxCharacters", 20_000));
+      } else if (name === "research_checkpoint") {
+        if (args.results !== undefined && !Array.isArray(args.results)) throw new Error("results must be an array");
+        value = auth.backend.checkpointResearch?.(auth.scope, (args.results ?? []) as unknown[]);
+      } else {
+        auth.backend.assessResearch?.(auth.scope, args.assessment);
+        value = { recorded: true };
+      }
+      auth.backend.recordRecall({ taskId: auth.scope.taskId, role: auth.scope.role, op: name as RecallRecord["op"], args: JSON.stringify(args), returnedIds: [], refusedIds: [] });
+      return text(JSON.stringify(value ?? null));
+    } catch (error) { return toolError(error instanceof Error ? error.message : String(error)); }
   }
 
   private trajectoryAllowed(auth: Authorized): boolean {
@@ -642,7 +682,9 @@ export class MemoryService {
     if (!isRecord(rawArgs) || typeof rawArgs["query"] !== "string") {
       return toolError("Invalid arguments for source_list: query must be a string");
     }
-    const rows = auth.backend.listIntakeSources(rawArgs["query"]);
+    const blind = auth.backend.supportsRecurrentTools?.() && (auth.scope.role === "auditor" || auth.scope.role === "verifier");
+    const query = rawArgs["query"].toLowerCase();
+    const rows = blind ? auth.backend.listIntakeSources("").filter(row => `${row.id} ${row.title} ${row.kind}`.toLowerCase().includes(query)) : auth.backend.listIntakeSources(rawArgs["query"]);
     auth.backend.recordRecall({
       taskId: auth.scope.taskId,
       role: auth.scope.role,
@@ -652,6 +694,9 @@ export class MemoryService {
       refusedIds: [],
     });
     if (rows.length === 0) return text("No intake sources match.");
+    if (auth.backend.supportsRecurrentTools?.() && (auth.scope.role === "auditor" || auth.scope.role === "verifier")) {
+      return text(rows.map(row => `${row.id} [${row.kind}] ${row.title}`).join("\n"));
+    }
     return text(rows.map((row) =>
       `${row.id} [${row.kind}] ${row.title} — ${row.abstract}` +
       (row.excerptMarkdown.trim() ? `\n${row.excerptMarkdown.trim()}` : "")

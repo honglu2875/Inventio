@@ -9,7 +9,7 @@ import {
 } from "@inventio/schema";
 import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
@@ -92,6 +92,7 @@ const ModelSettingsBody = z.object({
   synthesizer: SettingsModelChoice,
 });
 const ProjectSettingsBody = z.object({
+  researchModels: z.object({ research: SettingsModelChoice, support: SettingsModelChoice }).optional(),
   models: ModelSettingsBody,
   autonomy: z.enum(["auto", "gated"]),
   allowWebSearch: z.boolean(),
@@ -270,6 +271,24 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
   };
 
   // ------------------------------------------------------------- diagnostics
+
+  app.get<{ Params: { slug: string; id: string } }>("/api/projects/:slug/research/turns/:id", async (request, reply) => run(reply, () => {
+    const engine = engineOf(request.params.slug);
+    const turn = engine.state.research.turns[request.params.id];
+    if (!turn || !/^U\d{3,}$/.test(turn.id)) throw new ManagerError("unknown research turn", 404);
+    const file = confine(engine.paths.dir, `research/turns/${turn.id}/codex-events.jsonl`);
+    let tail = "";
+    if (existsSync(file)) {
+      const size = statSync(file).size;
+      const start = Math.max(0, size - 512_000);
+      const buffer = Buffer.alloc(size - start);
+      const fd = openSync(file, "r");
+      try { tail = buffer.subarray(0, readSync(fd, buffer, 0, buffer.length, start)).toString("utf8"); } finally { closeSync(fd); }
+      if (start > 0) tail = tail.slice(tail.indexOf("\n") + 1);
+    }
+    const events = tail.split("\n").filter(Boolean).slice(-200).map(line => { try { return JSON.parse(line); } catch { return { incomplete: true }; } });
+    return { turn, session: engine.state.research.sessions[turn.sessionId], events };
+  }));
 
   app.get("/api/health", async () => ({
     ok: true,
@@ -831,59 +850,6 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
       run(reply, () => {
         activeEngineOf(request.params.slug);
         throw new ManagerError("Council decision gates are retired", 410);
-      }),
-  );
-
-  app.post<{ Params: { slug: string; id: string } }>(
-    "/api/projects/:slug/waves/:id/interrupt",
-    async (request, reply) =>
-      run(reply, () => {
-        const engine = activeEngineOf(request.params.slug);
-        engine.softInterruptWave(checkedId(request.params.id, "wave"));
-        return { ok: true };
-      }),
-  );
-
-  app.post<{ Params: { slug: string; id: string } }>(
-    "/api/projects/:slug/tasks/:id/interrupt",
-    async (request, reply) =>
-      run(reply, () => {
-        const engine = activeEngineOf(request.params.slug);
-        engine.hardInterruptTask(checkedId(request.params.id, "task"));
-        return { ok: true };
-      }),
-  );
-
-  app.post<{ Params: { slug: string; id: string } }>(
-    "/api/projects/:slug/tasks/:id/extend",
-    async (request, reply) =>
-      run(reply, () => {
-        const engine = activeEngineOf(request.params.slug);
-        const body = parseBody(ExtendBody, request.body);
-        engine.extendTask(checkedId(request.params.id, "task"), body.addTokens);
-        return { ok: true };
-      }),
-  );
-
-  app.post<{ Params: { slug: string } }>("/api/projects/:slug/claim-conflicts/resolve", async (request, reply) =>
-    run(reply, () => {
-      const engine = activeEngineOf(request.params.slug);
-      const body = parseBody(z.object({ leftClaimId: z.string(), rightClaimId: z.string(), reason: z.string().min(1).max(4_000) }), request.body);
-      engine.resolveClaimConflict(checkedId(body.leftClaimId, "claim"), checkedId(body.rightClaimId, "claim"), body.reason);
-      return { ok: true };
-    }),
-  );
-
-  // ------------------------------------------------------ ledger intervention
-
-  app.post<{ Params: { slug: string; id: string } }>(
-    "/api/projects/:slug/claims/:id/status",
-    async (request, reply) =>
-      run(reply, () => {
-        const engine = activeEngineOf(request.params.slug);
-        const body = parseBody(ClaimStatusBody, request.body);
-        engine.humanClaimStatus(checkedId(request.params.id, "claim"), body.to, body.note);
-        return { ok: true };
       }),
   );
 

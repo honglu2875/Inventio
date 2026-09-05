@@ -1,6 +1,6 @@
 import type { ProjectState } from "@inventio/schema";
 import { withMathematicalWritingGuidance } from "./shared.js";
-import { latestMathematicalView, trajectoryClaimStatementIndex, trajectoryKnowledgeIndex } from "./trajectories.js";
+import { researchIndex, qualifiedRecord } from "./recurrent.js";
 
 export const PUBLICATION_PROMPT =
   "Reassess the concluded mathematics and prepare the standalone TeX manuscript described in AGENTS.md. " +
@@ -11,11 +11,10 @@ const PUBLICATION_CONTRACT = `# Standalone mathematical manuscript
 You are a mathematician making one final mathematical and expository pass
 after the research has stopped. Read the exact problem, the stopping report,
 the complete claim, fact, and verification record, and any
-full research write-ups needed to check the conclusion. The previous
-PROVED, DISPROVED, or UNCERTAIN label is evidence about where the work stopped,
-not an instruction to preserve that label. Reconstruct the decisive argument
-yourself. You may carry out a bounded final deduction or calculation in this
-pass, but do not delegate and do not conceal a remaining gap.
+full research write-ups needed to explain the conclusion. The fixed outcome
+and exact result qualifications constrain this exposition. You may downgrade
+an unsupported conclusion to UNCERTAIN, but cannot elevate it or supply new
+mathematics to obtain a stronger outcome. Expose missing arguments explicitly.
 
 Choose exactly one kind of document:
 
@@ -72,9 +71,9 @@ export function publicationPacketFiles(state: ProjectState, stoppingReport: stri
     "problem.md": state.problem.confirmedMarkdown ?? state.statement,
     "stopping-report.md": stoppingReport,
     "research-record-index.md": recordIndex,
-    "current-record.md": trajectoryClaimStatementIndex(state),
-    "working-library.md": trajectoryKnowledgeIndex(state),
-    "current-mathematical-view.md": latestMathematicalView(state).markdown,
+    "current-record.md": qualifiedRecord(state),
+    "working-library.md": researchIndex(state),
+    "current-mathematical-view.md": state.research.rounds[state.research.roundOrder.at(-1) ?? ""]?.editorial?.summaryMarkdown ?? "No round summary.",
     "publication-context.md": "The earlier stopping result is evidence about the review state, not an instruction to preserve the conclusion. Check the supplied statements and proofs. A claim needing revision has not been refuted. Facts under an unresolved correction must not be treated as settled.",
     ...(digest ? { "project-summary.md": digest } : {}),
   };

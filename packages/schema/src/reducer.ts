@@ -1,3 +1,4 @@
+import { applyResearchChange } from "./research.js";
 import type { Event } from "./events.js";
 import { usageSpend } from "./events.js";
 import type { ProjectState, TaskState } from "./state.js";
@@ -66,6 +67,10 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
   state.seq = event.seq;
 
   switch (event.type) {
+    case "research.updated":
+      applyResearchChange(state.research, event.change);
+      if (event.change.kind === "turn.completed") state.budget.spentTokens += event.change.chargedTokens;
+      return state;
     // ---- lifecycle -------------------------------------------------------
     case "project.created": {
       state.slug = event.slug;
@@ -213,6 +218,8 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
         atSeq: event.seq,
       });
       state.terminal = null;
+      state.research.final = null;
+      state.research.continuedAfterRound = state.research.roundOrder.length;
       state.budget.totalTokens += event.addTokens;
       state.config.budget.totalTokens += event.addTokens;
       state.config.limits.maxWaves += event.addWaves;
@@ -234,6 +241,7 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
       state.config.allowWebSearch = event.enabled;
       return state;
     case "project.settingsChanged":
+      if (event.settings.researchModels) state.config.researchModels = event.settings.researchModels;
       state.config.models = {
         ...state.config.models,
         ...event.settings.models,
@@ -360,8 +368,8 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
       const d = must(state.decisions[event.decisionId], `decision ${event.decisionId}`);
       d.status = "proposed";
       d.action = event.action;
-      if (event.usage) {
-        const spend = usageSpend(event.usage);
+      if (event.usage || event.chargedTokens !== undefined) {
+        const spend = event.chargedTokens ?? usageSpend(event.usage!);
         d.plannerSpend += spend;
         state.budget.plannerSpentTokens += spend;
       }

@@ -8,7 +8,7 @@ export type WorkerRole = z.infer<typeof WorkerRole>;
  * Workflow is explicit so an old event log is never reinterpreted by a newer
  * engine. Configurations written before this field existed parse as council-v1.
  */
-export const WorkflowVersion = z.enum(["council-v1", "trajectories-v2"]);
+export const WorkflowVersion = z.enum(["council-v1", "trajectories-v2", "recurrent-v3"]);
 export type WorkflowVersion = z.infer<typeof WorkflowVersion>;
 
 export const RoleName = z.enum([
@@ -74,6 +74,7 @@ export type ActiveModelSettings = z.infer<typeof ActiveModelSettings>;
  * event-sourced boundary.
  */
 export const ProjectSettings = z.object({
+  researchModels: z.object({ research: ModelChoice, support: ModelChoice }).optional(),
   models: ActiveModelSettings,
   autonomy: z.enum(["auto", "gated"]),
   allowWebSearch: z.boolean(),
@@ -111,6 +112,7 @@ export const SourceMount = z.object({
 export type SourceMount = z.infer<typeof SourceMount>;
 
 export const ProjectConfig = z.object({
+  researchModels: z.object({ research: ModelChoice, support: ModelChoice }).optional(),
   workflow: WorkflowVersion.default("council-v1"),
   budget: z.object({
     totalTokens: z.number().int().positive(),
@@ -170,6 +172,7 @@ export type ProjectConfig = z.infer<typeof ProjectConfig>;
 export function projectSettingsFromConfig(config: ProjectConfig): ProjectSettings {
   return ProjectSettings.parse({
     models: config.models,
+    researchModels: config.researchModels,
     autonomy: config.autonomy,
     allowWebSearch: config.allowWebSearch,
     totalTokens: config.budget.totalTokens,
@@ -212,9 +215,8 @@ export function defaultConfig(): ProjectConfig {
   };
 }
 
-/** Defaults for newly-created projects. `defaultConfig` remains the legacy
- * fixture/default so old tests and imported project files retain their exact
- * execution semantics. */
+/** Historical trajectory defaults for archive fixtures; new runs use
+ * defaultRecurrentConfig(). */
 export function defaultTrajectoryConfig(): ProjectConfig {
   const legacy = defaultConfig();
   return ProjectConfig.parse({
@@ -245,3 +247,14 @@ export const ProjectIdentity = z.object({
   createdAt: z.string(),
 });
 export type ProjectIdentity = z.infer<typeof ProjectIdentity>;
+
+/** New runs pin two choices; each round always has one Solver and Explorer. */
+export function defaultRecurrentConfig(): ProjectConfig {
+  const base = defaultTrajectoryConfig();
+  return ProjectConfig.parse({
+    ...base, workflow: "recurrent-v3",
+    researchModels: { research: base.models.solver, support: { model: "gpt-5.6-terra", effort: "high" } },
+    limits: { ...base.limits, maxConcurrentWorkers: 4 },
+    trajectory: { solversPerWave: 1, explorersPerWave: 1, verifiersPerClaim: 1, passesRequired: 1 },
+  });
+}

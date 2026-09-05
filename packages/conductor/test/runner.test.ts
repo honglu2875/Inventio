@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { buildArgs, codexEventErrorMessage, runCodex } from "../src/codex/runner.js";
 import { runStructured } from "../src/codex/structured.js";
-import { TRAJECTORY_WORKER_PROMPT } from "../src/prompts/trajectories.js";
+import { RESEARCH_PROMPT } from "../src/prompts/recurrent.js";
 
 const SIM_BIN = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -46,7 +46,7 @@ function setup(calls: ScenarioCall[]) {
     baseOpts: {
       bin: SIM_BIN,
       cwd: dir,
-      prompt: TRAJECTORY_WORKER_PROMPT,
+      prompt: RESEARCH_PROMPT,
       sandbox: "read-only" as const,
       eventsArchiveFile: path.join(dir, "archive", "codex-events.jsonl"),
       outputLastMessageFile: path.join(dir, "last-message.json"),

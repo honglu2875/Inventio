@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { Assessment, ResultSubmission, toJsonSchema } from "@inventio/schema";
 import { CardStatus, CardType } from "@inventio/schema";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
@@ -192,3 +194,12 @@ export const MODEL_TOOL_DEFINITIONS: Tool[] = [
  * every read/write permission against the task token.
  */
 export const MODEL_TOOL_NAMES = MODEL_TOOL_DEFINITIONS.map((tool) => tool.name);
+
+/** The recurrent filesystem tools replace the older card/claim tool surface. */
+export const RESEARCH_TOOL_DEFINITIONS: Tool[] = [
+  { name: "research_search", description: "Search the saved mathematical filesystem by text. Researchers can find every saved note and result version. Independent checks see only their authorized mathematical versions, without prior verdicts or author identities.", inputSchema: { type: "object", properties: { query: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 50 } }, required: ["query"], additionalProperties: false } },
+  { name: "research_open", description: "Read a saved mathematical document by its stable ID. Reads are bounded and return the next character offset when more remains; document IDs never grant host filesystem access.", inputSchema: { type: "object", properties: { id: { type: "string" }, start: { type: "integer", minimum: 0 }, maxCharacters: { type: "integer", minimum: 1, maximum: 30000 } }, required: ["id"], additionalProperties: false } },
+  { name: "research_checkpoint", description: "At a natural pause, publish immutable snapshots of all mathematical files under notes/ and optionally submit self-contained results. Drafts are catalogued automatically. This does not finish your conversation or promote a result.", inputSchema: toJsonSchema(z.object({ results: z.array(ResultSubmission).max(24).default([]) })) as Tool["inputSchema"] },
+  { name: "audit_assess", description: "Record an independent assessment of one authorized exact result version. A concrete mathematical objection immediately affects that version's eligibility and its dependents. You cannot rewrite or erase the author's proof.", inputSchema: toJsonSchema(z.object({ assessment: Assessment })) as Tool["inputSchema"] },
+  ...MODEL_TOOL_DEFINITIONS.filter(tool => tool.name === "source_list" || tool.name === "source_open"),
+];

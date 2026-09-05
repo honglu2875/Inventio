@@ -30,8 +30,8 @@ export class ArchivedProject extends EventEmitter implements ProjectReader {
     readProjectFile(this.paths);
     this.events = events ?? EventLog.read(this.paths.eventsFile);
     for (const event of this.events) applyEvent(this.state, event);
-    if (this.state.config.workflow !== "council-v1") {
-      throw new Error("only council-v1 projects belong in the legacy archive");
+    if (this.state.config.workflow === "recurrent-v3") {
+      throw new Error("active recurrent projects do not belong in the legacy archive");
     }
   }
 

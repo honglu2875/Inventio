@@ -1,9 +1,9 @@
 # Recurrent research with independent memory audit
 
-Replacement design, revised on 2026-09-05 with the owner's feedback. This
-supersedes the earlier proposal for two project-long conversations without
-rounds. The running implementation still follows TRAJECTORY-DESIGN.md.
-Backward compatibility is not a requirement for the replacement.
+Implemented as `recurrent-v3`, revised on 2026-09-05 with the owner's feedback.
+This supersedes the earlier proposal for two project-long conversations
+without rounds. Earlier workflows execute no models; a narrow archive reader
+retains their original event meanings without migration.
 
 ## Central decision
 
@@ -416,10 +416,10 @@ Replace the earlier specification in these stages:
    strong final writing pass, with source-bound mathematics and no editorial
    acceptance power.
    Update every model-call and tool contract under src/prompts/.
-5. Replace the UI and remove old workflow/schema compatibility in one tested
+5. Replace the UI and remove the old executable scheduler in one tested
    cutover. Keep no parallel compatibility engine or runtime migration.
-   Unsupported old projects are reported clearly; do not modify or delete
-   private project data as part of removing code support.
+   Preserve the narrow read-only event/archive projection required by the
+   repository guidance; do not modify private project data.
 
 Use the simulator for recovery, access-control, budget and output-validation
 coverage. Key cases include a weak checker correctly flagging D, a weak checker
@@ -438,8 +438,23 @@ checkers and whether the repair/audit path actually resolves it.
 
 ## Status
 
-This revision records the agreed recurrent direction and the proposed defaults
-needed to make it concrete. It supersedes the project-long-session design in
-dd46c72. The scheduler and model prompts have not yet been changed to implement
-this replacement. The validity work in 350488a remains reusable; its historical
-entity layout and compatibility contracts do not constrain the new framework.
+The recurrent scheduler, exact-version result contract, originating-session
+responses, blind audit tools, round/final writing, and graph/library/settings
+views are implemented. Only recurrent-v3 can be created or resumed. Historical
+schemas and read-only projections remain for archived evidence; the former
+trajectory scheduler and its obsolete execution tests/prompts are removed.
+
+The simulator covers correct and mistaken weaker objections, repairs of old
+results, repeated full audits, incomplete coverage, dependency propagation,
+parallel research with serialized author repair, continuation, access control,
+and saved-return/thread recovery. No live model evaluation was performed;
+mathematical reliability and whole-run savings remain empirical questions.
+
+Operational limits are explicit: two author responses per result per round,
+250k tokens per routine check, 150k per round editor, 500k reserved/targeted for
+final writing (scaled down for small allowances), and the configured long-call
+limit for researchers and auditors. Notes are UTF-8 text, at most 200k bytes per
+file and 256 files per checkpoint; larger material must be split/consolidated.
+Original sources remain available separately. A missing provider conversation
+cannot be reconstructed with its original cache; unresolved repair remains
+visible rather than being silently assigned to a different author.

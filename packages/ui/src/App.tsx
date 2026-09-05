@@ -1,3 +1,8 @@
+import RecurrentView from "./views/RecurrentView";
+import ResearchSettings from "./views/ResearchSettings";
+import { useProjectSlug } from "./components/ProjectContext";
+import { useProjectState } from "./store/hooks";
+import type { ReactNode } from "react";
 import { useEffect } from "react";
 import { BrowserRouter, HashRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { hasProjectExportPayload, projectExportSnapshot } from "./lib/projectExport";
@@ -31,8 +36,18 @@ function useThemeBootstrap(): void {
 /** `/p/:slug/node/:nodeId` → the owning view with the inspector open (§4). */
 function NodeResolver(): JSX.Element {
   const { slug = "", nodeId = "" } = useParams();
-  const target = resolveNodeRoute(slug, nodeId);
+  const state = useProjectState(slug);
+  const target = state?.config.workflow === "recurrent-v3" ? { to: `/p/${encodeURIComponent(slug)}/evidence?sel=${encodeURIComponent(nodeId)}` } : resolveNodeRoute(slug, nodeId);
   return <Navigate to={target.to} replace />;
+}
+
+function WorkflowView({ mode, children }: { mode: "map" | "summary" | "library" | "settings"; children: ReactNode }): JSX.Element {
+  const slug = useProjectSlug();
+  const state = useProjectState(slug);
+  if (state?.config.workflow !== "recurrent-v3") return <>{children}</>;
+  if (mode === "settings") return <ResearchSettings key={slug} state={state} />;
+  if (mode === "map" && ["CREATED", "INTAKE", "AWAITING_CONFIRMATION"].includes(state.phase)) return <OpsView />;
+  return <RecurrentView state={state} mode={mode} />;
 }
 
 export default function App(): JSX.Element {
@@ -62,13 +77,13 @@ export default function App(): JSX.Element {
         />
         <Route path="/p/:slug/node/:nodeId" element={<NodeResolver />} />
         <Route path="/p/:slug" element={<ProjectLayout />}>
-          <Route index element={<OpsView />} />
-          <Route path="manager" element={<ManagerView />} />
-          <Route path="evidence" element={<EvidenceView />} />
-          <Route path="library" element={<LibraryView />} />
-          <Route path="library/:section" element={<LibraryView />} />
-          <Route path="library/:section/:id" element={<LibraryView />} />
-          {exported === null ? <Route path="settings" element={<SettingsView />} /> : null}
+          <Route index element={<WorkflowView mode="map"><OpsView /></WorkflowView>} />
+          <Route path="manager" element={<WorkflowView mode="summary"><ManagerView /></WorkflowView>} />
+          <Route path="evidence" element={<WorkflowView mode="map"><EvidenceView /></WorkflowView>} />
+          <Route path="library" element={<WorkflowView mode="library"><LibraryView /></WorkflowView>} />
+          <Route path="library/:section" element={<WorkflowView mode="library"><LibraryView /></WorkflowView>} />
+          <Route path="library/:section/:id" element={<WorkflowView mode="library"><LibraryView /></WorkflowView>} />
+          {exported === null ? <Route path="settings" element={<WorkflowView mode="settings"><SettingsView /></WorkflowView>} /> : null}
         </Route>
         <Route path="*" element={<Navigate to={projectRoot} replace />} />
       </Routes>

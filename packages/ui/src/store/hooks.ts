@@ -27,7 +27,7 @@ export interface ActionGuard {
 export function useActionGuard(slug: string, allowArchiveCopy = false): ActionGuard {
   const readOnly = useStore((s) => {
     const connection = s.projects[slug]?.connection;
-    return connection === "fixture" || connection === "static" || (!allowArchiveCopy && s.projects[slug]?.state?.config.workflow === "council-v1");
+    return connection === "fixture" || connection === "static" || (!allowArchiveCopy && s.projects[slug]?.state?.config.workflow !== "recurrent-v3");
   });
   return readOnly
     ? { disabled: true, title: READ_ONLY_TOOLTIP }

@@ -15,10 +15,13 @@ import PublicationDialog from "./steering/PublicationDialog";
 
 function PhaseTracker({ state }: { state: ProjectState }): JSX.Element {
   const awaiting = state.phase === "AWAITING_CONFIRMATION";
-  const current = awaiting ? "INTAKE" : state.phase;
+  const recurrent = state.config.workflow === "recurrent-v3";
+  const round = state.research.rounds[state.research.roundOrder.at(-1) ?? ""];
+  const current = recurrent ? state.terminal ? "TERMINAL" : awaiting || ["CREATED", "INTAKE"].includes(state.phase) ? "INTAKE" : round?.status === "sealed" || state.research.final ? "WRITING" : "RESEARCH" : awaiting ? "INTAKE" : state.phase;
+  const phases: readonly string[] = recurrent ? ["INTAKE", "RESEARCH", "WRITING", "TERMINAL"] : PHASES;
   return (
     <div className="phase-tracker" title={`phase: ${state.phase}`}>
-      {PHASES.map((phase) => {
+      {phases.map((phase) => {
         const lit = phase === current;
         const terminalColor = phase === "TERMINAL" ? resultColor(state.terminal?.result) : null;
         return (
@@ -47,7 +50,7 @@ function BudgetBar({ state }: { state: ProjectState }): JSX.Element {
   const workerPct = Math.min(100, (worker / total) * 100);
   const plannerPct = Math.min(100 - workerPct, (planner / total) * 100);
   const readerLabel =
-    state.config.workflow === "trajectories-v2"
+    state.config.workflow !== "council-v1"
       ? "summary and final readings"
       : "Research Manager";
   const title = `research workers ${formatExact(worker)} + ${readerLabel} ${formatExact(planner)} of ${formatExact(total)} tokens`;
@@ -220,7 +223,7 @@ function MathToggle(): JSX.Element {
 
 export default function TopStrip({ slug, state }: { slug: string; state: ProjectState | null }): JSX.Element {
   const exported = projectExportSnapshot();
-  const archived = state?.config.workflow === "council-v1";
+  const archived = state?.config.workflow !== "recurrent-v3";
   const guard = useActionGuard(slug);
   const copyGuard = useActionGuard(slug, true);
   const run = useApiAction();
@@ -243,7 +246,7 @@ export default function TopStrip({ slug, state }: { slug: string; state: Project
     () =>
       state === null
         ? 0
-        : Object.values(state.tasks).filter((t) => t.status === "running").length,
+        : state.config.workflow === "recurrent-v3" ? Object.values(state.research.turns).filter(t => t.status === "running").length : Object.values(state.tasks).filter((t) => t.status === "running").length,
     [state],
   );
   const publication = state === null ? null : currentTerminalPublication(state);

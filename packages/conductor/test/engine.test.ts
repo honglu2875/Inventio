@@ -3,8 +3,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   Harness,
   INTAKE_MATCH,
-  PUBLICATION_MATCH, TRAJECTORY_FINAL_MATCH, USAGE, finalOutput, intakeOutput, plannerCall,
-  publicationOutput, trajectoryTestConfig, type SimCall
+  PUBLICATION_MATCH,  USAGE, researchStopCalls, intakeOutput, plannerCall,
+  publicationOutput, recurrentTestConfig, type SimCall
 } from "./helpers/harness.js";
 
 /**
@@ -28,7 +28,7 @@ afterEach(async () => {
   delete process.env["INVENTIO_SIM_STATE_DIR"];
 });
 
-function harness(name: string, calls: SimCall[], config = trajectoryTestConfig(c => { c.budget.totalTokens = 50_000; })): Harness {
+function harness(name: string, calls: SimCall[], config = recurrentTestConfig(c => { c.budget.totalTokens = 5_000_000; })): Harness {
   const h = Harness.create(name, calls, config);
   current = h;
   return h;
@@ -135,10 +135,7 @@ describe("ProjectEngine end-to-end (codex-sim)", () => {
   it("retries local PDF compilation without another mathematical reader call", async () => {
     const h = harness("publication-retry", [
       plannerCall(INTAKE_MATCH, intakeOutput()),
-      plannerCall(
-        TRAJECTORY_FINAL_MATCH,
-        finalOutput("# Final report\n\nThe planar reduction is established, but the last implication remains open."),
-      ),
+      ...researchStopCalls("# Final report\n\nThe planar reduction is established, but the last implication remains open."),
       plannerCall(PUBLICATION_MATCH, publicationOutput()),
     ]);
 
@@ -188,7 +185,7 @@ describe("ProjectEngine end-to-end (codex-sim)", () => {
   it("saves TeX even when the local PDF compiler is unavailable", async () => {
     const h = harness("publication-without-compiler", [
       plannerCall(INTAKE_MATCH, intakeOutput()),
-      plannerCall(TRAJECTORY_FINAL_MATCH, finalOutput("# Final report\n\nA partial theorem remains.")),
+      ...researchStopCalls("# Final report\n\nA partial theorem remains."),
       plannerCall(PUBLICATION_MATCH, publicationOutput()),
     ]);
 
@@ -217,7 +214,7 @@ describe("ProjectEngine end-to-end (codex-sim)", () => {
     const publicationThread = "th-publication-private-label";
     const h = harness("publication-validation-repair", [
       plannerCall(INTAKE_MATCH, intakeOutput()),
-      plannerCall(TRAJECTORY_FINAL_MATCH, finalOutput("# Final report\n\nA partial reduction is proved.")),
+      ...researchStopCalls("# Final report\n\nA partial reduction is proved."),
       plannerCall(
         PUBLICATION_MATCH,
         publicationOutput({
@@ -248,19 +245,19 @@ describe("ProjectEngine end-to-end (codex-sim)", () => {
     expect(tex).not.toMatch(/W000|A001|E001|\\input/);
     expect(tex).toContain("\\section{Partial result}");
     expect(h.simLog().some((row) => row.resumeOf === publicationThread)).toBe(true);
-    expect(h.state.budget.plannerSpentTokens).toBe(4 * 1100);
+    expect(h.state.budget.plannerSpentTokens).toBe(3 * 1100);
     expect(h.publicationCompiler.compileCalls).toBe(0);
   });
 
   it("closes the publication decision when drafting cannot begin", async () => {
     const h = harness("publication-missing-report", [
       plannerCall(INTAKE_MATCH, intakeOutput()),
-      plannerCall(TRAJECTORY_FINAL_MATCH, finalOutput("# Final report\n\nNo complete proof was obtained.")),
+      ...researchStopCalls("# Final report\n\nNo complete proof was obtained."),
     ]);
 
     await runToConfirmation(h);
     await h.waitForTerminal();
-    unlinkSync(h.paths.dir + "/artifacts/final.md");
+    unlinkSync(h.paths.dir + "/" + h.state.terminal!.finalPath);
     h.engine.requestPublication();
     await h.waitFor(
       (state) => state.publications[0]?.status === "failed",
@@ -269,13 +266,13 @@ describe("ProjectEngine end-to-end (codex-sim)", () => {
 
     expect(h.state.publications[0]).toMatchObject({
       failureStage: "drafting",
-      error: "stopping report is missing: artifacts/final.md",
+      error: "stopping report is missing: " + h.state.terminal!.finalPath,
     });
-    expect(h.state.decisions["DEC003"]).toMatchObject({
+    expect(h.state.decisions["DEC002"]).toMatchObject({
       kind: "publication",
       status: "rejected",
     });
-    expect(h.simLog()).toHaveLength(2);
+    expect(h.simLog()).toHaveLength(5);
   });
 
   });

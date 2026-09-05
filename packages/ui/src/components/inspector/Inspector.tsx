@@ -254,7 +254,7 @@ export default function Inspector({
   const state = useProjectState(slug);
   const kind = classifyNodeId(nodeId);
   const exported = isProjectExport();
-  const readOnly = exported || state?.config.workflow === "council-v1";
+  const readOnly = exported || state?.config.workflow !== "recurrent-v3";
   const tabs = useMemo(() => tabsFor(kind), [kind]);
   const [tab, setTab] = useState<TabKey>(() => tabs[0] ?? "events");
   const [width, setWidth] = useState(DEFAULT_W);

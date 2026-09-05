@@ -559,3 +559,23 @@ show successful, failed and unfinished commands, capture completeness and
 the declared basis; command details and output hashes load on demand. Missing
 historical evidence is shown as unrecorded. Portable exports include bounded
 evidence files and explicit omissions, and require no live server to open them.
+
+## Recurrent research (recurrent-v3)
+
+The default runtime follows SESSION-DESIGN.md. Research opens the versioned
+mathematics graph after intake; Summary and Library are first-class reading
+views. The graph distinguishes content kind, checking qualification, and goal
+relation. Exact dependencies, revision edges, independent assessments and
+originating-session responses come from durable records. Quarantined premises
+propagate visible warnings to dependent results. Selecting preserves lineage;
+hover adds a temporary trace without losing the selection. Hiding notes/checks
+does not shift the remaining nodes. Complete labels and preview lines must fit
+within node cards, including mathematical subscripts.
+
+The inspector opens exact proofs, notes, audit findings, responses and original
+session turns; it is resizable. Execution archives are owner-only detail and
+are never researcher/auditor memory. Summaries and final reports select the
+same exact result versions through references. Audit coverage distinguishes
+inspection from confirmation and leaves operational inability incomplete.
+New-project and Settings forms expose two model choices, allowance, long-call
+target and rounds. Earlier workflows expose archive reading controls only.

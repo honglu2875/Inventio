@@ -11,3 +11,6 @@ export * from "./tex-integrity.js";
 export * from "./project-export.js";
 export * from "./fact-eligibility.js";
 export * from "./verification-evidence.js";
+
+export * from "./research.js";
+export * from "./research-graph.js";

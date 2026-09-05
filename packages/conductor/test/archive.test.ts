@@ -92,8 +92,8 @@ describe("view-only legacy archive", () => {
       ];
       for (const [route, payload] of cases) {
         const response = await app.inject({ method: "POST", url: `/api/projects/test-problem/${route}`, payload });
-        expect(response.statusCode, route).toBe(409);
-        expect(response.body, route).toContain("view-only");
+        if (/^(waves|tasks|claims|claim-conflicts)\//.test(route)) expect(response.statusCode, route).toBe(404);
+        else { expect(response.statusCode, route).toBe(409); expect(response.body, route).toContain("view-only"); }
       }
       expect(() => manager.uploadSource("test-problem", "new.md", Buffer.from("x"))).toThrow(/view-only/);
       expect(() => manager.deleteSource("test-problem", "note.md")).toThrow(/view-only/);
@@ -106,7 +106,7 @@ describe("view-only legacy archive", () => {
     manager.openAll();
     const before = bytes(paths.dir);
     const clone = manager.cloneIntake("test-problem", { title: "New mathematical investigation" });
-    expect(clone.state.config.workflow).toBe("trajectories-v2");
+    expect(clone.state.config.workflow).toBe("recurrent-v3");
     expect(clone.state.phase).toBe("AWAITING_CONFIRMATION");
     expect(clone.state.claimOrder).toEqual([]);
     expect(clone.state.researchManagerNotes).toEqual([]);

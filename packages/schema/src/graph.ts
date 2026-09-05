@@ -11,6 +11,7 @@ import { candidateLifecycle } from "./candidate-status.js";
 export interface GraphNode {
   id: string;
   type:
+    | "research"
     | "problem"
     | "wave"
     | "task"

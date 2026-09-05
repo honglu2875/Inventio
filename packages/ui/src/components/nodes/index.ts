@@ -1,3 +1,4 @@
+import ResearchNode from "./ResearchNode";
 import type { NodeTypes } from "@xyflow/react";
 import CandidateNode from "./CandidateNode";
 import ClaimNode from "./ClaimNode";
@@ -36,6 +37,7 @@ export const OPS_NODE_TYPES: NodeTypes = {
 };
 
 export const EVIDENCE_NODE_TYPES: NodeTypes = {
+  researchNode: ResearchNode,
   candidateNode: CandidateNode,
   claimNode: ClaimNode,
   obligationNode: ObligationNode,
@@ -49,6 +51,7 @@ export const EVIDENCE_NODE_TYPES: NodeTypes = {
 
 /** Graph node `type` (schema) → React Flow node type name. */
 export const RF_TYPE_OF: Record<string, string> = {
+  research: "researchNode",
   problem: "problemNode",
   wave: "waveNode",
   task: "taskNode",

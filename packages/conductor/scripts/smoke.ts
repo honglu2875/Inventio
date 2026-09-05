@@ -1,5 +1,5 @@
 /**
- * Trajectory real-quota smoke (TRAJECTORY-DESIGN.md).
+ * Recurrent real-quota smoke (SESSION-DESIGN.md).
  *
  * Drives one deliberately tiny problem through the entire protocol against the
  * real `codex` CLI: intake → confirm → independent research trajectories →
@@ -14,13 +14,13 @@
  *   SMOKE_MEMORY=1 npm run smoke     # also exercise the MCP memory service
  *   SMOKE_KEEP=1 npm run smoke       # keep the project directory
  */
-import { applyEvent, defaultTrajectoryConfig, initialState, type Event } from "@inventio/schema";
+import { applyEvent, defaultRecurrentConfig, initialState, resultStatus, type Event } from "@inventio/schema";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { ProjectEngine } from "../src/engine/engine.js";
 import { WorkerPool } from "../src/engine/pool.js";
-import { FileMemoryBackend } from "../src/memory/cardStore.js";
+import { RecurrentMemoryBackend } from "../src/memory/recurrent.js";
 import { MemoryService } from "../src/memory/service.js";
 import { EventLog } from "../src/store/eventLog.js";
 
@@ -48,17 +48,15 @@ async function main(): Promise<void> {
   log(`root: ${root}`);
   log(`statement: ${STATEMENT}`);
 
-  const config = defaultTrajectoryConfig();
+  const config = defaultRecurrentConfig();
   // Small, real-money budget: enough for ~10 codex turns at this problem size.
   config.budget.totalTokens = Number(process.env["SMOKE_BUDGET"] ?? 3_000_000);
   config.budget.defaultTaskTokens = 400_000;
   config.budget.taskWallClockMinutes = 10;
   config.limits.maxWaves = 6;
   config.limits.maxConcurrentWorkers = 2;
-  config.trajectory = { solversPerWave: 1, explorersPerWave: 1, verifiersPerClaim: 2, passesRequired: 2 };
-  for (const role of ["summaryReader", "solver", "explorer", "verifier"] as const) {
-    config.models[role].effort = "medium";
-  }
+  config.researchModels!.research.effort = "medium";
+  config.researchModels!.support.effort = "medium";
 
   const pool = new WorkerPool(2);
   let memoryService: MemoryService | null = null;
@@ -87,13 +85,9 @@ async function main(): Promise<void> {
   if (memoryService) {
     memoryService.registerProject(
       SLUG,
-      new FileMemoryBackend(engine.paths.dir, (rec) => engine.recordRecall(rec), {
-        getState: () => engine.state,
-        recordMilestone: (taskId, title, markdown) =>
-          engine.recordTrajectoryMilestone(taskId, title, markdown),
-        flagFact: (taskId, factId, reason) =>
-          engine.flagTrajectoryFact(taskId, factId, reason),
-      }),
+      new RecurrentMemoryBackend(engine.paths.dir, rec => engine.recordRecall(rec), () => engine.state,
+        (scope, results) => engine.recurrent.checkpoint(scope, results),
+        (scope, assessment) => engine.recurrent.assess(scope, assessment)),
     );
   }
 
@@ -107,44 +101,8 @@ async function main(): Promise<void> {
       case "intake.completed":
         log(`intake complete; ${event.ambiguities.length} ambiguity/ies noted`);
         break;
-      case "wave.planned":
-        log(
-          `wave ${event.waveId} "${event.title}": ${event.roster
-            .map((r) => `${r.taskId}=${r.role}/${r.methodTag}`)
-            .join(", ")}`,
-        );
-        break;
-      case "task.dispatched":
-        log(`  ▶ ${event.taskId} dispatched (${event.role}, budget ${event.budgetTokens})`);
-        break;
-      case "task.completed":
-        log(`  ✓ ${event.taskId} completed (${event.usage.input_tokens} in / ${event.usage.output_tokens} out)`);
-        break;
-      case "task.interrupted":
-        log(`  ⏸ ${event.taskId} interrupted: ${event.reason}`);
-        break;
-      case "task.failed":
-        log(`  ✗ ${event.taskId} failed: ${event.error.slice(0, 200)}`);
-        break;
-      case "task.outputInvalid":
-        log(`  ! ${event.taskId} invalid output, repairing: ${event.errors.join("; ").slice(0, 200)}`);
-        break;
-      case "artifact.recorded":
-        log(`  · artifact ${event.artifactId} (${event.kind}${event.conclusion ? `, ${event.conclusion}` : ""})`);
-        break;
-      case "decision.accepted": {
-        const action = (event.action as { action?: string } | null)?.action;
-        log(`decision ${event.decisionId} accepted${action ? `: ${action}` : ""}`);
-        break;
-      }
-      case "decision.rejected":
-        log(`decision ${event.decisionId} REJECTED: ${event.violations.join("; ").slice(0, 300)}`);
-        break;
-      case "verification.completed":
-        log(`check ${event.verificationId}: ${event.verdict}`);
-        break;
-      case "fact.recorded":
-        log(`fact ${event.factId} from ${event.claimId}`);
+      case "research.updated":
+        if (event.change.kind !== "turn.progress") log(event.change.kind);
         break;
       case "terminal.reached":
         log(`TERMINAL: ${event.result}`);
@@ -227,22 +185,19 @@ async function main(): Promise<void> {
   }
 
   // Protocol sanity: whatever the outcome, the run must have done real work.
-  const completedTasks = Object.values(state.tasks).filter((t) => t.status === "completed").length;
+  const completedTasks = Object.values(state.research.turns).filter((t) => t.status === "completed").length;
   if (completedTasks === 0) fail("no task completed — the run did no mathematical work");
 
   const accepted = terminal.result === "PROVED" || terminal.result === "DISPROVED";
   if (accepted) {
     const relation = terminal.result === "PROVED" ? "PROVES" : "DISPROVES";
-    const fact = Object.values(state.facts).find(f => f.status === "ACTIVE" && state.claims[f.claimId]?.relationToGoal === relation);
-    if (!fact) fail(`terminal ${terminal.result} without a decisive active fact`);
-    const claim = state.claims[fact.claimId]!;
-    const passes = claim.verificationIds.filter(id => state.verifications[id]?.verdict === "PASS").length;
-    if (passes < (claim.verificationPolicy?.passesRequired ?? config.trajectory.passesRequired)) fail("decisive fact lacks its required checks");
+    const fact = Object.values(state.research.versions).find(v => v.relationToGoal === relation && resultStatus(state.research, v.id) === "AUDITED");
+    if (!fact || !state.research.final?.auditComplete) fail(`terminal ${terminal.result} without a complete strong audit`);
   }
 
   console.log(`\n✓ SMOKE PASSED — RESULT: ${terminal.result}`);
-  console.log(`  waves ${state.waveOrder.length}, tasks completed ${completedTasks}, ` +
-    `claims ${state.claimOrder.length}, facts ${state.factOrder.length}`);
+  console.log(`  waves ${state.research.roundOrder.length}, tasks completed ${completedTasks}, ` +
+    `versions ${state.research.versionOrder.length}, assessments ${state.research.assessments.length}`);
   console.log(`  final report: ${finalPath}`);
   console.log(`\n--- final.md (first 40 lines) ---`);
   console.log(finalText.split("\n").slice(0, 40).join("\n"));

@@ -336,5 +336,6 @@ export function buildCanonicalEvents(): Event[] {
   ev("claim.conflictRecorded", { leftClaimId: "K001", rightClaimId: "K002", reason: "The stated boundary values differ.", by: "summary_reader" });
   ev("claim.conflictResolved", { leftClaimId: "K001", rightClaimId: "K002", reason: "The owner verified that their hypotheses differ.", by: "human" });
 
+  ev("research.updated", { change: { kind: "round.opened", id: "W001", number: 1, briefMarkdown: "Synthetic recurrent event for schema coverage.", researchModel: { model: "research", effort: "high" }, supportModel: { model: "support", effort: "high" } } });
   return events;
 }

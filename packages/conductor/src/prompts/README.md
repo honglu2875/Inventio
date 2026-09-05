@@ -1,120 +1,96 @@
 # Inventio prompt architecture
 
-This directory contains all deliberate model-facing instructions. A call
-combines the CLI's own tool context, a short stdin message, a composed working
-directory with AGENTS.md, an output schema, and authorized project tools.
-Repository and user instructions are excluded from worker packets.
+All deliberate model-facing instructions live here. Calls combine a short
+stdin prompt, composed files, structured output schema and project-scoped MCP.
+Repository/user agent configuration and other workers' directories are excluded.
+Only `recurrent-v3` executes; older projects retain their original saved packets
+through the view-only archive.
 
-The proposed [recurrent replacement](../../../../SESSION-DESIGN.md) specifies
-author-session responses, blind memory audit, support-model round summaries
-and strong final writing. Those changes are not yet implemented; the lifecycle
-below describes the current executable prompts.
-
-Only trajectories-v2 executes. Council projects are view-only archives;
-their original prompts remain in their private saved packets. The old
-controller, curation, synthesis, and council worker prompt modules are removed.
-
-| Module | Responsibility |
+| Module | Calls and authority |
 | --- | --- |
-| `trajectories.ts` | Initial reading, Solver/Explorer sessions, statement comparison, independent verification, summary revision, stopping report |
-| `publication.ts` | Owner-requested standalone manuscript from the trajectory evidence and current mathematical view |
-| `shared.ts` | Short academic English guidance and TeX layout rules appended to every generated AGENTS.md |
-| `operational.ts` | Process-failure resume and structured-output repair messages |
-| `tools.ts` | Authorized memory and original-source tool descriptions |
-| `diagnostics.ts` | Manual diagnostic prompts, never automatic research calls |
+| `intake.ts` | Initial reading and owner-requested W000 regeneration; preserves originals and asks genuine clarifications. |
+| `recurrent.ts` | Solver/Explorer, originating-session repair, independent verification/audit, round editing, final writing, interrupted-turn continuation. |
+| `publication.ts` | Owner-requested standalone TeX exposition, followed by separately requested local compilation. |
+| `shared.ts` | Academic prose and TeX guidance appended to every AGENTS.md. |
+| `operational.ts` | Bounded process recovery and structured-output repair messages. |
+| `tools.ts` | Authorized mathematical-library, checkpoint, audit and original-source tools. Historical tool definitions serve archive-related tests only. |
+| `diagnostics.ts` | Explicit manual diagnostics; never automatic research calls. |
 
 ## Lifecycle and context
 
-- **Intake:** `generateIntake()` uses `trajectoryIntakeFiles()` and
-  `TRAJECTORY_INTAKE_PROMPT` through `runReaderCall()`. It preserves the raw
-  submission and supplies indexed source copies. Owner-requested regeneration
-  uses the same contract. The compatible IntakeOutput fields for council
-  taxonomy remain empty. An intake clone copies the original materials and
-  W000 into a new trajectory project without a model call.
-- **Research:** `executeTrajectoryTask()` uses `trajectoryWorkerFiles()` and
-  `TRAJECTORY_WORKER_PROMPT`. Every trajectory receives the exact problem,
-  current view, compact library, source catalog, and applicable owner
-  guidance. It chooses its own mathematical strategy. Sparse milestones and
-  a concrete correction flag use scoped tools. Research-thread recovery uses
-  `TRAJECTORY_RESTART_PROMPT` and preserves the existing packet. Claims require
-  exact supported scope, complete decisive calculations, and precise imported
-  results. Optional dependsOnFactIds records existing fact premises without
-  granting any extra verifier access. Unknown fact IDs fail structured-output
-  validation. Invalid structured output gets one same-thread repair.
-- **Statement comparison:** `compareTrajectoryClaims()` uses
-  `claimComparisonFiles()` and `CLAIM_COMPARISON_PROMPT`. It links identical
-  statements, never implications or thematic similarity, and records explicit
-  pairs of incompatible statements with mathematical reasons. Complete
-  statements are available under statements/; index excerpts are not sufficient
-  evidence. No proof or true statement is selected. The existing comparison
-  slot now also runs for differing goal relations. A failed comparison or an
-  unknown/self conflict reference records UNAVAILABLE and stops UNCERTAIN;
-  explicit owner continuation retries that comparison once. Historical rounds
-  without this field are not retroactively marked checked or rewritten.
-- **Verification:** `executeVerification()` uses `verificationFiles()` and
-  `VERIFICATION_PROMPT`. The packet contains only the exact problem and one
-  complete submitted claim/proof. Filesystem confinement prevents access to
-  other project attempts or peer checks. Odd ordinals emphasize a logical and
-  dependency audit; even ordinals emphasize independent derivation of the
-  decisive step, accounting for surviving and omitted recursion or boundary
-  terms before cancellation. This is complementary emphasis, not proof blinding: both
-  receive the same claim and must review the complete proof. The report must
-  show the decisive expression or implication, applicable hypotheses, and
-  source equation rather than merely endorse correctness. Failed execution
-  cannot be reported as computational confirmation. New verification requests
-  freeze evidenceRequired=true. The return declares derivation, computation,
-  or both; computational support names the exact commands supplied to the
-  shell tool. The parent-owned event archive records actual command outcomes,
-  hashes and bounded output excerpts. A proposed PASS without its required
-  support becomes FAIL/MISSING_DEPENDENCY, with the original return retained.
-  An explicit hand derivation can remain valid after a failed command. Evidence
-  capture never reruns commands or establishes their mathematical correctness.
-  Saved output recovery applies the same frozen policy and reuses the archive
-  without another verification call. Old completed verdicts remain unchanged;
-  old requests without this requirement retain their compatibility policy.
-  Frozen W-of-V counts, concurrency and budgets are unchanged.
-- **Summary:** `reviewTrajectorySummary()` uses `summaryReviewFiles()` and
-  `SUMMARY_REVIEW_PROMPT` after the round's checks settle. This is editorial
-  maintenance, not research planning. It may leave the view unchanged.
-- **Stopping:** `finalizeTrajectory()` uses `trajectoryFinalFiles()` and
-  `TRAJECTORY_FINAL_PROMPT`. Deterministic code fixes the result from the
-  verification record and supplies settled facts, unresolved conflicts,
-  correction warnings, and dependency concerns. An accepted fact with an open
-  conflict or unsettled premise cannot decide the result. FAILED and
-  NEEDS_REVISION proofs do not refute their statements or clear a correction
-  warning. Explicit refutation/retraction may resolve a conflict; an owner
-  resolution records a mathematical reason without changing historical votes.
-  Composition cannot elevate unchecked material. A deterministic fallback
-  handles composition failure.
-- **Publication:** `draftPublication()` uses `publicationPacketFiles()` and
-  `PUBLICATION_PROMPT` after an explicit owner request. It receives the
-  trajectory claims/facts index, current view, stopping report, and bounded
-  record copies, including recorded execution manifests. It may downgrade an unsupported conclusion in its separate
-  publication assessment. The saved stopping report is not rewritten. TeX is
-  saved before a separate owner-requested local compilation; compilation
-  retries make no model calls.
+`ProjectEngine` handles intake, owner controls and publication; `RecurrentResearch`
+handles recurrence. There is no model planner or statement-comparison controller.
 
-`runReaderCall()` provides the shared execution wrapper for intake,
-comparison, summaries, stopping reports, and publication. The compatible
-memory role name `research_manager` remains an internal tool-access label;
-it is not an executable council controller.
+- **Intake:** `generateIntake` uses `intakeFiles` and `INTAKE_PROMPT`, with the
+  support model, complete original materials and source tools. Owner confirmation
+  fixes the problem. An intake clone requires no model call.
+- **Research:** one research-model Solver and Explorer per round use
+  `authorFiles` / `RESEARCH_PROMPT`. New rounds start fresh from the original
+  problem, compact mathematical brief, library index and owner guidance.
+  They save mathematical notes under `notes/`; `research_checkpoint` shares
+  immutable snapshots and self-contained versions at natural pauses. Closing
+  write-ups and all saved notes are retained, without importing raw traces
+  into future researchers' packets. Researchers choose methods and pacing.
+- **Verification:** each proof version gets one fresh support-model conversation,
+  `independentFiles` / `CHECK_PROMPT`, with exact mathematical premises and
+  original sources. Status, author identity, old notes and prior verdicts are
+  absent from both packet and server-enforced tool view. Missing/failed command
+  evidence becomes operational inability, never a mathematical disproof.
+- **Author response:** a substantive objection appends `objections.md` to the
+  originating session and uses `REPAIR_PROMPT` with the same author envelope,
+  model and provider thread. The original packet remains stable. REVISE creates
+  an unchecked immutable version; WITHDRAW retracts it; DEFEND supplies additional
+  mathematics for independent audit; UNRESOLVED preserves the dispute. At most
+  two responses per result per round are admitted. Older repairs serialize with
+  the current researcher of that role. A missing conversation is not silently
+  replaced by a different author context.
+- **Strong audit:** from round two, a fresh research-model auditor runs alongside
+  research. `AUDIT_PROMPT` starts full-memory inspection; `AUDIT_TAIL_PROMPT`
+  continues in that same audit conversation for newly submitted versions or
+  mathematical defenses. Only mathematics, exact premises and original sources
+  are available; prior editorial opinions/verdicts cannot be fetched through
+  old tools. `audit_assess` allows immediate quarantine/downgrade/retraction,
+  with exact version/hash validation. Computational confirmations wait for the
+  complete parent-owned execution archive. The audit cannot author and certify
+  its own correction. Every required target needs a substantive assessment;
+  UNABLE leaves coverage incomplete. Round-one decisive stopping also requires
+  this strong audit.
+- **Round writing:** after author responses/checks/audit settle, the record is
+  sealed. `editorialFiles` / `EDITOR_PROMPT` use the support model for readable
+  summary and compact next-round brief. Current-round notes and complete result
+  records are files; older notes remain accessible on demand. Exact mathematics
+  and current qualifications are inserted by code, not inferred from prose.
+  Missing/invalid exposition uses a deterministic fallback.
+- **Final writing:** code first fixes the outcome, eligible versions and audit
+  coverage. `FINAL_PROMPT` uses the research model once for coherent exposition.
+  Unknown references cause fallback; writing cannot change the fixed outcome.
+  Opposing unresolved conclusions and incomplete audit prevent decisive stopping.
+- **Publication:** explicit owner requests use `publicationPacketFiles` /
+  `PUBLICATION_PROMPT` with the research model and full versioned record.
+  Exposition may downgrade but cannot elevate or reverse the fixed outcome.
+  TeX validation and local compilation retain their existing boundaries.
 
-## Writing and evidence
+## Recovery, tools and cost
 
-`shared.ts` asks for clear ordinary academic prose, stable terminology, exact
-hypotheses, and complete derivations. It replaces the earlier obligation to
-follow the full ASD-STE100 standard from memory. No sentence-length or grammar
-quota competes with mathematical completeness. TeX layout guidance still
-prevents delimiters crossing alignment cells or rows.
+Every recurrent turn saves a pinned model, session/thread identity, exact targets,
+parent-owned execution archive and atomic return before completion events.
+Recovery reuses validated saved output without another call or double charge;
+interrupted author turns resume their saved conversation. Every structured
+attempt is charged, with estimates when usage is absent. Reported uncached
+input, cache reads and output remain separate. Infrastructure retries remain
+bounded by `runStructured`; this is not a claim of measured monetary savings.
+Research admission leaves audit/writing capacity; failed or incomplete audits
+remain explicit rather than being silently sampled away.
 
-The failure evidence, limits of causal interpretation, token baseline, and
-proposed controlled evaluation are recorded in
-[the prompt audit](../../../../docs/PROMPT-AUDIT.md). The staged implementation
-and later experiments are in [the validity roadmap](../../../../docs/VALIDITY-ROADMAP.md).
-No extra verifier or automatic reconciliation model is added. The existing
-comparison pass now covers potentially opposing statements, including pairs
-previously skipped because their goal relations differed. More evidence in a
-report may change actual token use; the offline evaluator measures it rather
-than asserting savings. Simulator tests establish orchestration behavior;
-improvements in mathematical reliability need an explicitly authorized live
-evaluation.
+`research_search` / `research_open` expose all saved mathematics to researchers,
+and only authorized exact versions/premises to verifiers and auditors.
+`research_checkpoint` is available only to research authors; `audit_assess`
+only to the active auditor. `source_list` / `source_open` expose original
+sources; the blind view also excludes model-written source abstracts.
+The server rejects old memory/knowledge/write-up tools for recurrent sessions.
+Workers never write shared state or run their scripts in the conductor process.
+
+Simulator tests establish orchestration, replay and isolation behavior.
+Expert-labelled mathematical reliability and whole-run cost evaluation still
+require separately authorized live runs. See [the prompt audit](../../../../docs/PROMPT-AUDIT.md)
+and [the validity roadmap](../../../../docs/VALIDITY-ROADMAP.md).

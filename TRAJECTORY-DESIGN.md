@@ -1,5 +1,8 @@
 # Long-trajectory research workflow
 
+Historical specification for view-only `trajectories-v2` runs. New execution
+uses [SESSION-DESIGN.md](SESSION-DESIGN.md); this scheduler is retired.
+
 The proposed replacement is [SESSION-DESIGN.md](SESSION-DESIGN.md): recurrent
 rounds with one long Solver and Explorer, author-session repairs, strong memory
 audit and support-model editorial work. It has no backward-compatibility

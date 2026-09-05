@@ -1,6 +1,6 @@
 import {
   applyEvent,
-  defaultTrajectoryConfig,
+  defaultRecurrentConfig,
   initialState,
   type ClaimComparisonOutput,
   type Event,
@@ -13,6 +13,7 @@ import {
   type TrajectoryOutput,
   type VerificationOutput,
 } from "@inventio/schema";
+import { RESEARCH_PROMPT, EDITOR_PROMPT, FINAL_PROMPT } from "../../src/prompts/recurrent.js";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -184,22 +185,25 @@ export function claimComparisonOutput(
   return { equivalentClaimGroups, conflicts: [] };
 }
 
-export function trajectoryTestConfig(
+export function recurrentTestConfig(
   over: (c: ProjectConfig) => void = () => undefined,
 ): ProjectConfig {
-  const c = defaultTrajectoryConfig();
+  const c = defaultRecurrentConfig();
   c.budget.totalTokens = 10_000_000;
   c.budget.defaultTaskTokens = 500_000;
   c.limits.maxWaves = 1;
   c.limits.maxConcurrentWorkers = 1;
-  c.trajectory = {
-    solversPerWave: 1,
-    explorersPerWave: 0,
-    verifiersPerClaim: 2,
-    passesRequired: 2,
-  };
+
   over(c);
   return c;
+}
+
+/** One empty research round followed by exposition, for shared lifecycle tests. */
+export function researchStopCalls(reportMarkdown: string): SimCall[] {
+  const output = { writeupMarkdown: "No decisive theorem was established.", results: [], responses: [], questions: [] };
+  return [plannerCall(RESEARCH_PROMPT, output), plannerCall(RESEARCH_PROMPT, output),
+    plannerCall(EDITOR_PROMPT, { summaryMarkdown: "No decisive result.", briefMarkdown: "The original question remains open.", referencedVersions: [] }),
+    plannerCall(FINAL_PROMPT, { reportMarkdown, referencedVersions: [] })];
 }
 
 // ---------------------------------------------------------------------------
@@ -287,7 +291,7 @@ export class Harness {
   static create(
     name: string,
     calls: SimCall[],
-    config: ProjectConfig = trajectoryTestConfig(),
+    config: ProjectConfig = recurrentTestConfig(),
     memory: MemoryAccess | null = null,
   ): Harness {
     const root = mkdtempSync(path.join(os.tmpdir(), `collq-eng-${name}-`));
@@ -321,6 +325,8 @@ export class Harness {
   get state(): ProjectState {
     return this.engine.state;
   }
+
+  setConcurrency(n: number): void { this.pool.setMax(n); }
 
   start(): void {
     this.engine.start();

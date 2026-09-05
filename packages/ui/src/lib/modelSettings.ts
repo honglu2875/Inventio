@@ -100,9 +100,9 @@ export function activeModelSettings(
 }
 
 export function defaultActiveModelSettings(
-  workflow: "council-v1" | "trajectories-v2" = "council-v1",
+  workflow: "council-v1" | "trajectories-v2" | "recurrent-v3" = "council-v1",
 ): ActiveModelSettings {
-  const defaults = workflow === "trajectories-v2" ? defaultTrajectoryConfig() : defaultConfig();
+  const defaults = workflow !== "council-v1" ? defaultTrajectoryConfig() : defaultConfig();
   return activeModelSettings(defaults.models);
 }
 

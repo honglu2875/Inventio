@@ -1,3 +1,4 @@
+import { ResearchChange } from "./research.js";
 import { VerificationEvidenceSummary } from "./verification-evidence.js";
 import { z } from "zod";
 import { ActiveModelSettings, ProjectConfig, ProjectSettings, WorkerRole } from "./config.js";
@@ -223,6 +224,7 @@ export type ProposedCard = z.infer<typeof ProposedCard>;
 const base = { seq: z.number().int().min(1), ts: z.string() };
 
 export const EventSchema = z.discriminatedUnion("type", [
+  z.object({ ...base, type: z.literal("research.updated"), change: ResearchChange }),
   // Lifecycle & phases
   z.object({ ...base, type: z.literal("project.created"), slug: z.string(), title: z.string(), statement: z.string(), contextMarkdown: z.string().optional(), config: ProjectConfig }),
   z.object({ ...base, type: z.literal("project.paused"), by: Actor }),
@@ -301,7 +303,7 @@ export const EventSchema = z.discriminatedUnion("type", [
 
   // Decisions (Planner)
   z.object({ ...base, type: z.literal("decision.requested"), decisionId: z.string(), kind: DecisionKind, waveId: z.string().nullable() }),
-  z.object({ ...base, type: z.literal("decision.proposed"), decisionId: z.string(), action: z.unknown(), usage: Usage.nullable() }),
+  z.object({ ...base, type: z.literal("decision.proposed"), decisionId: z.string(), action: z.unknown(), usage: Usage.nullable(), chargedTokens: z.number().int().nonnegative().optional() }),
   z.object({ ...base, type: z.literal("decision.rejected"), decisionId: z.string(), violations: z.array(z.string()) }),
   z.object({ ...base, type: z.literal("decision.accepted"), decisionId: z.string(), action: z.unknown() }),
   z.object({ ...base, type: z.literal("gate.opened"), decisionId: z.string() }),
@@ -547,6 +549,10 @@ export const EventSchema = z.discriminatedUnion("type", [
       "writeup_open",
       "mark_milestone",
       "flag_fact",
+      "research_search",
+      "research_open",
+      "research_checkpoint",
+      "audit_assess",
     ]),
     args: z.string(),
     returnedIds: z.array(z.string()),

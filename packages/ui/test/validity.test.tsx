@@ -23,7 +23,7 @@ describe("mathematical evidence views", () => {
     const state = initialState();
     state.claimConflicts.push({ leftClaimId: "K001", rightClaimId: "K002", reason: "The same residual is both zero and nonzero.", status: "OPEN", resolutionReason: null, recordedAtSeq: 1, resolvedAtSeq: null });
     const render = () => renderToStaticMarkup(<MemoryRouter><ClaimConflicts slug="test" state={state} /></MemoryRouter>);
-    expect(render()).toContain("Record resolution");
+    expect(render()).not.toContain("Record resolution");
     useStore.getState().resetSlot("test");
     useStore.getState().setConnection("test", "fixture");
     const html = render();

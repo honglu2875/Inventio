@@ -1,4 +1,4 @@
-import { defaultTrajectoryConfig } from "@inventio/schema";
+import { defaultRecurrentConfig } from "@inventio/schema";
 import type { FastifyInstance } from "fastify";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { connect, type AddressInfo } from "node:net";
@@ -13,11 +13,11 @@ import { EngineManager, mergeConfig, slugify } from "../src/server/manager.js";
 import { tailJsonl } from "../src/server/sse.js";
 import {
   FakePublicationCompiler,
-  finalOutput,
+  researchStopCalls,
   plannerCall,
   PUBLICATION_MATCH,
   publicationOutput,
-  TRAJECTORY_FINAL_MATCH,
+
   type SimCall
 } from "./helpers/harness.js";
 
@@ -122,7 +122,7 @@ async function parked(h: Harness, title: string, slug?: string): Promise<string>
   const { status, json } = await createProject(h.app, {
     title,
     statement: "Prove that every X is a Y.",
-    config: { ...defaultTrajectoryConfig(), allowWebSearch: false },
+    config: { ...defaultRecurrentConfig(), allowWebSearch: false },
     ...(slug ? { slug } : {}),
   });
   expect(status).toBe(201);
@@ -301,15 +301,12 @@ describe("diagnostics", () => {
 describe("standalone publication HTTP", () => {
   it("saves and serves TeX before an explicit local PDF compilation", async () => {
     const h = harness(1, [
-      plannerCall(
-        TRAJECTORY_FINAL_MATCH,
-        finalOutput("# Final report\n\nA partial theorem is proved, while the main implication remains open."),
-      ),
+      ...researchStopCalls("# Final report\n\nA partial theorem is proved, while the main implication remains open."),
       plannerCall(PUBLICATION_MATCH, publicationOutput()),
     ]);
     const created = await createProject(h.app, {
       title: "Publication boundary",
-      config: { budget: { totalTokens: 50_000 } },
+      config: { budget: { totalTokens: 10_000_000 }, limits: { maxWaves: 1 } },
       statement: "Determine whether every widget is round.",
     });
     expect(created.status).toBe(201);
@@ -461,7 +458,7 @@ describe("projects", () => {
       statement: "An early statement that intake will normalize.",
       contextMarkdown: "Long original notes that must remain available verbatim.",
       config: {
-        workflow: "trajectories-v2",
+        workflow: "recurrent-v3",
         budget: { totalTokens: 9_000_000 },
         allowWebSearch: true,
         sourceMounts: [
@@ -590,7 +587,7 @@ describe("projects", () => {
     const merged = mergeConfig({ budget: { totalTokens: 1234 }, autonomy: "gated" });
     expect(merged.budget.totalTokens).toBe(1234);
     expect(merged.budget.defaultTaskTokens).toBe(2_000_000);
-    expect(merged.workflow).toBe("trajectories-v2");
+    expect(merged.workflow).toBe("recurrent-v3");
     expect(merged.autonomy).toBe("gated");
     expect(() => mergeConfig({ budget: { totalTokens: -1 } })).toThrow();
   });
@@ -852,7 +849,7 @@ describe("steering routes", () => {
       slug: "trajectory-settings",
       statement: "Prove P.",
       config: {
-        workflow: "trajectories-v2",
+        workflow: "recurrent-v3",
         trajectory: {
           solversPerWave: 2,
           explorersPerWave: 2,
@@ -984,10 +981,10 @@ describe("steering routes", () => {
     expect(gate.statusCode).toBe(410);
 
     const wave = await h.app.inject({ method: "POST", url: `/api/projects/${slug}/waves/W001/interrupt` });
-    expect(wave.statusCode).toBe(409);
+    expect(wave.statusCode).toBe(404);
 
     const kill = await h.app.inject({ method: "POST", url: `/api/projects/${slug}/tasks/T001/interrupt` });
-    expect(kill.statusCode).toBe(409);
+    expect(kill.statusCode).toBe(404);
 
     const question = await h.app.inject({
       method: "POST",

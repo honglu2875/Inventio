@@ -1,3 +1,4 @@
+import { ResearchInspector } from "./RecurrentView";
 import { useCallback, useEffect } from "react";
 import { NavLink, Outlet, useParams, useSearchParams } from "react-router-dom";
 import { ProjectSlugContext } from "../components/ProjectContext";
@@ -26,7 +27,7 @@ export default function ProjectLayout(): JSX.Element {
   const sel = params.get("sel");
   const state = useProjectState(slug);
   const slot = useSlot(slug);
-  const readOnly = exported || state?.config.workflow === "council-v1";
+  const readOnly = exported || state?.config.workflow !== "recurrent-v3";
   const setSelection = useStore((s) => s.setSelection);
 
   useEffect(() => {
@@ -69,10 +70,10 @@ export default function ProjectLayout(): JSX.Element {
             Research
           </NavLink>
           <NavLink to={`/p/${slug}/manager${query}`} className="view-tab">
-            {state?.config.workflow === "trajectories-v2" ? "Summary" : "Manager"}
+            {state?.config.workflow !== "council-v1" ? "Summary" : "Manager"}
           </NavLink>
           <NavLink to={`/p/${slug}/evidence${query}`} className="view-tab">
-            {state?.config.workflow === "trajectories-v2" ? "Research map" : "Evidence"}
+            {state?.config.workflow !== "council-v1" ? "Research map" : "Evidence"}
           </NavLink>
           <NavLink to={`/p/${slug}/library${query}`} className="view-tab">
             Library
@@ -91,7 +92,7 @@ export default function ProjectLayout(): JSX.Element {
           </div>
         </main>
         {readOnly ? null : <DirectiveDock slug={slug} />}
-        {sel === null ? null : <Inspector slug={slug} nodeId={sel} onClose={closeInspector} />}
+        {sel === null ? null : state?.config.workflow === "recurrent-v3" && sel !== "problem" && !/^Q\d/.test(sel) ? <ResearchInspector key={sel} state={state} id={sel} onClose={closeInspector} /> : <Inspector slug={slug} nodeId={sel} onClose={closeInspector} />}
         {!readOnly && state?.openGateDecisionId ? (
           <GateCard slug={slug} decisionId={state.openGateDecisionId} />
         ) : null}

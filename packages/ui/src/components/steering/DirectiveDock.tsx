@@ -63,10 +63,10 @@ export default function DirectiveDock({ slug }: { slug: string }): JSX.Element {
             }
           }}
         />
-        <label className="checkbox small" title="jump the queue at the next decision">
+        {state?.config.workflow === "recurrent-v3" ? null : <label className="checkbox small" title="jump the queue at the next decision">
           <input type="checkbox" checked={urgent} disabled={terminal} onChange={(e) => setUrgent(e.target.checked)} />
           Urgent
-        </label>
+        </label>}
         <button
           type="button"
           className="button primary"

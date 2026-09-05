@@ -1,16 +1,10 @@
-import {
-  ProjectConfig,
-  SLUG_RE,
-  defaultTrajectoryConfig,
-  type ProjectState,
-  type SourceMount,
-} from "@inventio/schema";
+import { RecurrentMemoryBackend } from "../memory/recurrent.js";
+import { ProjectConfig, SLUG_RE, defaultRecurrentConfig, type ProjectState, type SourceMount } from "@inventio/schema";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { ProjectEngine, type EngineDeps } from "../engine/engine.js";
 import type { WorkerPool } from "../engine/pool.js";
 import { ArchivedProject, readProjectWorkflow } from "../legacy/archive.js";
-import { FileMemoryBackend } from "../memory/cardStore.js";
 import type { MemoryService } from "../memory/service.js";
 import {
   createTectonicCompiler,
@@ -108,7 +102,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
  * the other budget defaults, but a supplied array (e.g. sourceMounts) replaces.
  */
 export function mergeConfig(patch: unknown): ProjectConfig {
-  const base: Record<string, unknown> = { ...defaultTrajectoryConfig() };
+  const base: Record<string, unknown> = { ...defaultRecurrentConfig() };
   if (patch !== undefined && patch !== null) {
     if (!isPlainObject(patch)) throw new ManagerError("config must be an object", 400);
     for (const [key, value] of Object.entries(patch)) {
@@ -123,7 +117,7 @@ export function mergeConfig(patch: unknown): ProjectConfig {
       400,
     );
   }
-  if (parsed.data.workflow !== "trajectories-v2") throw new ManagerError("legacy council projects are view-only; new projects use trajectories-v2", 400);
+  if (parsed.data.workflow !== "recurrent-v3") throw new ManagerError("legacy workflows are view-only; new projects use recurrent-v3", 400);
   return parsed.data;
 }
 
@@ -169,18 +163,8 @@ export class EngineManager {
   /** Per-project memory backend: recalls land in that project's event log. */
   private wireMemory(engine: ProjectEngine): void {
     if (!this.memoryService) return;
-    const backend = new FileMemoryBackend(
-      engine.paths.dir,
-      (rec) => engine.recordRecall(rec),
-      {
-            getState: () => engine.state,
-            recordMilestone: (taskId, title, markdown) =>
-              engine.recordTrajectoryMilestone(taskId, title, markdown),
-            flagFact: (taskId, factId, reason) =>
-              engine.flagTrajectoryFact(taskId, factId, reason),
-      },
-    );
-    this.memoryService.registerProject(engine.slug, backend);
+    this.memoryService.registerProject(engine.slug, new RecurrentMemoryBackend(engine.paths.dir, rec => engine.recordRecall(rec), () => engine.state,
+      (scope, results) => engine.recurrent.checkpoint(scope, results), (scope, assessment) => engine.recurrent.assess(scope, assessment)));
   }
 
   createProject(args: CreateProjectArgs): ProjectEngine {
@@ -249,8 +233,8 @@ export class EngineManager {
     // Parsing makes a detached copy. External filesystem access is never
     // inherited; project-local uploads are copied below as ordinary bytes.
     const config = ProjectConfig.parse({
-      ...source.state.config,
-      workflow: "trajectories-v2",
+      ...(source.state.config.workflow === "recurrent-v3" ? source.state.config : defaultRecurrentConfig()),
+      workflow: "recurrent-v3",
       sourceMounts: [],
     });
     const legacyDigest = source.state.problem.contextDigestMarkdown;
@@ -286,7 +270,7 @@ export class EngineManager {
     const opened: ProjectEngine[] = [];
     for (const slug of listProjectSlugs(this.root)) {
       if (this.engines.has(slug)) continue;
-      if (readProjectWorkflow(projectPaths(this.root, slug).eventsFile) === "council-v1") {
+      if (readProjectWorkflow(projectPaths(this.root, slug).eventsFile) !== "recurrent-v3") {
         this.engines.set(slug, new ArchivedProject(this.root, slug));
         continue;
       }
@@ -427,7 +411,7 @@ export class EngineManager {
           paused: s.paused,
           terminal: s.terminal,
           autonomy: s.config.autonomy,
-          waves: s.waveOrder.length,
+          waves: s.config.workflow === "recurrent-v3" ? s.research.roundOrder.length : s.waveOrder.length,
           budget: s.budget,
           openBlockingQuestions: Object.values(s.questions).filter(
             (question) => question.status === "open" && question.blocking,

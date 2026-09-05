@@ -5,6 +5,7 @@ import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { CardStore, FileMemoryBackend } from "../src/memory/cardStore.js";
+import { RecurrentMemoryBackend } from "../src/memory/recurrent.js";
 import { MemoryService } from "../src/memory/service.js";
 import type { MemoryCard, RecallRecord } from "../src/memory/types.js";
 import { defaultTrajectoryConfig, initialState } from "@inventio/schema";
@@ -276,6 +277,28 @@ describe("MemoryService over HTTP", () => {
     clients.push(client);
     return client;
   }
+
+  it("enforces a blind mathematical-only view through every exposed MCP tool", async () => {
+    const state = initialState();
+    state.research.versions["B001.v1"] = { id: "B001.v1", resultId: "B001", version: 1, parentVersionId: null, sessionId: "S001", roundId: "W001", kind: "CALCULATION", title: "Boundary identity", statement: "D = 10/3", proofMarkdown: "Summing the two boundary terms gives 10/3.", dependencies: [], sourceIds: [], relationToGoal: "PARTIAL", attachments: [], hash: "a".repeat(64) };
+    state.research.versionOrder.push("B001.v1");
+    state.research.notes.N001 = { kind: "note.recorded", id: "N001", sessionId: "S001", roundId: "W001", name: "notes/old-opinion.md", hash: "b".repeat(64), markdown: "SECRET previous verdict and author confidence" };
+    const backend = new RecurrentMemoryBackend(dir, () => undefined, () => state, () => ({ notes: [], results: [] }), () => undefined);
+    service.registerProject("blind-research", backend);
+    const auditor = await connect(service.mintToken({ slug: "blind-research", taskId: "S002", role: "auditor", waveId: "W002", allowedVersionIds: ["B001.v1"] }));
+    expect((await auditor.listTools()).tools.map(t => t.name).sort()).toEqual(["audit_assess", "research_open", "research_search", "source_list", "source_open"].sort());
+    const opened = textOf(await auditor.callTool({ name: "research_open", arguments: { id: "B001.v1", start: 0, maxCharacters: 30000 } }));
+    expect(opened).toContain("D = 10/3");
+    expect(opened).not.toMatch(/SECRET|Current qualification|S001/);
+    expect(textOf(await auditor.callTool({ name: "research_search", arguments: { query: "SECRET", limit: 10 } }))).not.toContain("N001");
+    expect(textOf(await auditor.callTool({ name: "research_open", arguments: { id: "N001", start: 0, maxCharacters: 30000 } }))).not.toContain("SECRET");
+    for (const name of ["memory_search", "writeup_open", "knowledge_open", "research_checkpoint"]) {
+      expect((await auditor.callTool({ name, arguments: { query: "", results: [] } }) as ToolText).isError).toBe(true);
+    }
+    const solver = await connect(service.mintToken({ slug: "blind-research", taskId: "S001", role: "solver", waveId: "W002" }));
+    expect(textOf(await solver.callTool({ name: "research_open", arguments: { id: "N001", start: 0, maxCharacters: 30000 } }))).toContain("SECRET");
+    expect((await solver.callTool({ name: "audit_assess", arguments: {} }) as ToolText).isError).toBe(true);
+  });
 
   it("lists memory and original-source tools", async () => {
     const client = await connect(solverToken);

@@ -7,87 +7,59 @@ strong Codex Solvers and Explorers long, independent sessions on one problem,
 checks every proposed result independently, and preserves the evolving
 mathematics through a live graph interface.
 
-The premise is simple: sustained research trajectories should have room to
-think, while a claimed proof should still survive independent scrutiny. A
-deterministic runtime handles scheduling, isolation, persistence, budgets, and
-state transitions; it does not tell the researchers which mathematics to try.
-New projects use this long-trajectory workflow. Projects made under the earlier
-Research Manager/council workflow remain fully replayable as view-only archives.
-Their saved results, sources, transcripts, and exports remain available; start
-a fresh trajectory project from the original intake to do new research.
+Each round has one long Solver session and one long Explorer session. Fresh
+rounds retain refined mathematics and a compact brief; the complete note
+library stays available through project-scoped search and open tools.
+
+A support-model verifier checks each exact proof version. Concrete objections
+return to its originating author conversation for revision, withdrawal or a
+mathematical defense. From round two, a strong independent auditor checks all
+established mathematics in parallel, without prior verdicts or author traces.
+A decisive first-round result receives the same strong audit before stopping.
 
 ## Documents
 
-The proposed [recurrent research redesign](SESSION-DESIGN.md) keeps one long
-Solver and Explorer per round, adds author-session repairs and independent
-strong memory audit, and retains round summaries and final writing. It records
-the replacement design; the current runtime is still described below.
-
-The [validity roadmap](docs/VALIDITY-ROADMAP.md) records the staged safeguards,
-remaining experiments and costs. [Offline evaluation](docs/EVALUATION.md) scores
-explicitly selected saved checks without model calls or project writes.
-
-| file | what it is |
+| file | purpose |
 |---|---|
-| `TRAJECTORY-DESIGN.md` | The current default workflow: long trajectories, claims, facts, and independent checks. Read this first. |
-| `PROTOCOL.md` | The preserved rules for legacy `council-v1` projects. |
-| `DESIGN.md` | The compatible legacy architecture and shared event/runtime design. |
-| `packages/ui/UI-SPEC.md` | The binding UI design: views, node chrome, tokens, interactions. |
-| `packages/conductor/src/prompts/README.md` | Prompt architecture: every model-facing instruction, call site, and lifecycle condition. |
-| `PLAN.md` | Milestone tracker and deviation log — the recovery point if work is interrupted. |
+| [SESSION-DESIGN.md](SESSION-DESIGN.md) | The implemented recurrent workflow and its validity/cost choices. |
+| [TRAJECTORY-DESIGN.md](TRAJECTORY-DESIGN.md) | Historical trajectories-v2 semantics for archived runs. |
+| [PROTOCOL.md](PROTOCOL.md), [DESIGN.md](DESIGN.md) | Historical council semantics and shared infrastructure. |
+| [UI-SPEC.md](packages/ui/UI-SPEC.md) | Interface invariants. |
+| [Prompt architecture](packages/conductor/src/prompts/README.md) | Model calls, context boundaries, and lifecycle conditions. |
+| [Validity roadmap](docs/VALIDITY-ROADMAP.md) | Expert evaluation and remaining experiments. |
 
 ## How it works
 
-```text
-browser ── REST + SSE ──> deterministic runtime ──> long Solver/Explorer sessions
-                              │                         │
-                              │                         └── independent Verifiers
-                              └── projects/<slug>/ (events + Markdown + transcripts)
-```
+- **Two model choices:** research for Solver, Explorer, audit and final writing;
+  support for intake, routine verification and round editing. Conversations
+  retain their chosen model. Researchers choose their mathematical methods.
+- **One versioned record:** propositions, calculations, conjectures and notes
+  keep distinct content kinds. Checking status and relation to the original
+  goal are separate. Immutable dependencies refer to exact proof versions;
+  quarantining a premise immediately disqualifies dependent arguments.
+- **Bounded disagreement:** one routine check per proof version; at most two
+  author responses per result per round. Repairs resume the originating
+  conversation and serialize with the current researcher of that role.
+  A defense needs independent assessment; confidence never counts as a vote.
+- **Independent audit:** each later round audits the full established record,
+  including unchanged facts. New versions enter the audit tail. Operational
+  inability leaves coverage incomplete. Opposing unresolved conclusions block
+  decisive stopping.
+- **Readable outputs:** a support editor writes the round summary and compact
+  brief after the record is sealed. The runtime inserts exact mathematics and
+  qualifications. One strong final writer explains a previously fixed outcome,
+  with a deterministic fallback if composition fails.
+- **Graph and library:** select a result to follow its premises, author session,
+  checks, objections, revisions and audits. Summaries and the final report link
+  to the same versions. Every saved note remains accessible on demand.
+- **Local persistence:** the append-only event log, original sources, Markdown
+  notes and parent-owned execution archives remain on disk. Cache-read tokens,
+  uncached input, output and estimates are recorded separately; the token
+  allowance is a scheduling proxy, not a price estimate.
 
-- **Research trajectories are the main thinkers.** Every round starts the
-  configured number of independent Solvers and Explorers (by default two of
-  each). Solvers attack the exact problem; Explorers may pursue special cases,
-  examples, computations, obstructions, neighboring theorems, or connections.
-  Their default session limit is two hours, and Web search is available when
-  the project permits it.
-- **There is no model middle-manager in the default workflow.** Each trajectory
-  starts from the same current mathematical view, active facts and claims,
-  retained source catalog, and current human guidance. It chooses and revises
-  its own strategy. Deterministic code starts the configured trajectories and
-  never invents a mathematical direction.
-- **Intake preserves the submission.** Your objective, long background notes,
-  and uploaded documents are stored before any model runs. A strong initial
-  reader drafts `W000 · Current mathematical view`; before accepting it, you
-  may return to the raw input, revise text or files, and regenerate W000. The
-  accepted files, hashes, abstracts, and excerpts remain available in Library
-  throughout the project, while the event log retains the revision history.
-- **Claims become facts only after independent checks.** A trajectory returns a
-  complete write-up and a small list of worthwhile new mathematical statements,
-  each with a self-contained alleged proof. Damaged or non-standalone claim text
-  gets one repair turn in its originating trajectory. Identical statements are
-  linked before review, and one proof at a time receives up to `V` independent
-  checks; at least `W` passes are required to record it as a fact. A missing
-  dependency or malformed presentation is kept as `NEEDS_REVISION`, distinct
-  from a mathematical proof failure. Failed and duplicate claims remain
-  inspectable.
-  A later trajectory may raise one concrete correction to an accepted fact,
-  which goes through the same process.
-- **Long work stays inspectable.** Trajectories can mark sparse mathematical
-  milestones, use a private writable calculation directory, search or open the
-  project library and original sources, and leave both a readable final
-  write-up and their complete Codex event archive.
-- **Research prose uses clear academic English.** Claims and verifier reports
-  retain the decisive derivations and exact source hypotheses. Concision must
-  never replace mathematical evidence.
-- **The current view changes slowly.** After a round's checks settle, a strong
-  summary reader may make a small edit to W000 only when the new results
-  materially change the mathematical picture. It cannot choose work or brief
-  the next round.
-- **Everything is an event.** `projects/<slug>/events.jsonl` is the
-  operational truth; Markdown artifacts are the mathematical evidence. The UI
-  runs the same reducer as the backend, so the graph can't disagree with the
-  state.
+Only `recurrent-v3` executes. Earlier council and trajectory runs are view-only
+archives with their original event meanings. Their files are never migrated or
+repaired on opening. Cloning intake creates a fresh recurrent project.
 
 ## Quickstart
 
@@ -197,16 +169,12 @@ them to trajectories through project-scoped read tools.
 The system runs to a terminal state on its own. You can always:
 
 - **send a direction** — supplied verbatim to every Solver and Explorer in the
-  next round; an urgent direction stops the current round first;
+  next round; guidance does not interrupt the current mathematical conversation;
 - **pause and resume** — pausing prevents new work and does not silently resume
   on restart;
-- **change project settings** — one saved form controls the token ceiling,
-  maximum research rounds, autonomy, Web-search permission, and the
-  number and model/reasoning effort of Solvers, Explorers, Verifiers, and the
-  summary reader. It also controls `V`, the independent checks requested for
-  each claim, and `W`, the passes required. It shows the effective values stored
-  with that project, including choices made at creation. A save affects future
-  process launches; a process already in flight continues unchanged.
+- **change project settings** — choose research/support models and effort,
+  the total allowance, long-session target and maximum rounds. New model
+  choices apply to new rounds; existing conversations keep their pinned model.
 - **allow or deny Web search** — the same Settings form controls whether the
   initial reader and future trajectories and Verifiers receive native Web
   search. Turning it off affects future process launches; a process already
@@ -218,8 +186,8 @@ The system runs to a terminal state on its own. You can always:
   final mathematical reader to reassess the complete record and draft TeX for the
   mathematical community. A complete proof or counterexample becomes a
   preprint; anything uncertain becomes a research report containing the sound
-  partial results, calculations, precise gap, and next steps. This final reading
-  may change the earlier assessment. Inventio first saves the complete TeX and
+  partial results, calculations, precise gap, and next steps. This exposition may downgrade an unsupported conclusion, but cannot elevate
+  or reverse the fixed research outcome. Inventio first saves the complete TeX and
   opens a persistent overview. **Generate PDF** is a separate action using
   Tectonic's untrusted mode. If compilation fails, the error is shown beside
   the still-downloadable TeX, and **Retry PDF** reuses it without another model

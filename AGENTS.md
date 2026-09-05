@@ -1,17 +1,15 @@
 # Inventio repository guidance
 
 Inventio is a local research application for difficult mathematics. New
-projects use the `trajectories-v2` workflow: deterministic code launches long,
-independent Solver and Explorer sessions, independently checks their
-self-contained claims, and preserves accepted results as facts. There is no
-model controller between the problem and these trajectories. Projects created
-under the earlier `council-v1` workflow are view-only archives. Their saved
-Research Manager notes and event meanings must remain replayable without
-reinterpretation; no legacy project may resume execution or receive writes.
+projects use the `recurrent-v3` workflow described in `SESSION-DESIGN.md`:
+one long Solver and Explorer per round, originating-session repairs,
+independent weaker checks, and strong blind memory audit. There is no model
+controller. Earlier council and trajectory workflows are view-only archives;
+their event meanings remain replayable without reinterpretation or writes.
 
 When changing this repository:
 
-1. Read `TRAJECTORY-DESIGN.md` for the default workflow. Read `PROTOCOL.md` and
+1. Read `SESSION-DESIGN.md` for the default workflow. Read `PROTOCOL.md` and
    `DESIGN.md` when changing the compatible council workflow or shared
    infrastructure, and `packages/ui/UI-SPEC.md` for relevant interface
    invariants.

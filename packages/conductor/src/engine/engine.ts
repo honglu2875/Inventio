@@ -1,75 +1,18 @@
-import { evidenceIssues, readExecutionEvidence, sha256 } from "../verification/executionEvidence.js";
-import {
-  ActiveModelSettings,
-  ClaimComparisonOutput,
-  FinalOutput,
-  factConcerns,
-  factIsSettled,
-  factDisplayStatus,
-  IntakeOutput,
-  ProjectSettings,
-  PublicationOutput,
-  SummaryRevisionOutput,
-  TrajectoryOutput,
-  Usage as UsageSchema,
-  VerificationOutput,
-  applyEvent,
-  currentTerminalPublication,
-  initialState,
-  makeId,
-  nextContinuationRevisionId,
-  pendingIntakeDecision,
-  projectSettingsFromConfig,
-  repairLegacyArtifactControls,
-  usageSpend,
-  type ClaimState,
-  type Event,
-  type IdKind,
-  type IntakeMemory,
-  type IntakeSource,
-  type ModelChoice,
-  type Phase,
-  type ProjectConfig,
-  type ProjectState,
-  type PublicationState,
-  type Result,
-  type RosterEntry,
-  type TaskState,
-  type TrajectoryOutput as TrajectoryOutputT,
-  type Usage,
-} from "@inventio/schema";
+import { RecurrentResearch } from "./recurrent.js";
+import { applyResearchChange, resultStatus, resultMathematics, usageSpend, type ResearchChange } from "@inventio/schema";
+import { ActiveModelSettings, IntakeOutput, ProjectSettings, PublicationOutput, applyEvent, currentTerminalPublication, initialState, makeId, nextContinuationRevisionId, pendingIntakeDecision, projectSettingsFromConfig, type Event, type IdKind, type IntakeMemory, type IntakeSource, type ModelChoice, type Phase, type ProjectConfig, type ProjectState, type PublicationState, type TaskState, type Usage } from "@inventio/schema";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { z } from "zod";
 import { parseModelJson } from "../codex/modelJson.js";
-import {
-  CODEX_TURN_BASE_TOKENS,
-  ZERO_USAGE,
-  addUsage,
-  type InterruptReason,
-} from "../codex/runner.js";
-import { runStructured, type StructuredRunResult } from "../codex/structured.js";
+import { type InterruptReason } from "../codex/runner.js";
+import { runStructured } from "../codex/structured.js";
 import { readProjectWorkflow } from "../legacy/archive.js";
 import type { RecallRecord, TaskScope } from "../memory/types.js";
 import { PUBLICATION_PROMPT, publicationPacketFiles } from "../prompts/publication.js";
-import { MODEL_TOOL_NAMES } from "../prompts/tools.js";
-import {
-  CLAIM_COMPARISON_PROMPT,
-  SUMMARY_REVIEW_PROMPT,
-  TRAJECTORY_FINAL_PROMPT,
-  TRAJECTORY_INTAKE_PROMPT,
-  TRAJECTORY_RESTART_PROMPT,
-  TRAJECTORY_WORKER_PROMPT,
-  VERIFICATION_PROMPT,
-  claimComparisonFiles,
-  latestMathematicalView,
-  summaryReviewFiles,
-  trajectoryFinalFiles,
-  trajectoryIntakeFiles,
-  trajectoryWorkerFiles,
-  verificationFiles,
-} from "../prompts/trajectories.js";
+import { RESEARCH_TOOL_DEFINITIONS } from "../prompts/tools.js";
+import { INTAKE_PROMPT, intakeFiles } from "../prompts/intake.js";
 import {
   createTectonicCompiler,
   renderPublicationTex,
@@ -114,61 +57,6 @@ export interface EngineDeps {
   progressThrottleMs?: number;
 }
 
-type TaskAccountingBasis = "reported" | "estimated" | "mixed";
-
-interface TaskAccounting {
-  /** Exact usage from every run that reached turn.completed, if any did. */
-  reportedUsage: Usage | null;
-  /** Exact spend plus conservative estimates for runs that never reported. */
-  chargedTokens: number;
-  basis: TaskAccountingBasis;
-}
-
-function taskAccountingBasis(hasReported: boolean, hasEstimated: boolean): TaskAccountingBasis {
-  return hasReported && hasEstimated ? "mixed" : hasReported ? "reported" : "estimated";
-}
-
-/** Add one resumed model call to the cumulative charge already on the task. */
-function resumedTaskAccounting(
-  previousCharge: number,
-  previousBasis: TaskAccountingBasis,
-  current: TaskAccounting,
-  cumulativeReportedUsage: Usage,
-): TaskAccounting {
-  const hasPrevious = previousCharge > 0;
-  const hasReported =
-    (hasPrevious && previousBasis !== "estimated") || current.basis !== "estimated";
-  const hasEstimated =
-    (hasPrevious && previousBasis !== "reported") || current.basis !== "reported";
-  return {
-    reportedUsage: hasReported ? cumulativeReportedUsage : null,
-    chargedTokens: previousCharge + current.chargedTokens,
-    basis: taskAccountingBasis(hasReported, hasEstimated),
-  };
-}
-
-/**
- * A structured call may contain retries. Some can report exact usage while a
- * final timed-out run cannot, so account each constituent run independently.
- */
-function structuredTaskAccounting<T>(result: StructuredRunResult<T>): TaskAccounting {
-  const reportedRuns = result.runs.filter((run) => run.usage !== null);
-  const estimatedTokens = result.runs
-    .filter((run) => run.usage === null)
-    .reduce((total, run) => total + Math.max(0, Math.floor(run.estimatedTokens)), 0);
-  const reportedTokens = usageSpend(result.usage);
-  return {
-    reportedUsage: reportedRuns.length > 0 ? result.usage : null,
-    chargedTokens: reportedTokens + estimatedTokens,
-    basis:
-      reportedRuns.length > 0 && estimatedTokens > 0
-        ? "mixed"
-        : reportedRuns.length > 0
-          ? "reported"
-          : "estimated",
-  };
-}
-
 function stripJsonFence(text: string): string {
   const trimmed = text.trim();
   const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
@@ -197,28 +85,6 @@ function readablePartialWork(text: string): string {
   }
 }
 
-function abstractSentenceCount(text: string): number {
-  const compact = text.trim().replace(/\s+/g, " ");
-  if (compact === "") return 0;
-  const marked = compact.match(/[.!?]+(?=\s|$)/g)?.length ?? 0;
-  return Math.max(1, marked + (/[.!?]+$/.test(compact) ? 0 : 1));
-}
-
-function summaryAbstractViolations(text: string): string[] {
-  const violations: string[] = [];
-  const trimmed = text.trim();
-  if (trimmed.length > 480) violations.push("abstract exceeds 480 characters");
-  if (abstractSentenceCount(trimmed) > 4) violations.push("abstract exceeds four sentences");
-  if (/(?:^|\n)\s*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s)/m.test(trimmed)) {
-    violations.push("abstract contains a heading, list, or outline");
-  }
-  const withoutClosingMarks = trimmed.replace(/[\s"'’”`*_)$\]}]+$/g, "");
-  if (!/[.!?]$/.test(withoutClosingMarks)) {
-    violations.push("abstract does not end with a complete sentence");
-  }
-  return violations;
-}
-
 function normalizeMathematicalViewMarkdown(waveId: string, markdown: string): string {
   const lines = markdown.trim().split("\n");
   const first = lines[0]?.trim() ?? "";
@@ -231,37 +97,21 @@ function normalizeMathematicalViewMarkdown(waveId: string, markdown: string): st
   return [`# ${waveId} — Current mathematical view`, "", ...lines].join("\n").trim();
 }
 
-const VERIFIER_FILESYSTEM_ISOLATION = "packet-only-v1";
-const MAX_VERIFICATION_PROCESS_REPLACEMENTS = 2;
-
-/**
- * ProjectEngine: the per-project Conductor (DESIGN §6). One logical thread:
- * the main loop runs the protocol sequentially; external calls land as
- * events and wake it. The event log is the only mutation path.
- */
-function normalizeClaimStatement(statement: string): string {
-  // Mathematical symbols are case-sensitive: A and a are not identical.
-  return statement.replace(/\s+/g, " ").trim().replace(/[.;]+$/, "");
-}
-
 export class ProjectEngine extends EventEmitter {
   readonly slug: string;
   readonly paths: ProjectPaths;
   readonly state: ProjectState;
+  readonly recurrent: RecurrentResearch;
   private log: EventLog;
   private deps: EngineDeps;
   private stopped = false;
   private loopPromise: Promise<void> | null = null;
   private wakeWaiters: (() => void)[] = [];
   private killHandles = new Map<string, (reason: InterruptReason) => void>();
-  private trajectoryOutputs = new Map<string, TrajectoryOutputT>();
-  private lastProgressAt = new Map<string, number>();
   private intakeRefreshInFlight = false;
   private interruptedIntakeChecked = false;
   private interruptedPublicationChecked = false;
   private publicationPromise: Promise<void> | null = null;
-  /** In-flight v2 verification calls; durable queued/completed state lives in events. */
-  private verificationPromises = new Map<string, Promise<void>>();
 
   private constructor(slug: string, deps: EngineDeps, log: EventLog, state: ProjectState) {
     super();
@@ -270,13 +120,30 @@ export class ProjectEngine extends EventEmitter {
     this.paths = projectPaths(deps.root, slug);
     this.log = log;
     this.state = state;
+    this.recurrent = new RecurrentResearch({
+      state, paths: this.paths, deps,
+      emit: change => this.emitResearch(change),
+      stopped: () => this.stopped,
+      blocked: () => this.blocked(), wait: () => this.wake(),
+      registerKill: (id, kill) => { if (kill) this.killHandles.set(id, kill); else this.killHandles.delete(id); },
+      question: (text, context) => {
+        if (Object.values(this.state.questions).some(q => q.text === text && q.status === "open")) return;
+        this.emitEvent({ type: "question.raised", id: this.allocId("question"), text, context, blocking: true, raisedBy: "conductor" });
+      },
+      terminal: (result, markdown) => {
+        const finalPath = `research/final-${this.state.research.roundOrder.length}.md`;
+        writeFileAtomic(path.join(this.paths.dir, finalPath), `RESULT: ${result}\n\n${markdown}`);
+        this.phaseTo("TERMINAL", "recurrent research stopped");
+        this.emitEvent({ type: "terminal.reached", result, finalPath });
+      },
+    });
   }
 
   static create(
     deps: EngineDeps,
     args: { slug: string; title: string; statement: string; contextMarkdown?: string; config: ProjectConfig },
   ): ProjectEngine {
-    if (args.config.workflow !== "trajectories-v2") throw new Error("legacy council projects are view-only");
+    if (args.config.workflow !== "recurrent-v3") throw new Error("unsupported workflow; create a recurrent-v3 project");
     const paths = projectPaths(deps.root, args.slug);
     if (existsSync(paths.projectFile)) throw new Error(`project ${args.slug} already exists`);
     createProjectDirs(paths);
@@ -302,20 +169,14 @@ export class ProjectEngine extends EventEmitter {
   static load(deps: EngineDeps, slug: string): ProjectEngine {
     const paths = projectPaths(deps.root, slug);
     readProjectFile(paths); // validates presence
-    if (readProjectWorkflow(paths.eventsFile) !== "trajectories-v2") {
-      throw new Error("legacy council projects must be opened through the view-only archive");
+    if (readProjectWorkflow(paths.eventsFile) !== "recurrent-v3") {
+      throw new Error("legacy projects must be opened through the view-only archive");
     }
     const log = EventLog.open(paths.eventsFile);
     try {
       const state = initialState();
       for (const e of log.events) applyEvent(state, e);
       const engine = new ProjectEngine(slug, deps, log, state);
-      engine.repairCollidedTrajectoryWriteups();
-      engine.recoverRejectedTrajectoryReturns();
-      engine.repairCompletedTrajectoryReturns();
-      engine.repairClosedTrajectoryDockets();
-      engine.repairSavedTaskAccounting();
-      engine.closeInterruptedTrajectoryDecisions();
       return engine;
     } catch (error) {
       log.close();
@@ -324,6 +185,24 @@ export class ProjectEngine extends EventEmitter {
   }
 
   // ------------------------------------------------------------------ core
+
+  private emitResearch(change: ResearchChange): void {
+    // Validate a detached projection before appending. A rejected model target
+    // must never poison the append-only log. Mathematical bodies are immutable,
+    // so shallow collection copies are sufficient and avoid copying proofs.
+    const source = this.state.research;
+    const draft = {
+      ...source,
+      rounds: Object.fromEntries(Object.entries(source.rounds).map(([id, r]) => [id, { ...r, sessionIds: [...r.sessionIds] }])),
+      roundOrder: [...source.roundOrder],
+      sessions: Object.fromEntries(Object.entries(source.sessions).map(([id, s]) => [id, { ...s, turnIds: [...s.turnIds] }])),
+      turns: Object.fromEntries(Object.entries(source.turns).map(([id, t]) => [id, { ...t }])),
+      versions: { ...source.versions }, versionOrder: [...source.versionOrder], notes: { ...source.notes },
+      responses: [...source.responses], assessments: [...source.assessments], final: source.final ? { ...source.final } : null,
+    };
+    applyResearchChange(draft, change);
+    this.emitEvent({ type: "research.updated", change });
+  }
 
   private emitEvent(partial: NewEvent): Event {
     const event = this.log.append(partial);
@@ -338,10 +217,6 @@ export class ProjectEngine extends EventEmitter {
   private wake(): Promise<void> {
     if (this.stopped) return Promise.resolve();
     return new Promise((resolve) => this.wakeWaiters.push(resolve));
-  }
-
-  private async until(cond: () => boolean): Promise<void> {
-    while (!this.stopped && !cond()) await this.wake();
   }
 
   private allocId(kind: IdKind): string {
@@ -401,10 +276,8 @@ export class ProjectEngine extends EventEmitter {
     await Promise.all([
       this.loopPromise?.catch(() => undefined),
       this.publicationPromise?.catch(() => undefined),
-      ...[...this.verificationPromises.values()].map((promise) =>
-        promise.catch(() => undefined),
-      ),
     ]);
+    await this.recurrent.settle();
     this.log.close();
   }
 
@@ -416,10 +289,7 @@ export class ProjectEngine extends EventEmitter {
   }
 
   private openWaveId(): string | null {
-    for (const wid of this.state.waveOrder) {
-      if (this.state.waves[wid]!.status !== "closed") return wid;
-    }
-    return null;
+    return this.state.research.roundOrder.find(id => this.state.research.rounds[id]!.status !== "closed") ?? null;
   }
 
   /**
@@ -517,16 +387,16 @@ export class ProjectEngine extends EventEmitter {
       this.interruptedPublicationChecked = true;
       this.recoverInterruptedPublications();
     }
-    await this.trajectoryLoop();
+    await this.researchLoop();
   }
 
-  // ---------------------------------------------------- trajectories-v2 loop
+  // ------------------------------------------------------ recurrent research
 
   /**
    * Single-controller execution: code fixes the number of independent long
    * trajectories, while no model sits between the problem and those workers.
    */
-  private async trajectoryLoop(): Promise<void> {
+  private async researchLoop(): Promise<void> {
     while (!this.stopped) {
       if (this.state.terminal) return;
       if (this.blocked()) {
@@ -548,1733 +418,10 @@ export class ProjectEngine extends EventEmitter {
         continue;
       }
 
-      this.repairTrajectoryInvariants();
-      this.launchPendingVerifications();
-
-      const openWave = this.openWaveId();
-      if (openWave) {
-        await this.runTrajectoryWave(openWave);
-        continue;
-      }
-
-      // An explicit continuation retries an unavailable comparison once. A
-      // failure never starts an automatic sequence of reconciliation calls.
-      const previousStop = this.state.terminalHistory.at(-1)?.reachedAtSeq ?? 0;
-      const retryComparison = this.state.waveOrder.find(id => {
-        const wave = this.state.waves[id]!;
-        return wave.conflictCheck === "UNAVAILABLE" && wave.claimsComparedAtSeq < previousStop;
-      });
-      if (retryComparison) {
-        await this.compareTrajectoryClaims(retryComparison, true);
-        continue;
-      }
-
-      const needsSummary = this.state.waveOrder.find((waveId) => {
-        const wave = this.state.waves[waveId]!;
-        return wave.status === "closed" && !wave.summaryReviewed;
-      });
-      if (needsSummary) {
-        if (!this.state.waves[needsSummary]!.claimsCompared) {
-          await this.compareTrajectoryClaims(needsSummary);
-          continue;
-        }
-        await this.drainVerifications();
-        if (this.stopped) return;
-        await this.reviewTrajectorySummary(needsSummary);
-        continue;
-      }
-
-      if (this.state.waveOrder.some(id => this.state.waves[id]!.conflictCheck === "UNAVAILABLE")) {
-        await this.finalizeTrajectory("UNCERTAIN", "the comparison of potentially conflicting statements could not be completed; continuation will retry that comparison");
-        continue;
-      }
-
-      const decisive = this.trajectoryDecisiveResult();
-      if (decisive !== null) {
-        await this.drainVerifications();
-        const confirmed = this.trajectoryDecisiveResult();
-        if (confirmed !== null) {
-          await this.finalizeTrajectory(
-            confirmed,
-            `an independently verified result ${confirmed === "PROVED" ? "proves" : "disproves"} the stated problem`,
-          );
-          continue;
-        }
-      }
-
-      if (this.state.waveOrder.length >= this.state.config.limits.maxWaves) {
-        await this.drainVerifications();
-        const result = this.trajectoryDecisiveResult() ?? "UNCERTAIN";
-        await this.finalizeTrajectory(
-          result,
-          result === "UNCERTAIN"
-            ? `completed ${this.state.waveOrder.length} research rounds without a verified proof or disproof of the whole problem`
-            : `independent verification established a ${result.toLowerCase()} result`,
-        );
-        continue;
-      }
-
-      if (!this.planTrajectoryWave()) {
-        await this.drainVerifications();
-        await this.finalizeTrajectory(
-          this.trajectoryDecisiveResult() ?? "UNCERTAIN",
-          "the remaining token allowance is too small for another long research round",
-        );
-      }
+      await this.recurrent.run();
     }
   }
 
-  /**
-   * Guidance accepted for one particular round. Directives are consumed as
-   * soon as the round is planned, so packet construction must follow the
-   * decision that consumed them rather than looking only for pending entries.
-   * A continuation note belongs to the first round planned after that note.
-   */
-  private trajectoryOwnerGuidance(waveId: string): string {
-    const parts: string[] = [];
-    const wave = this.state.waves[waveId];
-    if (!wave) return "";
-    for (const id of this.state.directiveOrder) {
-      const directive = this.state.directives[id]!;
-      if (directive.consumedByDecision === wave.decisionId) parts.push(directive.text);
-    }
-    const continuation = this.state.continuations.at(-1);
-    const waveIndex = this.state.waveOrder.indexOf(waveId);
-    const previousPlannedAt =
-      waveIndex > 0
-        ? this.state.waves[this.state.waveOrder[waveIndex - 1]!]!.plannedAtSeq
-        : 0;
-    if (
-      continuation &&
-      continuation.atSeq > previousPlannedAt &&
-      continuation.atSeq < wave.plannedAtSeq
-    ) {
-      parts.push(continuation.note);
-    }
-    return parts.join("\n\n");
-  }
-
-  /** Deterministically create N Solver and M Explorer trajectories. */
-  private planTrajectoryWave(): boolean {
-    const settings = this.state.config.trajectory;
-    const count = settings.solversPerWave + settings.explorersPerWave;
-    if (count < 1) return false;
-    const availableForResearch = Math.floor(
-      this.remainingBudget() * (1 - this.state.config.budget.reserveFraction),
-    );
-    const tokenBudget = Math.min(
-      this.state.config.budget.defaultTaskTokens,
-      Math.floor(availableForResearch / count),
-    );
-    if (tokenBudget < 60_000) return false;
-
-    const waveId = this.allocId("wave");
-    const decisionId = this.allocId("decision");
-    const roster: RosterEntry[] = [];
-    // allocId() derives its answer from replayed state. That state does not
-    // advance until wave.planned is emitted, so calling allocId("task") several
-    // times while constructing one event would repeat the same ID. Reserve the
-    // whole contiguous range locally and let the event advance the counter.
-    const firstTaskNumber = (this.state.counters.task ?? 0) + 1;
-    let taskOffset = 0;
-    const add = (role: "solver" | "explorer", ordinal: number): void => {
-      const taskId = makeId("task", firstTaskNumber + taskOffset);
-      taskOffset += 1;
-      roster.push({
-        taskId,
-        role,
-        methodTag: `${role}-trajectory-${ordinal}`,
-        direction:
-          role === "solver"
-            ? `Independent sustained attack on the original problem (${ordinal})`
-            : `Independent sustained exploration around the original problem (${ordinal})`,
-        briefMarkdown:
-          role === "solver"
-            ? "Develop the strongest rigorous attack you can on the original problem, choosing and revising your own strategy."
-            : "Explore mathematically useful nearby results, special cases, examples, computations, obstructions, or methods, following the most informative route you find.",
-        tokenBudget,
-        computation: true,
-        webSearch: this.state.config.allowWebSearch,
-        reviewOf: null,
-        grants: { artifactIds: [], cardIds: [], sourceMounts: [] },
-      });
-    };
-    for (let i = 1; i <= settings.solversPerWave; i += 1) add("solver", i);
-    for (let i = 1; i <= settings.explorersPerWave; i += 1) add("explorer", i);
-    if (new Set(roster.map((entry) => entry.taskId)).size !== roster.length) {
-      throw new Error("internal error: a trajectory round contains duplicate task IDs");
-    }
-
-    this.emitEvent({ type: "decision.requested", decisionId, kind: "next_move", waveId: null });
-    const action = {
-      workflow: "trajectories-v2",
-      round: waveId,
-      solvers: settings.solversPerWave,
-      explorers: settings.explorersPerWave,
-    };
-    this.emitEvent({ type: "decision.proposed", decisionId, action, usage: null });
-    this.emitEvent({ type: "decision.accepted", decisionId, action });
-    this.emitEvent({
-      type: "wave.planned",
-      waveId,
-      title: `Research round ${this.state.waveOrder.length + 1}`,
-      decisionId,
-      roster,
-      reserveTokens: Math.max(0, this.remainingBudget() - tokenBudget * count),
-      rationale: "The configured independent Solver and Explorer trajectories begin from the shared current mathematical view.",
-    });
-    for (const id of this.state.directiveOrder) {
-      if (this.state.directives[id]!.status === "pending") {
-        this.emitEvent({ type: "directive.consumed", id, decisionId });
-      }
-    }
-    return true;
-  }
-
-  private trajectoryOutputSchema() {
-    return TrajectoryOutput.superRefine((output, context) => {
-      output.claims.forEach((claim, index) => {
-        for (const id of claim.dependsOnFactIds ?? []) {
-          if (!this.state.facts[id]) context.addIssue({
-            code: "custom", path: ["claims", index, "dependsOnFactIds"],
-            message: `Unknown project fact ${id}; cite only existing facts and state their mathematics in the proof.`,
-          });
-        }
-      });
-    });
-  }
-
-  private readTrajectoryOutput(taskId: string): TrajectoryOutputT | null {
-    const cached = this.trajectoryOutputs.get(taskId);
-    if (cached) return cached;
-    const file = path.join(this.paths.tasksDir, taskId, "output.json");
-    if (!existsSync(file)) return null;
-    try {
-      const parsed = this.trajectoryOutputSchema().safeParse(parseModelJson(readFileSync(file, "utf8")));
-      if (!parsed.success) return null;
-      this.trajectoryOutputs.set(taskId, parsed.data);
-      return parsed.data;
-    } catch {
-      return null;
-    }
-  }
-
-  private readTaskMeta(taskId: string): Record<string, unknown> | null {
-    const file = path.join(this.paths.tasksDir, taskId, "meta.json");
-    if (!existsSync(file)) return null;
-    try {
-      const value: unknown = JSON.parse(readFileSync(file, "utf8"));
-      return value !== null && typeof value === "object" && !Array.isArray(value)
-        ? (value as Record<string, unknown>)
-        : null;
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * A narrow compatibility repair for returns rejected solely by an older
-   * objective-preparation validator. The model's final JSON must validate
-   * under the current full trajectory schema; otherwise nothing is changed.
-   */
-  private recoverRejectedTrajectoryReturns(): void {
-
-    for (const task of Object.values(this.state.tasks)) {
-      if (
-        task.status !== "failed" ||
-        task.invalidOutputErrors === null ||
-        !task.error?.startsWith("output invalid after repair:") ||
-        (task.role !== "solver" && task.role !== "explorer") ||
-        task.artifactIds.length > 0
-      ) {
-        continue;
-      }
-      const taskDir = path.join(this.paths.tasksDir, task.id);
-      const candidates = ["output.json", "last-message.json"];
-      let recovered: TrajectoryOutputT | null = null;
-      for (const name of candidates) {
-        const file = path.join(taskDir, name);
-        if (!existsSync(file)) continue;
-        try {
-          const parsed = this.trajectoryOutputSchema().safeParse(
-            parseModelJson(stripJsonFence(readFileSync(file, "utf8"))),
-          );
-          if (parsed.success) {
-            recovered = parsed.data;
-            break;
-          }
-        } catch {
-          // A malformed or still-invalid return remains failed and inspectable.
-        }
-      }
-      if (!recovered) continue;
-
-      writeFileAtomic(path.join(taskDir, "output.json"), JSON.stringify(recovered, null, 2));
-      this.trajectoryOutputs.set(task.id, recovered);
-      const meta = this.readTaskMeta(task.id) ?? {};
-      writeFileAtomic(
-        path.join(taskDir, "meta.json"),
-        JSON.stringify(
-          {
-            ...meta,
-            status: "completed",
-            recoveredFromRejectedOutput: true,
-            recoveredAt: new Date().toISOString(),
-          },
-          null,
-          2,
-        ),
-      );
-      this.emitEvent({
-        type: "task.completed",
-        taskId: task.id,
-        usage: this.readTrajectoryMetaUsage(task.id),
-        clearInvalidOutput: true,
-      });
-    }
-  }
-
-  /** Finish the idempotent materialization half of any recovered completion. */
-  private repairCompletedTrajectoryReturns(): void {
-
-    for (const waveId of this.state.waveOrder) {
-      const wave = this.state.waves[waveId]!;
-      for (const entry of wave.roster) {
-        const task = this.state.tasks[entry.taskId];
-        if (
-          task?.status !== "completed" ||
-          (entry.role !== "solver" && entry.role !== "explorer")
-        ) {
-          continue;
-        }
-        const output = this.readTrajectoryOutput(entry.taskId);
-        if (output) this.materializeTrajectoryReturn(waveId, entry, output);
-      }
-    }
-  }
-
-  private recordTaskAccounting(taskId: string, accounting: TaskAccounting): void {
-    const task = this.state.tasks[taskId];
-    if (!task || accounting.chargedTokens <= task.chargedTokens) return;
-    this.emitEvent({
-      type: "task.accounted",
-      taskId,
-      chargedTokens: accounting.chargedTokens,
-      basis: accounting.basis,
-    });
-  }
-
-  /**
-   * Backfill terminal calls written before estimated fallback accounting was
-   * durable. Exact meta usage wins; otherwise the last progress estimate is
-   * recorded. No completed task is ever charged twice.
-   */
-  private repairSavedTaskAccounting(): void {
-    for (const task of Object.values(this.state.tasks)) {
-      if (task.status === "queued") continue;
-      const meta = this.readTaskMeta(task.id);
-      const parsedUsage = UsageSchema.safeParse(meta?.usage);
-      const reported = parsedUsage.success ? usageSpend(parsedUsage.data) : 0;
-      const tokenAccounting =
-        meta?.tokenAccounting !== null && typeof meta?.tokenAccounting === "object"
-          ? (meta.tokenAccounting as Record<string, unknown>)
-          : null;
-      const savedCharge =
-        typeof meta?.chargedTokens === "number" && Number.isFinite(meta.chargedTokens)
-          ? Math.max(0, Math.floor(meta.chargedTokens))
-          : typeof tokenAccounting?.actual === "number" &&
-            Number.isFinite(tokenAccounting.actual) &&
-            tokenAccounting.actual > 0
-            ? Math.floor(tokenAccounting.actual)
-            : null;
-      const chargedTokens = savedCharge ?? (reported > 0 ? reported : Math.floor(task.estimatedTokens));
-      const basis: TaskAccountingBasis =
-        meta?.accountingBasis === "mixed" || meta?.accountingBasis === "estimated"
-          ? meta.accountingBasis
-          : reported > 0
-            ? "reported"
-            : "estimated";
-      this.recordTaskAccounting(task.id, {
-        reportedUsage: parsedUsage.success && reported > 0 ? parsedUsage.data : null,
-        chargedTokens,
-        basis,
-      });
-    }
-  }
-
-  /** A previous process cannot still own a model call after this engine loads. */
-  private closeInterruptedTrajectoryDecisions(): void {
-
-    for (const decisionId of [...this.state.decisionOrder]) {
-      const decision = this.state.decisions[decisionId]!;
-      if (
-        decision.status !== "requested" ||
-        (decision.kind !== "curation" &&
-          decision.kind !== "final" &&
-          decision.kind !== "next_move")
-      ) {
-        continue;
-      }
-      this.emitEvent({ type: "decision.proposed", decisionId, action: null, usage: null });
-      this.emitEvent({
-        type: "decision.rejected",
-        decisionId,
-        violations: [
-          "The model call ended with the previous conductor process; Inventio will retry it automatically from the unchanged mathematical record.",
-        ],
-      });
-    }
-  }
-
-  private trajectoryWaveDocket(waveId: string): string {
-    const wave = this.state.waves[waveId]!;
-    const lines = [`# Research round ${waveId}`, ""];
-    for (const entry of wave.roster) {
-      const task = this.state.tasks[entry.taskId]!;
-      const output = this.readTrajectoryOutput(entry.taskId);
-      const partialFile = path.join(this.paths.tasksDir, entry.taskId, "salvage.md");
-      const partial =
-        !output && existsSync(partialFile)
-          ? readablePartialWork(readFileSync(partialFile, "utf8")).slice(0, 1_600)
-          : "";
-      lines.push(
-        `## ${entry.taskId} — ${entry.role} (${task.status})`,
-        "",
-        output?.summaryMarkdown ??
-        (partial !== ""
-          ? [
-            "Partial notes preserved when the research session ended before a structured return; they have not been independently checked:",
-            "",
-            partial,
-          ].join("\n")
-          : task.error ?? task.interruptReason ?? "No mathematical return was completed."),
-        "",
-      );
-    }
-    return lines.join("\n");
-  }
-
-  /** Refresh old closed-round summaries when a return or partial note was recovered. */
-  private repairClosedTrajectoryDockets(): void {
-
-    for (const waveId of this.state.waveOrder) {
-      const wave = this.state.waves[waveId]!;
-      if (wave.status !== "closed") continue;
-      const docketMarkdown = this.trajectoryWaveDocket(waveId);
-      if (docketMarkdown === wave.docketMarkdown) continue;
-      this.emitEvent({ type: "wave.closed", waveId, docketMarkdown });
-    }
-  }
-
-  /**
-   * Repair projects written by the early trajectories-v2 allocator bug.
-   *
-   * Those logs reused A001 for every Solver and E001 for every Explorer. The
-   * task-local structured returns are durable, so replay can reconstruct the
-   * intended write-ups without rewriting history: each recovered file is
-   * followed by a fresh artifact event, and affected claim source labels are
-   * corrected by their own audit events. The historical first-record order is
-   * used so recovered identifiers retain completion order. Once repaired,
-   * repeated loads are byte- and event-idempotent.
-   */
-  private repairCollidedTrajectoryWriteups(): void {
-
-    const owners = new Map<string, Set<string>>();
-    const orderedTasks: Record<"solver" | "explorer", string[]> = {
-      solver: [],
-      explorer: [],
-    };
-    const seenTasks = new Set<string>();
-    for (const event of this.log.events) {
-      if (event.type !== "artifact.recorded" || event.kind !== "writeup" || !event.taskId) {
-        continue;
-      }
-      const role = this.state.tasks[event.taskId]?.role;
-      if (role !== "solver" && role !== "explorer") continue;
-      const artifactOwners = owners.get(event.artifactId) ?? new Set<string>();
-      artifactOwners.add(event.taskId);
-      owners.set(event.artifactId, artifactOwners);
-      if (!seenTasks.has(event.taskId)) {
-        seenTasks.add(event.taskId);
-        orderedTasks[role].push(event.taskId);
-      }
-    }
-    if (![...owners.values()].some((artifactOwners) => artifactOwners.size > 1)) return;
-
-    for (const role of ["solver", "explorer"] as const) {
-      const idKind: IdKind = role === "solver" ? "attempt" : "exploration";
-      for (const [index, taskId] of orderedTasks[role].entries()) {
-        const task = this.state.tasks[taskId];
-        const output = task?.status === "completed" ? this.readTrajectoryOutput(taskId) : null;
-        if (!task || !output) continue;
-
-        const artifactId = makeId(idKind, index + 1);
-        const relPath = path.join("writeups", `${artifactId}.md`);
-        const markdown = output.writeupMarkdown.trim() + "\n";
-        const absolutePath = path.join(this.paths.dir, relPath);
-        const current = this.state.artifacts[artifactId];
-        const fileMatches =
-          existsSync(absolutePath) && readFileSync(absolutePath, "utf8") === markdown;
-        if (
-          current?.kind !== "writeup" ||
-          current.taskId !== taskId ||
-          current.path !== relPath ||
-          !fileMatches
-        ) {
-          writeFileAtomic(absolutePath, markdown);
-          this.emitEvent({
-            type: "artifact.recorded",
-            artifactId,
-            kind: "writeup",
-            taskId,
-            path: relPath,
-            conclusion: output.conclusion,
-          });
-        }
-
-        for (const claimId of this.state.claimOrder) {
-          const claim = this.state.claims[claimId]!;
-          if (claim.sourceTaskId !== taskId) continue;
-          const suffix = claim.provenance.match(/, result \d+$/)?.[0];
-          if (!suffix || !claim.provenance.includes(`(from ${taskId})`)) continue;
-          const repaired = `${artifactId} (from ${taskId})${suffix}`;
-          if (claim.provenance === repaired) continue;
-          this.emitEvent({
-            type: "claim.provenanceRepaired",
-            claimId,
-            from: claim.provenance,
-            to: repaired,
-          });
-        }
-      }
-    }
-  }
-
-  /** Recover usage written immediately before a valid trajectory output. */
-  private readTrajectoryMetaUsage(taskId: string): Usage {
-    const file = path.join(this.paths.tasksDir, taskId, "meta.json");
-    if (!existsSync(file)) return ZERO_USAGE;
-    try {
-      const value = JSON.parse(readFileSync(file, "utf8")) as { usage?: unknown };
-      const parsed = UsageSchema.safeParse(value.usage);
-      return parsed.success ? parsed.data : ZERO_USAGE;
-    } catch {
-      return ZERO_USAGE;
-    }
-  }
-
-  private async runTrajectoryWave(waveId: string): Promise<void> {
-    const wave = this.state.waves[waveId]!;
-    const jobs = wave.roster.map((entry) =>
-      this.deps.pool.run(() => this.executeTrajectoryTask(waveId, entry)),
-    );
-    await Promise.all(jobs);
-    if (this.stopped || this.state.waves[waveId]!.status === "closed") return;
-    this.emitEvent({
-      type: "wave.closed",
-      waveId,
-      docketMarkdown: this.trajectoryWaveDocket(waveId),
-    });
-  }
-
-  private async executeTrajectoryTask(waveId: string, entry: RosterEntry): Promise<void> {
-    if (this.stopped || (entry.role !== "solver" && entry.role !== "explorer")) return;
-    const task = this.state.tasks[entry.taskId]!;
-    if (task.status === "completed") {
-      const output = this.readTrajectoryOutput(task.id);
-      if (output) this.materializeTrajectoryReturn(waveId, entry, output);
-      return;
-    }
-    if (task.status === "failed" || task.status === "interrupted") return;
-
-    // output.json is written before task.completed. If the server stopped in
-    // that narrow interval, the validated mathematical return is already the
-    // durable source of truth and must not be recomputed by resuming the model.
-    const recoveredOutput = this.readTrajectoryOutput(task.id);
-    if (recoveredOutput) {
-      this.emitEvent({
-        type: "task.completed",
-        taskId: task.id,
-        usage: this.readTrajectoryMetaUsage(task.id),
-      });
-      this.materializeTrajectoryReturn(waveId, entry, recoveredOutput);
-      return;
-    }
-
-    const wave = this.state.waves[waveId]!;
-    const resuming = task.status === "running";
-    if (resuming && task.threadId === null) {
-      this.emitEvent({
-        type: "task.interrupted",
-        taskId: task.id,
-        reason: "conductor-restart",
-        usage: null,
-      });
-      return;
-    }
-    if (!resuming && wave.status === "softInterrupted") {
-      this.emitEvent({
-        type: "task.interrupted",
-        taskId: task.id,
-        reason: "round-soft-interrupt",
-        usage: null,
-      });
-      return;
-    }
-
-    const taskDir = path.join(this.paths.tasksDir, task.id);
-    const packetDir = path.join(taskDir, "packet");
-    const previousMeta = resuming ? this.readTaskMeta(task.id) : null;
-    const previousUsageResult = UsageSchema.safeParse(previousMeta?.usage);
-    const previousUsage = previousUsageResult.success ? previousUsageResult.data : ZERO_USAGE;
-    const previousCharge = resuming ? task.chargedTokens : 0;
-    const previousBasis: TaskAccountingBasis =
-      previousMeta?.accountingBasis === "reported" ||
-        previousMeta?.accountingBasis === "estimated" ||
-        previousMeta?.accountingBasis === "mixed"
-        ? previousMeta.accountingBasis
-        : "estimated";
-    let manifest = task.packetManifest;
-    if (!resuming) {
-      try {
-        mkdirSync(packetDir, { recursive: true });
-        mkdirSync(path.join(packetDir, "scratch"), { recursive: true });
-        const sameRole = wave.roster.filter((candidate) => candidate.role === entry.role);
-        const ordinal = sameRole.findIndex((candidate) => candidate.taskId === entry.taskId) + 1;
-        const files = trajectoryWorkerFiles(
-          this.state,
-          waveId,
-          entry.taskId,
-          entry.role,
-          ordinal,
-          this.trajectoryOwnerGuidance(waveId),
-          this.deps.memory !== null,
-        );
-        for (const [name, content] of Object.entries(files)) {
-          writeFileAtomic(path.join(packetDir, name), content);
-        }
-        manifest = [...Object.keys(files), "scratch/"].sort();
-        this.emitEvent({
-          type: "task.dispatched",
-          taskId: entry.taskId,
-          waveId,
-          role: entry.role,
-          methodTag: entry.methodTag,
-          direction: entry.direction,
-          packetManifest: manifest,
-          budgetTokens: entry.tokenBudget,
-        });
-      } catch (error) {
-        this.emitEvent({
-          type: "task.failed",
-          taskId: entry.taskId,
-          error: `research context could not be prepared: ${String(error)}`,
-        });
-        return;
-      }
-    }
-
-    const token = this.deps.memory?.mintToken({
-      slug: this.slug,
-      taskId: entry.taskId,
-      role: entry.role,
-      waveId,
-    });
-    const model = this.state.config.models[entry.role];
-    const packetSize = manifest.reduce((total, relative) => {
-      try {
-        return total + statSync(path.join(packetDir, relative)).size;
-      } catch {
-        return total;
-      }
-    }, 0);
-
-    try {
-      const result = await runStructured(
-        {
-          bin: this.deps.codexBin,
-          cwd: packetDir,
-          prompt: resuming ? TRAJECTORY_RESTART_PROMPT : TRAJECTORY_WORKER_PROMPT,
-          sandbox: "workspace-write",
-          webSearch: this.state.config.allowWebSearch,
-          // Do not inherit the repository's legacy council AGENTS.md. The
-          // trajectory reads its deliberately composed packet/AGENTS.md and
-          // retains shell, scratch-space, memory, and Web-search access.
-          isolatedTask: true,
-          eventsArchiveFile: path.join(taskDir, "codex-events.jsonl"),
-          model: model.model,
-          effort: model.effort,
-          outputSchemaFile: path.join(taskDir, "output-schema.json"),
-          outputLastMessageFile: path.join(taskDir, "last-message.json"),
-          ...(resuming ? { resumeThreadId: task.threadId! } : {}),
-          ...(this.deps.memory && token
-            ? {
-              mcp: {
-                serverName: "memory",
-                url: this.deps.memory.url,
-                tokenEnvVar: "INVENTIO_TASK_TOKEN",
-                token,
-                enabledTools: MODEL_TOOL_NAMES,
-              },
-            }
-            : {}),
-          // The configured number is a planning target, not an exact live
-          // meter. Exact usage arrives only at turn completion; interrupt at
-          // 150% as an emergency ceiling while preserving long trajectories.
-          maxEstimatedTokens: () =>
-            Math.max(
-              1,
-              this.state.tasks[entry.taskId]!.budgetTokens * 1.5 - previousCharge,
-            ),
-          baseEstimatedTokens: CODEX_TURN_BASE_TOKENS + Math.ceil(packetSize / 4),
-          wallClockMs:
-            this.deps.taskWallClockMsOverride ??
-            this.state.config.budget.taskWallClockMinutes * 60_000,
-          killGraceMs: this.deps.killGraceMs ?? 10_000,
-          onThread: (threadId) => {
-            if (this.state.tasks[entry.taskId]!.threadId !== threadId) {
-              this.emitEvent({ type: "task.session", taskId: entry.taskId, threadId });
-            }
-          },
-          registerKill: (kill) => this.killHandles.set(entry.taskId, kill),
-          onProgress: ({ estimatedTokens, lastItem }) => {
-            const now = Date.now();
-            const last = this.lastProgressAt.get(entry.taskId) ?? 0;
-            if (now - last >= (this.deps.progressThrottleMs ?? 2_000)) {
-              this.lastProgressAt.set(entry.taskId, now);
-              this.emitEvent({
-                type: "task.progress",
-                taskId: entry.taskId,
-                estimatedTokens: previousCharge + estimatedTokens,
-                lastItem,
-              });
-            }
-          },
-        },
-        this.trajectoryOutputSchema(),
-        {
-          onInvalidOutput: (errors) =>
-            this.emitEvent({ type: "task.outputInvalid", taskId: entry.taskId, errors }),
-        },
-      );
-      const currentAccounting = structuredTaskAccounting(result);
-      const cumulativeUsage = addUsage(previousUsage, result.usage);
-      const accounting = resumedTaskAccounting(
-        previousCharge,
-        previousBasis,
-        currentAccounting,
-        cumulativeUsage,
-      );
-
-      writeFileAtomic(
-        path.join(taskDir, "meta.json"),
-        JSON.stringify(
-          {
-            workflow: "trajectories-v2",
-            threadId: result.threadId,
-            status: result.status,
-            model: model.model,
-            effort: model.effort,
-            usage: cumulativeUsage,
-            usageReported: accounting.reportedUsage !== null,
-            estimatedTokens: accounting.chargedTokens,
-            chargedTokens: accounting.chargedTokens,
-            accountingBasis: accounting.basis,
-            tokenAccounting: {
-              kind: "soft-target",
-              target: this.state.tasks[entry.taskId]!.budgetTokens,
-              actual: accounting.chargedTokens,
-              exceededBy: Math.max(
-                0,
-                accounting.chargedTokens - this.state.tasks[entry.taskId]!.budgetTokens,
-              ),
-            },
-            finishedAt: new Date().toISOString(),
-          },
-          null,
-          2,
-        ),
-      );
-
-      if (result.status === "completed" && result.output) {
-        writeFileAtomic(path.join(taskDir, "output.json"), JSON.stringify(result.output, null, 2));
-        this.trajectoryOutputs.set(entry.taskId, result.output);
-        this.emitEvent({ type: "task.completed", taskId: entry.taskId, usage: cumulativeUsage });
-        this.recordTaskAccounting(entry.taskId, accounting);
-        this.materializeTrajectoryReturn(waveId, entry, result.output);
-      } else if (result.status === "interrupted") {
-        if (result.lastAgentMessage) {
-          writeFileAtomic(path.join(taskDir, "salvage.md"), result.lastAgentMessage);
-        }
-        this.recordTaskAccounting(entry.taskId, accounting);
-        // A process reload is a pause, not a mathematical outcome. Keep the
-        // durable task running so the next engine resumes the same Codex
-        // thread; explicit user interrupts still become terminal below.
-        if (this.stopped && result.interruptReason === "killed") return;
-        this.emitEvent({
-          type: "task.interrupted",
-          taskId: entry.taskId,
-          reason: result.interruptReason ?? "interrupted",
-          usage: accounting.reportedUsage,
-        });
-      } else {
-        this.emitEvent({
-          type: "task.failed",
-          taskId: entry.taskId,
-          usage: accounting.reportedUsage,
-          error:
-            (result.validationErrors
-              ? `output invalid after repair: ${result.validationErrors.join("; ")}`
-              : null) ??
-            result.errorDetail ??
-            "research process failed",
-        });
-        this.recordTaskAccounting(entry.taskId, accounting);
-      }
-    } finally {
-      this.killHandles.delete(entry.taskId);
-      if (token) this.deps.memory?.revokeToken(token);
-    }
-  }
-
-  private materializeTrajectoryReturn(
-    waveId: string,
-    entry: RosterEntry,
-    output: TrajectoryOutputT,
-  ): void {
-    let artifact = Object.values(this.state.artifacts).find(
-      (candidate) => candidate.taskId === entry.taskId && candidate.kind === "writeup",
-    );
-    if (!artifact) {
-      const artifactId = this.allocId(entry.role === "explorer" ? "exploration" : "attempt");
-      const relPath = path.join("writeups", `${artifactId}.md`);
-      writeFileAtomic(path.join(this.paths.dir, relPath), output.writeupMarkdown.trim() + "\n");
-      this.emitEvent({
-        type: "artifact.recorded",
-        artifactId,
-        kind: "writeup",
-        taskId: entry.taskId,
-        path: relPath,
-        conclusion: output.conclusion,
-      });
-      artifact = this.state.artifacts[artifactId]!;
-    }
-
-    for (const [index, proposed] of output.claims.entries()) {
-      const provenance = `${artifact.id} (from ${entry.taskId}), result ${index + 1}`;
-      let claim = Object.values(this.state.claims).find(
-        (candidate) =>
-          candidate.sourceTaskId === entry.taskId && candidate.provenance === provenance,
-      );
-      if (!claim) {
-        const claimId = this.allocId("claim");
-        const relPath = path.join("claims", `${claimId}.md`);
-        const markdown = [
-          `# ${proposed.title}`,
-          "",
-          `Relation to the original problem: **${proposed.relationToGoal}**`,
-          "",
-          "## Statement",
-          "",
-          proposed.statementMarkdown.trim(),
-          "",
-          "## Alleged proof",
-          "",
-          proposed.proofMarkdown.trim(),
-          "",
-        ].join("\n");
-        writeFileAtomic(path.join(this.paths.dir, relPath), markdown);
-        this.emitEvent({
-          type: "claim.added",
-          claimId,
-          title: proposed.title.trim(),
-          statement: proposed.statementMarkdown.trim(),
-          proofMarkdown: proposed.proofMarkdown.trim(),
-          status: "UNVERIFIED",
-          provenance,
-          sourceTaskId: entry.taskId,
-          sourceWaveId: waveId,
-          path: relPath,
-          relationToGoal: proposed.relationToGoal,
-          kind: "mathematical",
-          targetFactId: null,
-          verificationPolicy: {
-            verifiersPerClaim: this.state.config.trajectory.verifiersPerClaim,
-            passesRequired: this.state.config.trajectory.passesRequired,
-          },
-          dependsOn: [...new Set(proposed.dependsOnFactIds ?? [])],
-        });
-        claim = this.state.claims[claimId]!;
-        const normalized = normalizeClaimStatement(claim.statement);
-        for (const olderId of this.state.claimOrder) {
-          if (olderId === claim.id) continue;
-          const older = this.state.claims[olderId]!;
-          if (
-            normalizeClaimStatement(older.statement) === normalized &&
-            !older.equivalentIds.includes(claim.id)
-          ) {
-            this.emitEvent({
-              type: "claim.equivalent",
-              leftClaimId: older.id,
-              rightClaimId: claim.id,
-              reason: "The normalized mathematical statements are identical.",
-              by: "conductor",
-            });
-          }
-        }
-      }
-    }
-  }
-
-  /**
-   * Compare statements once per round before any new proof is sent for
-   * checking. It records identity and explicit incompatibility observations
-   * without selecting a true statement, editing a proof, or steering research.
-   */
-  private async compareTrajectoryClaims(waveId: string, retry = false): Promise<void> {
-    const wave = this.state.waves[waveId];
-    if (!wave || (wave.claimsCompared && !retry)) return;
-    const currentIds = this.state.claimOrder.filter(
-      (claimId) => this.state.claims[claimId]?.sourceWaveId === waveId,
-    );
-    const comparable = currentIds.some((claimId) => {
-      const claim = this.state.claims[claimId]!;
-      return this.state.claimOrder.some((otherId) => {
-        if (otherId === claimId) return false;
-        const other = this.state.claims[otherId]!;
-        return (
-          other.kind === "mathematical" && claim.kind === "mathematical" &&
-          !claim.equivalentIds.includes(otherId)
-        );
-      });
-    });
-
-    let conflictCheck: "COMPLETE" | "UNAVAILABLE" = comparable ? "UNAVAILABLE" : "COMPLETE";
-    if (comparable) {
-      const decisionId = this.allocId("decision");
-      this.emitEvent({ type: "decision.requested", decisionId, kind: "curation", waveId });
-      const call = await this.runReaderCall(
-        decisionId,
-        claimComparisonFiles(this.state, waveId),
-        CLAIM_COMPARISON_PROMPT,
-        ClaimComparisonOutput,
-        {
-          model: this.state.config.models.summaryReader,
-          isolatedTask: true,
-          memoryAccess: false,
-          webSearch: false,
-        },
-      );
-      if (this.stopped) return;
-      this.emitEvent({
-        type: "decision.proposed",
-        decisionId,
-        action: call.output,
-        usage: call.usage,
-      });
-
-      if (call.output) {
-        // Check proposed identity transitively before applying any links. An
-        // inconsistent comparison cannot silently erase its own warning.
-        const identity = new Map(this.state.claimOrder.map(id => [id, new Set(this.state.claims[id]!.equivalentIds)]));
-        for (const group of call.output.equivalentClaimGroups) {
-          for (const id of group) for (const other of group) identity.get(id)?.add(other);
-        }
-        const alsoIdentical = (left: string, right: string): boolean => {
-          const seen = new Set<string>();
-          const pending = [left];
-          while (pending.length) {
-            const id = pending.pop()!;
-            if (id === right) return true;
-            if (seen.has(id)) continue;
-            seen.add(id);
-            pending.push(...identity.get(id) ?? []);
-          }
-          return false;
-        };
-        const invalidReference = call.output.equivalentClaimGroups.flat().some(id => !this.state.claims[id]) ||
-          call.output.conflicts.some(entry => !this.state.claims[entry.leftClaimId] || !this.state.claims[entry.rightClaimId] || alsoIdentical(entry.leftClaimId, entry.rightClaimId));
-        conflictCheck = invalidReference ? "UNAVAILABLE" : "COMPLETE";
-        const current = new Set(currentIds);
-        const groups: string[][] = [];
-        for (const proposed of invalidReference ? [] : call.output.equivalentClaimGroups) {
-          const ids = [...new Set(proposed.map((id) => id.trim()))].filter(
-            (id) => this.state.claims[id] !== undefined,
-          );
-          if (ids.length < 2 || !ids.some((id) => current.has(id))) continue;
-          const first = this.state.claims[ids[0]!]!;
-          if (
-            ids.some((id) => {
-              const claim = this.state.claims[id]!;
-              return (
-                claim.kind !== first.kind ||
-                claim.targetFactId !== first.targetFactId ||
-                claim.relationToGoal !== first.relationToGoal
-              );
-            })
-          ) {
-            continue;
-          }
-          groups.push(ids);
-        }
-        // Reject unknown IDs, self-pairs, correction claims and any pair
-        // that is also declared identical. This is a warning, not a truth vote.
-        const conflicts = call.output.conflicts.filter((entry) => {
-          if (invalidReference) return false;
-          const left = this.state.claims[entry.leftClaimId];
-          const right = this.state.claims[entry.rightClaimId];
-          return left && right && left.id !== right.id &&
-            left.kind === "mathematical" && right.kind === "mathematical" &&
-            (current.has(left.id) || current.has(right.id)) &&
-            !left.equivalentIds.includes(right.id) &&
-            !groups.some((ids) => ids.includes(left.id) && ids.includes(right.id));
-        });
-        const accepted = { equivalentClaimGroups: groups, conflicts };
-        if (invalidReference) this.emitEvent({ type: "decision.rejected", decisionId, violations: ["The comparison contains unknown claims or incompatible identity and conflict observations."] });
-        else this.emitEvent({ type: "decision.accepted", decisionId, action: accepted });
-        for (const ids of groups) {
-          for (let leftIndex = 0; leftIndex < ids.length; leftIndex += 1) {
-            for (let rightIndex = leftIndex + 1; rightIndex < ids.length; rightIndex += 1) {
-              const left = this.state.claims[ids[leftIndex]!]!;
-              const right = this.state.claims[ids[rightIndex]!]!;
-              if (left.equivalentIds.includes(right.id)) continue;
-              this.emitEvent({
-                type: "claim.equivalent",
-                leftClaimId: left.id,
-                rightClaimId: right.id,
-                reason: `The pre-review comparison found the mathematical statements identical (${waveId}).`,
-                by: "summary_reader",
-              });
-            }
-          }
-        }
-        for (const conflict of conflicts) {
-          const [left, right] = [conflict.leftClaimId, conflict.rightClaimId].sort();
-          if (this.state.claimConflicts.some((entry) => entry.leftClaimId === left && entry.rightClaimId === right)) continue;
-          this.emitEvent({ type: "claim.conflictRecorded", ...conflict, by: "summary_reader" });
-        }
-      } else {
-        this.emitEvent({
-          type: "decision.rejected",
-          decisionId,
-          violations: [call.error ?? "claim comparison failed"],
-        });
-      }
-    }
-
-    this.emitEvent({ type: "wave.claimsCompared", waveId, conflictCheck });
-    this.repairTrajectoryInvariants();
-  }
-
-  /** Only one proof in an identical-statement group is checked at a time. */
-  private claimVerificationRepresentative(claimId: string): string | null {
-    const component = this.equivalentClaimComponent(claimId)
-      .filter((id) => this.state.claims[id]?.status === "UNVERIFIED")
-      .sort(
-        (left, right) =>
-          this.state.claimOrder.indexOf(left) - this.state.claimOrder.indexOf(right),
-      );
-    if (component.length === 0) return null;
-    const alreadyStarted = component.find(
-      (id) => (this.state.claims[id]?.verificationIds.length ?? 0) > 0,
-    );
-    return alreadyStarted ?? component[0]!;
-  }
-
-  private ensureClaimVerifications(claimId: string): void {
-    const claim = this.state.claims[claimId];
-    if (!claim || claim.status !== "UNVERIFIED") return;
-    if (this.claimVerificationRepresentative(claimId) !== claimId) return;
-    const target =
-      claim.verificationPolicy?.verifiersPerClaim ??
-      this.state.config.trajectory.verifiersPerClaim;
-    const usefulOrPending = claim.verificationIds.filter((verificationId) => {
-      const verification = this.state.verifications[verificationId];
-      return verification?.status !== "completed" || verification.verdict !== "ERROR";
-    }).length;
-    const maxAttempts = target + MAX_VERIFICATION_PROCESS_REPLACEMENTS;
-    const needed = Math.max(
-      0,
-      Math.min(target - usefulOrPending, maxAttempts - claim.verificationIds.length),
-    );
-    for (let offset = 0; offset < needed; offset += 1) {
-      this.emitEvent({
-        type: "verification.requested",
-        evidenceRequired: true,
-        verificationId: this.allocId("verification"),
-        claimId,
-        ordinal: claim.verificationIds.length + 1,
-      });
-    }
-  }
-
-  private launchPendingVerifications(): void {
-    for (const verificationId of this.state.verificationOrder) {
-      const verification = this.state.verifications[verificationId]!;
-      if (
-        verification.status === "completed" ||
-        this.verificationPromises.has(verificationId)
-      ) {
-        continue;
-      }
-      const promise = this.deps.pool
-        .run(() => this.executeVerification(verificationId))
-        .catch((error) => {
-          if (this.stopped || this.state.verifications[verificationId]?.status === "completed") return;
-          this.emitEvent({
-            type: "verification.completed",
-            verificationId,
-            verdict: "ERROR",
-            finding: null,
-            summaryMarkdown: `The verification process failed: ${String(error).slice(0, 1_500)}`,
-            artifactPath: null,
-            usage: null,
-          });
-        })
-        .finally(() => {
-          this.verificationPromises.delete(verificationId);
-          this.wakeWaiters.splice(0).forEach((wake) => wake());
-        });
-      this.verificationPromises.set(verificationId, promise);
-    }
-  }
-
-  private async executeVerification(verificationId: string): Promise<void> {
-    const verification = this.state.verifications[verificationId];
-    if (!verification || verification.status === "completed" || this.stopped) return;
-    const claim = this.state.claims[verification.claimId];
-    if (!claim) return;
-    if (verification.status === "queued") {
-      this.emitEvent({ type: "verification.started", verificationId });
-    }
-
-    const dir = path.join(this.paths.verificationsDir, verificationId);
-    const packetDir = path.join(dir, "packet");
-    const outputFile = path.join(dir, "output.json");
-    const recoveredMeta = this.readVerificationMeta(dir);
-    if (
-      existsSync(outputFile) &&
-      recoveredMeta.filesystemIsolation === VERIFIER_FILESYSTEM_ISOLATION
-    ) {
-      try {
-        const recoveredJson = JSON.parse(readFileSync(outputFile, "utf8")) as unknown;
-        // A check may have written output.json immediately before a server
-        // upgrade added finding categories. Preserve that durable result.
-        const compatible =
-          recoveredJson !== null &&
-            typeof recoveredJson === "object" &&
-            !("finding" in recoveredJson) &&
-            ((recoveredJson as { verdict?: unknown }).verdict === "PASS" ||
-              (recoveredJson as { verdict?: unknown }).verdict === "FAIL")
-            ? {
-              ...recoveredJson,
-              finding:
-                (recoveredJson as { verdict: "PASS" | "FAIL" }).verdict === "PASS"
-                  ? "NONE"
-                  : "PROOF_GAP",
-            }
-            : recoveredJson;
-        const recovered = VerificationOutput.safeParse(compatible);
-        if (recovered.success) {
-          const checked = this.checkVerificationEvidence(verificationId, recovered.data);
-          const relPath = path.join("verifications", verificationId, "report.md");
-          writeFileAtomic(
-            path.join(this.paths.dir, relPath),
-            checked.reportMarkdown.trim() + "\n",
-          );
-          this.emitEvent({
-            type: "verification.completed",
-            verificationId,
-            verdict: checked.verdict,
-            finding: checked.finding,
-            summaryMarkdown: checked.summaryMarkdown,
-            artifactPath: relPath,
-            usage: recoveredMeta.usage,
-          });
-          this.evaluateTrajectoryClaim(claim.id);
-          return;
-        }
-      } catch {
-        // A partial or corrupt file is not durable evidence; run the check.
-      }
-    }
-    mkdirSync(path.join(packetDir, "scratch"), { recursive: true });
-    const claimMarkdown = claim.path && existsSync(path.join(this.paths.dir, claim.path))
-      ? readFileSync(path.join(this.paths.dir, claim.path), "utf8")
-      : [
-        `# ${claim.title}`,
-        "",
-        `Relation to the original problem: **${claim.relationToGoal}**`,
-        "",
-        "## Statement",
-        "",
-        claim.statement,
-        "",
-        "## Alleged proof",
-        "",
-        claim.proofMarkdown,
-      ].join("\n");
-    const files = verificationFiles(
-      this.state.problem.confirmedMarkdown ?? this.state.statement,
-      claim.id,
-      claimMarkdown,
-      verification.ordinal,
-    );
-    for (const [name, content] of Object.entries(files)) {
-      writeFileAtomic(path.join(packetDir, name), content);
-    }
-    const packetSize = Object.keys(files).reduce((total, name) => {
-      try {
-        return total + statSync(path.join(packetDir, name)).size;
-      } catch {
-        return total;
-      }
-    }, 0);
-    const model = this.state.config.models.verifier;
-    const killKey = `verification:${verificationId}`;
-    const result = await runStructured(
-      {
-        bin: this.deps.codexBin,
-        cwd: packetDir,
-        prompt: VERIFICATION_PROMPT,
-        sandbox: "workspace-write",
-        permissionProfile: {
-          name: "inventio_verifier",
-          filesystem: {
-            ":minimal": "read",
-            [packetDir]: "write",
-          },
-        },
-        webSearch: this.state.config.allowWebSearch,
-        isolatedTask: true,
-        eventsArchiveFile: path.join(dir, "codex-events.jsonl"),
-        model: model.model,
-        effort: model.effort,
-        outputSchemaFile: path.join(dir, "output-schema.json"),
-        outputLastMessageFile: path.join(dir, "last-message.json"),
-        maxEstimatedTokens: Math.min(750_000, this.state.config.budget.defaultTaskTokens),
-        baseEstimatedTokens: CODEX_TURN_BASE_TOKENS + Math.ceil(packetSize / 4),
-        wallClockMs: this.deps.taskWallClockMsOverride ?? 60 * 60_000,
-        killGraceMs: this.deps.killGraceMs ?? 10_000,
-        registerKill: (kill) => this.killHandles.set(killKey, kill),
-      },
-      VerificationOutput,
-    ).finally(() => this.killHandles.delete(killKey));
-    if (this.stopped || this.state.verifications[verificationId]?.status === "completed") return;
-
-    if (result.status === "completed" && result.output) {
-      // Save the authentic model return before recording the deterministic
-      // evidence check. Recovery reuses the same archive and frozen policy.
-      const relPath = path.join("verifications", verificationId, "report.md");
-      writeFileAtomic(
-        path.join(dir, "meta.json"),
-        JSON.stringify(
-          {
-            workflow: "trajectories-v2",
-            filesystemIsolation: VERIFIER_FILESYSTEM_ISOLATION,
-            status: result.status,
-            model: model.model,
-            effort: model.effort,
-            usage: result.usage,
-            finishedAt: new Date().toISOString(),
-          },
-          null,
-          2,
-        ),
-      );
-      writeFileAtomic(
-        outputFile,
-        JSON.stringify(result.output, null, 2),
-      );
-      const checked = this.checkVerificationEvidence(verificationId, result.output);
-      writeFileAtomic(path.join(this.paths.dir, relPath), checked.reportMarkdown.trim() + "\n");
-      this.emitEvent({
-        type: "verification.completed",
-        verificationId,
-        verdict: checked.verdict,
-        finding: checked.finding,
-        summaryMarkdown: checked.summaryMarkdown,
-        artifactPath: relPath,
-        usage: result.usage,
-      });
-    } else {
-      this.emitEvent({
-        type: "verification.completed",
-        verificationId,
-        verdict: "ERROR",
-        finding: null,
-        summaryMarkdown:
-          result.errorDetail ??
-          result.validationErrors?.join("; ") ??
-          result.interruptReason ??
-          "The verification process did not return a verdict.",
-        artifactPath: null,
-        usage: result.usage,
-      });
-    }
-    this.evaluateTrajectoryClaim(claim.id);
-  }
-
-  private checkVerificationEvidence(verificationId: string, output: z.infer<typeof VerificationOutput>) {
-    const verification = this.state.verifications[verificationId]!;
-    let evidence = verification.executionEvidence;
-    if (!evidence) {
-      const dir = path.join(this.paths.verificationsDir, verificationId);
-      const record = readExecutionEvidence(path.join(dir, "codex-events.jsonl"));
-      const text = JSON.stringify(record, null, 2) + "\n";
-      const relPath = path.join("verifications", verificationId, "execution-evidence.json");
-      writeFileAtomic(path.join(this.paths.dir, relPath), text);
-      const issues = evidenceIssues(output.evidence, verification.evidenceRequired, record);
-      evidence = {
-        path: relPath, sha256: sha256(text), capture: record.capture,
-        succeeded: record.commands.filter((entry) => entry.status === "SUCCEEDED").length,
-        failed: record.commands.filter((entry) => entry.status === "FAILED").length,
-        unfinished: record.commands.filter((entry) => entry.status === "UNFINISHED").length,
-        declaredBasis: output.evidence?.basis ?? null, declaredVerdict: output.verdict,
-        supportValidated: output.evidence || verification.evidenceRequired ? issues.length === 0 : null,
-        issues,
-      };
-      this.emitEvent({ type: "verification.evidenceRecorded", verificationId, evidence });
-    }
-    const rejected = output.verdict === "PASS" && evidence.supportValidated === false;
-    return {
-      ...output,
-      verdict: rejected ? "FAIL" as const : output.verdict,
-      finding: rejected ? "MISSING_DEPENDENCY" as const : output.finding,
-      summaryMarkdown: rejected
-        ? `The claimed support was not established: ${evidence.issues.join(" ")}`.slice(0, 2_000)
-        : output.summaryMarkdown,
-      reportMarkdown: rejected
-        ? `# Unconfirmed verification evidence\n\n${evidence.issues.join("\n\n")}\n\nThe submitted proof needs a supported check. This does not refute its statement. The original referee report follows.\n\n---\n\n${output.reportMarkdown}`
-        : output.reportMarkdown,
-    };
-  }
-
-  private readVerificationMeta(dir: string): {
-    usage: Usage;
-    filesystemIsolation: string | null;
-  } {
-    const file = path.join(dir, "meta.json");
-    if (!existsSync(file)) {
-      return { usage: ZERO_USAGE, filesystemIsolation: null };
-    }
-    try {
-      const value = JSON.parse(readFileSync(file, "utf8")) as {
-        usage?: unknown;
-        filesystemIsolation?: unknown;
-      };
-      const parsed = UsageSchema.safeParse(value.usage);
-      return {
-        usage: parsed.success ? parsed.data : ZERO_USAGE,
-        filesystemIsolation:
-          typeof value.filesystemIsolation === "string" ? value.filesystemIsolation : null,
-      };
-    } catch {
-      return { usage: ZERO_USAGE, filesystemIsolation: null };
-    }
-  }
-
-  private evaluateTrajectoryClaim(claimId: string): void {
-    const claim = this.state.claims[claimId];
-    if (!claim || claim.status !== "UNVERIFIED") return;
-    // A crashed or malformed verifier is operational noise, not mathematical
-    // evidence. Replace it with a fresh independent check before evaluating
-    // the configured W-out-of-V rule.
-    this.ensureClaimVerifications(claimId);
-    const results = claim.verificationIds
-      .map((id) => this.state.verifications[id]!)
-      .filter((verification) => verification.status === "completed");
-    const passes = results.filter((verification) => verification.verdict === "PASS").length;
-    const failedChecks = results.filter((verification) => verification.verdict === "FAIL");
-    const failures = failedChecks.length;
-    const { passesRequired, verifiersPerClaim } =
-      claim.verificationPolicy ?? this.state.config.trajectory;
-    if (passes >= passesRequired) {
-      this.promoteTrajectoryClaim(claim.id);
-      return;
-    }
-    const pending = claim.verificationIds.some(
-      (id) => this.state.verifications[id]?.status !== "completed",
-    );
-    const completedMathematicalChecks = passes + failures;
-    if (!pending && completedMathematicalChecks >= verifiersPerClaim && passes < passesRequired) {
-      const detail = [
-        `${passes} PASS`,
-        `${failures} FAIL`,
-      ].join(", ");
-      const mathematicalFailure = failedChecks.some(
-        (verification) =>
-          verification.finding === null ||
-          verification.finding === "INCORRECT" ||
-          verification.finding === "PROOF_GAP",
-      );
-      const nextStatus = mathematicalFailure ? "FAILED" : "NEEDS_REVISION";
-      const findingDetail = [...new Set(failedChecks.map((verification) => verification.finding).filter(Boolean))]
-        .join(", ");
-      this.emitEvent({
-        type: "claim.status",
-        claimId: claim.id,
-        from: "UNVERIFIED",
-        to: nextStatus,
-        justification:
-          nextStatus === "NEEDS_REVISION"
-            ? `the submitted text received ${detail} (${findingDetail || "incomplete presentation"}); revise the missing dependency or notation before checking it again`
-            : `the submitted proof received ${detail}; ${passesRequired} passes out of ${verifiersPerClaim} independent checks are no longer possible. This does not assert that the statement itself is false`,
-        by: "conductor",
-      });
-    }
-  }
-
-  /**
-   * Complete the second half of any multi-event mathematical transition that
-   * was interrupted by a process crash. Files are written before their event,
-   * and event IDs are allocated from replayed counters, so every repair is
-   * idempotent across repeated restarts.
-   */
-  private repairTrajectoryInvariants(): void {
-    for (const claimId of this.state.claimOrder) {
-      const claim = this.state.claims[claimId]!;
-      if (claim.status === "VERIFIED") {
-        let factId = claim.promotedFactId;
-        if (!factId || !this.state.facts[factId]) {
-          const existing = this.equivalentClaimComponent(claim.id)
-            .map((id) => this.state.claims[id]?.promotedFactId)
-            .find((id): id is string => Boolean(id && this.state.facts[id]));
-          factId = existing ?? this.recordTrajectoryFact(claim);
-        }
-        if (
-          claim.kind === "correction" &&
-          claim.targetFactId &&
-          (this.state.facts[claim.targetFactId]?.status === "ACTIVE" ||
-            this.state.facts[claim.targetFactId]?.status === "SUSPICIOUS")
-        ) {
-          this.emitEvent({
-            type: "fact.retracted",
-            factId: claim.targetFactId,
-            correctionClaimId: claim.id,
-            reason: "The concrete correction passed independent verification.",
-          });
-        }
-        for (const siblingId of this.equivalentClaimComponent(claim.id)) {
-          if (siblingId === claim.id) continue;
-          const sibling = this.state.claims[siblingId]!;
-          if (sibling.status !== "UNVERIFIED" && sibling.status !== "NEEDS_REVISION") continue;
-          this.emitEvent({
-            type: "claim.status",
-            claimId: sibling.id,
-            from: sibling.status,
-            to: "SUPERSEDED",
-            justification: `the identical statement was established as ${factId}; its distinct proof remains in ${sibling.path ?? sibling.provenance}`,
-            by: "conductor",
-          });
-        }
-      } else if (
-        claim.status === "REFUTED" &&
-        claim.kind === "correction" &&
-        claim.targetFactId &&
-        this.state.facts[claim.targetFactId]?.status === "SUSPICIOUS" &&
-        this.state.facts[claim.targetFactId]!.correctionClaimIds.every((id) => this.state.claims[id]?.status === "REFUTED")
-      ) {
-        this.emitEvent({
-          type: "fact.suspicionCleared",
-          factId: claim.targetFactId,
-          correctionClaimId: claim.id,
-          reason: "The correction statement was refuted.",
-        });
-      }
-    }
-    for (const conflict of this.state.claimConflicts) {
-      if (conflict.status !== "OPEN") continue;
-      const refuted = [conflict.leftClaimId, conflict.rightClaimId].find((id) => {
-        const claim = this.state.claims[id];
-        return claim?.status === "REFUTED" ||
-          Boolean(claim?.promotedFactId && this.state.facts[claim.promotedFactId]?.status === "RETRACTED");
-      });
-      if (refuted) this.emitEvent({
-        type: "claim.conflictResolved", leftClaimId: conflict.leftClaimId, rightClaimId: conflict.rightClaimId,
-        reason: `The statement ${refuted} was explicitly refuted or its fact was retracted.`, by: "conductor",
-      });
-    }
-  }
-
-  resolveClaimConflict(leftClaimId: string, rightClaimId: string, reason: string): void {
-    const [left, right] = [leftClaimId, rightClaimId].sort();
-    const conflict = this.state.claimConflicts.find((entry) => entry.leftClaimId === left && entry.rightClaimId === right);
-    if (!conflict || conflict.status !== "OPEN") throw new Error("no open conflict exists for these claims");
-    if (!reason.trim() || reason.trim().length > 4_000) throw new Error("a mathematical reason of at most 4000 characters is required");
-    this.emitEvent({ type: "claim.conflictResolved", leftClaimId, rightClaimId, reason: reason.trim(), by: "human" });
-  }
-
-  private equivalentClaimComponent(claimId: string): string[] {
-    const seen = new Set<string>();
-    const pending = [claimId];
-    while (pending.length > 0) {
-      const next = pending.pop()!;
-      if (seen.has(next) || !this.state.claims[next]) continue;
-      seen.add(next);
-      pending.push(...this.state.claims[next]!.equivalentIds);
-    }
-    return [...seen];
-  }
-
-  private recordTrajectoryFact(claim: ClaimState): string {
-    const factId = this.allocId("fact");
-    const relPath = path.join("facts", `${factId}.md`);
-    writeFileAtomic(
-      path.join(this.paths.dir, relPath),
-      [
-        `# ${claim.title}`,
-        "",
-        "## Statement",
-        "",
-        claim.statement,
-        "",
-        "## Proof",
-        "",
-        claim.proofMarkdown,
-        "",
-      ].join("\n"),
-    );
-    this.emitEvent({ type: "fact.recorded", factId, claimId: claim.id, path: relPath });
-    return factId;
-  }
-
-  private promoteTrajectoryClaim(claimId: string): void {
-    const claim = this.state.claims[claimId];
-    if (!claim || claim.status !== "UNVERIFIED") return;
-    const component = this.equivalentClaimComponent(claimId);
-    const existingFact = component
-      .map((id) => this.state.claims[id]?.promotedFactId)
-      .find((id): id is string =>
-        Boolean(
-          id &&
-          (this.state.facts[id]?.status === "ACTIVE" ||
-            this.state.facts[id]?.status === "SUSPICIOUS"),
-        ),
-      );
-
-    this.emitEvent({
-      type: "claim.status",
-      claimId: claim.id,
-      from: "UNVERIFIED",
-      to: "VERIFIED",
-      justification: `received at least ${claim.verificationPolicy?.passesRequired ?? this.state.config.trajectory.passesRequired
-        } independent PASS verdicts`,
-      by: "conductor",
-    });
-
-    let factId = existingFact;
-    if (!factId) {
-      factId = this.recordTrajectoryFact(claim);
-    }
-
-    if (claim.kind === "correction" && claim.targetFactId) {
-      this.emitEvent({
-        type: "fact.retracted",
-        factId: claim.targetFactId,
-        correctionClaimId: claim.id,
-        reason: "The concrete correction passed independent verification.",
-      });
-    }
-
-    for (const siblingId of component) {
-      if (siblingId === claim.id) continue;
-      const sibling = this.state.claims[siblingId]!;
-      if (sibling.status !== "UNVERIFIED" && sibling.status !== "NEEDS_REVISION") continue;
-      this.emitEvent({
-        type: "claim.status",
-        claimId: sibling.id,
-        from: sibling.status,
-        to: "SUPERSEDED",
-        justification: `the identical statement was established as ${factId}; its distinct proof remains in ${sibling.path ?? sibling.provenance}`,
-        by: "conductor",
-      });
-    }
-  }
-
-  private async drainVerifications(): Promise<void> {
-    while (!this.stopped) {
-      for (const claimId of this.state.claimOrder) this.evaluateTrajectoryClaim(claimId);
-      for (const claimId of this.state.claimOrder) this.ensureClaimVerifications(claimId);
-      this.launchPendingVerifications();
-      const active = [...this.verificationPromises.values()];
-      if (active.length === 0) return;
-      await Promise.allSettled(active);
-    }
-  }
-
-  private trajectoryDecisiveResult(): "PROVED" | "DISPROVED" | null {
-    let proves = false;
-    let disproves = false;
-    for (const factId of this.state.factOrder) {
-      const fact = this.state.facts[factId]!;
-      if (!factIsSettled(this.state, factId)) continue;
-      const relation = this.state.claims[fact.claimId]?.relationToGoal;
-      if (relation === "PROVES") proves = true;
-      if (relation === "DISPROVES") disproves = true;
-    }
-    if (proves === disproves) return null;
-    return proves ? "PROVED" : "DISPROVED";
-  }
-
-  private async reviewTrajectorySummary(waveId: string): Promise<void> {
-    const wave = this.state.waves[waveId]!;
-    if (wave.summaryReviewed) return;
-    const current = latestMathematicalView(this.state);
-    const decisionId = this.allocId("decision");
-    this.emitEvent({ type: "decision.requested", decisionId, kind: "curation", waveId });
-    const call = await this.runReaderCall(
-      decisionId,
-      summaryReviewFiles(
-        this.state,
-        waveId,
-        wave.docketMarkdown ?? "No research summary was recovered.",
-      ),
-      SUMMARY_REVIEW_PROMPT,
-      SummaryRevisionOutput,
-      {
-        model: this.state.config.models.summaryReader,
-        isolatedTask: true,
-        memoryAccess: false,
-        webSearch: false,
-      },
-    );
-    if (this.stopped) return;
-    this.emitEvent({
-      type: "decision.proposed",
-      decisionId,
-      action: call.output,
-      usage: call.usage,
-    });
-
-    let markdown = current.markdown;
-    let abstract = current.abstract;
-    let changed = false;
-    let reason = call.error ?? "The summary reader returned no revision; the preceding view is retained.";
-    let source: "summary_reader" | "fallback" = "fallback";
-    if (call.output) {
-      const revisionViolations = [
-        ...(call.output.markdown.length > 16_000
-          ? ["mathematical view exceeds 16,000 characters"]
-          : []),
-        ...summaryAbstractViolations(call.output.abstract),
-      ];
-      const validRevision = revisionViolations.length === 0;
-      if (validRevision) {
-        this.emitEvent({ type: "decision.accepted", decisionId, action: call.output });
-        source = "summary_reader";
-        const abstractChanged = call.output.abstract.trim() !== current.abstract.trim();
-        changed = call.output.changed || abstractChanged;
-        reason = call.output.reason || (changed ? "The mathematical picture changed." : "No material change.");
-        if (call.output.changed) {
-          markdown = call.output.markdown;
-        }
-        abstract = call.output.abstract;
-      } else {
-        reason = `The proposed edit was not a complete concise mathematical view: ${revisionViolations.join("; ")}. The preceding view was retained.`;
-        this.emitEvent({ type: "decision.rejected", decisionId, violations: revisionViolations });
-      }
-    } else {
-      this.emitEvent({
-        type: "decision.rejected",
-        decisionId,
-        violations: [call.error ?? "summary review failed"],
-      });
-    }
-
-    this.recordMathematicalView(
-      waveId,
-      markdown,
-      abstract,
-      source,
-      changed,
-      reason,
-      null,
-    );
-    this.emitEvent({ type: "wave.summaryReviewed", waveId });
-    for (const claimId of this.state.claimOrder) this.evaluateTrajectoryClaim(claimId);
-  }
-
-  private async finalizeTrajectory(result: Result, reason: string): Promise<void> {
-    if (this.state.terminal) return;
-    let body: string | null = null;
-    if (this.remainingBudget() > 0) {
-      const decisionId = this.allocId("decision");
-      this.emitEvent({ type: "decision.requested", decisionId, kind: "final", waveId: null });
-      const call = await this.runReaderCall(
-        decisionId,
-        trajectoryFinalFiles(this.state, result, reason),
-        TRAJECTORY_FINAL_PROMPT,
-        FinalOutput,
-        {
-          model: this.state.config.models.summaryReader,
-          isolatedTask: true,
-          memoryAccess: false,
-          webSearch: false,
-        },
-      );
-      this.emitEvent({
-        type: "decision.proposed",
-        decisionId,
-        action: call.output,
-        usage: call.usage,
-      });
-      if (call.output) {
-        this.emitEvent({ type: "decision.accepted", decisionId, action: call.output });
-        body = call.output.finalMarkdown;
-      } else {
-        this.emitEvent({
-          type: "decision.rejected",
-          decisionId,
-          violations: [call.error ?? "final report call failed"],
-        });
-      }
-    }
-    if (body === null) {
-      const facts = this.state.factOrder
-        .map((id) => this.state.facts[id]!)
-        .filter((fact) => factIsSettled(this.state, fact.id))
-        .map((fact) => `## ${fact.title || fact.id}\n\n${fact.statement}\n\n### Proof\n\n${fact.proofMarkdown}`)
-        .join("\n\n");
-      const unsettled = this.state.factOrder
-        .map((id) => this.state.facts[id]!)
-        .filter((fact) => fact.status === "ACTIVE" || fact.status === "SUSPICIOUS")
-        .flatMap((fact) => factConcerns(this.state, fact.id).map((reason) => `- ${fact.title || fact.id}: ${reason}`))
-        .join("\n");
-      const conflicts = this.state.claimConflicts.filter(entry => entry.status === "OPEN")
-        .map(entry => [this.state.claims[entry.leftClaimId]!.statement, this.state.claims[entry.rightClaimId]!.statement, entry.reason].join("\n\n"))
-        .join("\n\n");
-      body = [
-        "# Research report",
-        "",
-        `Research stopped because ${reason}.`,
-        "",
-        facts || "No new claim completed the configured independent verification process.",
-        ...(unsettled ? ["", "## Results with unresolved challenges", "", unsettled] : []),
-        ...(conflicts ? ["", "## Unresolved incompatible statements", "", conflicts] : []),
-      ].join("\n");
-    }
-    body = body.replace(/^RESULT:.*\n+/i, "");
-    const reportNumber = this.state.terminalHistory.length + 1;
-    const firstReport = reportNumber === 1 && this.state.artifacts["final"] === undefined;
-    const artifactId = firstReport ? "final" : `final-${reportNumber}`;
-    const relPath = firstReport
-      ? path.join("artifacts", "final.md")
-      : path.join("artifacts", "finals", `${artifactId}.md`);
-    writeFileAtomic(path.join(this.paths.dir, relPath), `RESULT: ${result}\n\n${body}`);
-    this.emitEvent({
-      type: "artifact.recorded",
-      artifactId,
-      kind: "final",
-      taskId: null,
-      path: relPath,
-      conclusion: result,
-    });
-    this.phaseTo("TERMINAL", reason);
-    this.emitEvent({ type: "terminal.reached", result, finalPath: relPath });
-  }
-
-  // --------------------------------------------- mathematical reader process
 
   private async runReaderCall<T>(
     decisionId: string,
@@ -2291,6 +438,7 @@ export class ProjectEngine extends EventEmitter {
   ): Promise<{
     output: T | null;
     usage: Usage | null;
+    chargedTokens: number;
     error: string | null;
     status: "completed" | "interrupted" | "failed";
     interruptReason: string | null;
@@ -2305,7 +453,7 @@ export class ProjectEngine extends EventEmitter {
     if (options.intakeSources) {
       copyIntakeSourcesToPacket(this.paths, options.intakeSources, packetDir);
     }
-    const model = options.model ?? this.state.config.models.summaryReader;
+    const model = options.model ?? this.state.config.researchModels!.support;
     const useMemory = options.memoryAccess ?? true;
     const decisionWaveId = this.state.decisions[decisionId]?.waveId;
     const token =
@@ -2326,6 +474,8 @@ export class ProjectEngine extends EventEmitter {
           cwd: packetDir,
           prompt,
           sandbox: "read-only",
+          permissionProfile: { name: "inventio_reader", filesystem: { ":minimal": "read", [packetDir]: "read" } },
+          maxEstimatedTokens: Math.max(1, Math.min(500_000, this.remainingBudget())),
           eventsArchiveFile: path.join(dir, "codex-events.jsonl"),
           model: model.model,
           effort: model.effort,
@@ -2338,7 +488,7 @@ export class ProjectEngine extends EventEmitter {
                 url: this.deps.memory.url,
                 tokenEnvVar: "INVENTIO_TASK_TOKEN",
                 token,
-                enabledTools: MODEL_TOOL_NAMES,
+                enabledTools: RESEARCH_TOOL_DEFINITIONS.filter(t => t.name !== "research_checkpoint" && t.name !== "audit_assess").map(t => t.name),
               },
             }
             : {}),
@@ -2354,13 +504,14 @@ export class ProjectEngine extends EventEmitter {
       this.killHandles.delete(killKey);
       if (token) this.deps.memory?.revokeToken(token);
     }
-    const usage = result.usage;
+    const usage = result.runs.some(r => r.usage) ? result.usage : null;
+    const chargedTokens = result.runs.reduce((n, r) => n + (r.usage ? usageSpend(r.usage) : Math.max(4000, r.estimatedTokens)), 0);
     const processLabel =
       "mathematical reader";
     if (result.status === "completed" && result.output !== null) {
       return {
         output: result.output,
-        usage,
+        usage, chargedTokens,
         error: null,
         status: result.status,
         interruptReason: result.interruptReason,
@@ -2376,7 +527,7 @@ export class ProjectEngine extends EventEmitter {
         : null;
     return {
       output: null,
-      usage,
+      usage, chargedTokens,
       error:
         result.errorDetail ??
         (result.validationErrors
@@ -2468,11 +619,11 @@ export class ProjectEngine extends EventEmitter {
     this.emitEvent({ type: "decision.requested", decisionId, kind: "intake", waveId: null });
     const call = await this.runReaderCall(
       decisionId,
-      trajectoryIntakeFiles(this.state.statement, this.state.contextMarkdown),
-      TRAJECTORY_INTAKE_PROMPT,
+      intakeFiles(this.state.statement, this.state.contextMarkdown),
+      INTAKE_PROMPT,
       IntakeOutput,
       {
-        model: this.state.config.models.summaryReader,
+        model: this.state.config.researchModels!.support,
         isolatedTask: true,
         memoryAccess: true,
         intakeSources: indexedSources,
@@ -2480,7 +631,7 @@ export class ProjectEngine extends EventEmitter {
       },
     );
     if (this.stopped) return { ok: false, error: "conductor stopping" };
-    this.emitEvent({ type: "decision.proposed", decisionId, action: call.output, usage: call.usage });
+    this.emitEvent({ type: "decision.proposed", decisionId, action: call.output, usage: call.usage, chargedTokens: call.chargedTokens });
     if (call.output) {
       this.emitEvent({ type: "decision.accepted", decisionId, action: call.output });
       const sources = applyIntakeSourceSummaries(
@@ -2744,7 +895,10 @@ export class ProjectEngine extends EventEmitter {
 
   private publicationInternalIds(): string[] {
     const ids = [
-      ...this.state.waveOrder,
+      ...this.state.research.roundOrder,
+      ...this.state.research.versionOrder,
+      ...Object.keys(this.state.research.sessions),
+      ...Object.keys(this.state.research.notes),
       ...this.state.mathematicalViews.map((note) => note.waveId),
       ...this.state.factOrder,
       ...this.state.verificationOrder,
@@ -2766,7 +920,7 @@ export class ProjectEngine extends EventEmitter {
     // Some artifact keys (notably "final") are ordinary English words. Only
     // structural labels belong to the private research notation and should be
     // forbidden in the standalone manuscript.
-    return [...new Set(ids.filter((id) => /^(?:DEC\d+|[WTAECRKIMQDXSPFV]\d+)(?:\.v\d+)?$/.test(id)))];
+    return [...new Set(ids.filter((id) => /^(?:DEC\d+|[WTAECRKIMQDXSPFVBN]\d+)(?:\.v\d+)?$/.test(id)))];
   }
 
   /**
@@ -2779,100 +933,18 @@ export class ProjectEngine extends EventEmitter {
     index: string;
   } {
     const files: Record<string, string> = {};
-    const index = [
-      "# Complete research record",
-      "",
-      "Open the full files below as needed for the final mathematical check. Internal labels are navigation aids in this private directory only and must not appear in the standalone manuscript.",
-      "",
-      "## Mathematical write-ups",
-      "",
-    ];
-    let totalCharacters = 0;
-    const totalCap = 50_000_000;
-    const fileCap = 5_000_000;
-    const add = (name: string, absolutePath: string, label: string): void => {
-      if (!existsSync(absolutePath) || !statSync(absolutePath).isFile()) {
-        index.push("- " + label + ": file unavailable");
-        return;
-      }
-      const size = statSync(absolutePath).size;
-      if (size > fileCap || totalCharacters + size > totalCap) {
-        index.push("- " + label + ": omitted from the copied reading directory because it exceeds the safety size limit");
-        return;
-      }
-      const content = repairLegacyArtifactControls(readFileSync(absolutePath, "utf8"));
-      files[name] = content;
-      totalCharacters += content.length;
-      index.push("- " + label + ": " + name);
-    };
-
-    const artifacts = Object.values(this.state.artifacts).sort(
-      (a, b) => a.recordedAtSeq - b.recordedAtSeq,
-    );
-    for (const artifact of artifacts) {
-      add(
-        path.join("research-record", "write-ups", artifact.id + ".md"),
-        path.join(this.paths.dir, artifact.path),
-        artifact.id + " [" + artifact.kind + "; " + (artifact.conclusion ?? "no conclusion") + "]",
-      );
+    const index: string[] = [];
+    for (const id of this.state.research.versionOrder) {
+      const version = this.state.research.versions[id]!;
+      const file = `record/${id}.md`;
+      files[file] = `Current qualification: ${resultStatus(this.state.research, id)}\n\n${resultMathematics(version)}`;
+      index.push(`- ${id}: ${version.title} → ${file}`);
     }
-
-    index.push("", "## Submitted claims and proofs", "");
-    for (const claim of Object.values(this.state.claims)) {
-      if (claim.path) {
-        add(
-          path.join("research-record", "claims", claim.id + ".md"),
-          path.join(this.paths.dir, claim.path),
-          claim.id + " [" + claim.status + "; " + claim.relationToGoal + "]",
-        );
-      }
+    for (const note of Object.values(this.state.research.notes)) {
+      const file = `record/${note.id}.md`; files[file] = note.markdown;
+      index.push(`- ${note.id}: ${note.name} → ${file}`);
     }
-
-    index.push("", "## Facts and their current standing", "");
-    for (const fact of Object.values(this.state.facts)) {
-      add(
-        path.join("research-record", "facts", fact.id + ".md"),
-        path.join(this.paths.dir, fact.path),
-        fact.id + " [" + factDisplayStatus(this.state, fact.id) + "; from " + fact.claimId + "]",
-      );
-    }
-
-    index.push("", "## Independent verification reports", "");
-    for (const verification of Object.values(this.state.verifications)) {
-      if (verification.executionEvidence) add(
-        path.join("research-record", "executions", verification.id + ".json"),
-        path.join(this.paths.dir, verification.executionEvidence.path),
-        verification.id + " recorded executions [" + verification.executionEvidence.capture + "]",
-      );
-      if (verification.artifactPath) {
-        add(
-          path.join("research-record", "verifications", verification.id + ".md"),
-          path.join(this.paths.dir, verification.artifactPath),
-          verification.id + " on " + verification.claimId + " [" +
-          (verification.verdict ?? verification.status) + "; " +
-          (verification.finding ?? "no finding") + "]",
-        );
-      }
-    }
-
-    index.push("", "## Structured assignment returns", "");
-    for (const task of Object.values(this.state.tasks)) {
-      const output = path.join(this.paths.tasksDir, task.id, "output.json");
-      add(
-        path.join("research-record", "assignment-returns", task.id + ".json"),
-        output,
-        task.id + " [" + task.role + "; " + task.status + "]",
-      );
-    }
-
-    index.push("", "## Earlier mathematical views", "");
-    for (const note of this.state.mathematicalViews) {
-      const name = path.join("research-record", "mathematical-views", note.waveId + ".md");
-      files[name] = note.markdown;
-      index.push("- " + note.waveId + ": " + name);
-    }
-
-    return { files, index: index.join("\n") + "\n" };
+    return { files, index: index.join("\n") };
   }
 
   private launchPublicationOperation(
@@ -2923,6 +995,7 @@ export class ProjectEngine extends EventEmitter {
     };
     const internalIds = this.publicationInternalIds();
     const schema = PublicationOutput.superRefine((output, context) => {
+      if (output.result !== "UNCERTAIN" && output.result !== publication.terminalResult) context.addIssue({ code: "custom", message: "Exposition cannot elevate or reverse the fixed research outcome" });
       for (const message of validatePublicationManuscript(output, internalIds)) {
         context.addIssue({ code: "custom", message });
       }
@@ -2933,6 +1006,7 @@ export class ProjectEngine extends EventEmitter {
       PUBLICATION_PROMPT,
       schema,
       {
+        model: this.state.config.researchModels!.research,
         memoryAccess: true,
         intakeSources: this.state.problem.sources,
         webSearch: this.state.config.allowWebSearch,
@@ -2945,6 +1019,7 @@ export class ProjectEngine extends EventEmitter {
       decisionId,
       action: call.output,
       usage: call.usage,
+      chargedTokens: call.chargedTokens,
     });
     if (!call.output) {
       const failure = call.error ?? "the publication pass did not return a manuscript";
@@ -3238,6 +1313,7 @@ export class ProjectEngine extends EventEmitter {
       synthesizer: clean(parsed.models.synthesizer),
     };
     const next: ProjectSettings = {
+      ...((parsed.researchModels ?? this.state.config.researchModels) ? { researchModels: { research: clean((parsed.researchModels ?? this.state.config.researchModels)!.research), support: clean((parsed.researchModels ?? this.state.config.researchModels)!.support) } } : {}),
       models,
       autonomy: parsed.autonomy,
       allowWebSearch: parsed.allowWebSearch,
@@ -3252,9 +1328,10 @@ export class ProjectEngine extends EventEmitter {
     if (next.totalTokens < spent) {
       throw new Error(`token ceiling cannot be below the ${spent} tokens already spent`);
     }
-    if (next.maxWaves < this.state.waveOrder.length) {
+    const roundsUsed = this.state.config.workflow === "recurrent-v3" ? this.state.research.roundOrder.length : this.state.waveOrder.length;
+    if (next.maxWaves < roundsUsed) {
       throw new Error(
-        `maximum research rounds cannot be below the ${this.state.waveOrder.length} already used`,
+        `maximum research rounds cannot be below the ${roundsUsed} already used`,
       );
     }
     if (
@@ -3286,6 +1363,7 @@ export class ProjectEngine extends EventEmitter {
       currentTrajectory.passesRequired === nextTrajectory.passesRequired;
     if (
       modelsUnchanged &&
+      JSON.stringify(current.researchModels) === JSON.stringify(next.researchModels) &&
       current.autonomy === next.autonomy &&
       current.allowWebSearch === next.allowWebSearch &&
       current.totalTokens === next.totalTokens &&
@@ -3301,12 +1379,6 @@ export class ProjectEngine extends EventEmitter {
   submitDirective(text: string, urgent: boolean): string {
     const id = this.allocId("directive");
     this.emitEvent({ type: "directive.submitted", id, text, urgent });
-    if (urgent) {
-      const wid = this.openWaveId();
-      if (wid && this.state.waves[wid]!.status === "open") {
-        this.emitEvent({ type: "wave.softInterrupted", waveId: wid, by: "human" });
-      }
-    }
     return id;
   }
 
@@ -3322,33 +1394,10 @@ export class ProjectEngine extends EventEmitter {
     this.emitEvent({ type: "question.dismissed", id });
   }
 
-  softInterruptWave(waveId: string, by = "human"): void {
-    const w = this.state.waves[waveId];
-    if (!w || w.status !== "open") throw new Error(`wave ${waveId} is not open`);
-    this.emitEvent({ type: "wave.softInterrupted", waveId, by });
-  }
-
   hardInterruptTask(taskId: string): void {
     const kill = this.killHandles.get(taskId);
     if (!kill) throw new Error(`task ${taskId} is not running`);
     kill("killed");
-  }
-
-  extendTask(taskId: string, addTokens: number, by = "human"): void {
-    const t = this.state.tasks[taskId];
-    if (!t) throw new Error(`unknown task ${taskId}`);
-    this.emitEvent({ type: "task.extended", taskId, addTokens, by });
-  }
-
-  humanClaimStatus(
-    claimId: string,
-    to: "VERIFIED" | "FAILED" | "REFUTED",
-    note: string,
-  ): void {
-    const claim = this.state.claims[claimId];
-    if (!claim) throw new Error(`unknown claim ${claimId}`);
-    this.emitEvent({ type: "claim.status", claimId, from: claim.status, to, justification: note, by: "human" });
-    this.repairTrajectoryInvariants();
   }
 
   /** All events so far (for SSE snapshot/replay). Do not mutate. */
@@ -3366,110 +1415,6 @@ export class ProjectEngine extends EventEmitter {
       returnedIds: rec.returnedIds,
       refusedIds: rec.refusedIds,
     });
-  }
-
-  /** Project-scoped MCP callback for a sparse human-readable trajectory marker. */
-  recordTrajectoryMilestone(
-    taskId: string,
-    title: string,
-    markdown: string,
-  ): { milestoneId: string } {
-
-    const task = this.state.tasks[taskId];
-    if (!task || task.status !== "running") throw new Error(`task ${taskId} is not running`);
-    if (task.role !== "solver" && task.role !== "explorer") {
-      throw new Error("only Solver and Explorer trajectories may record milestones");
-    }
-    if (task.milestoneIds.length >= 12) {
-      throw new Error("this trajectory already has twelve milestones; reserve further detail for the final write-up");
-    }
-    const cleanTitle = title.trim();
-    const cleanMarkdown = markdown.trim();
-    if (!cleanTitle || !cleanMarkdown) throw new Error("milestone title and mathematics are required");
-    const milestoneId = this.allocId("milestone");
-    this.emitEvent({
-      type: "task.milestone",
-      milestoneId,
-      taskId,
-      title: cleanTitle.slice(0, 160),
-      markdown: cleanMarkdown.slice(0, 4_000),
-    });
-    return { milestoneId };
-  }
-
-  /** Turn one concrete fact contradiction into a self-contained correction claim. */
-  flagTrajectoryFact(
-    taskId: string,
-    factId: string,
-    reason: string,
-  ): { correctionClaimId: string } {
-
-    const task = this.state.tasks[taskId];
-    if (!task || task.status !== "running") throw new Error(`task ${taskId} is not running`);
-    if (task.role !== "solver" && task.role !== "explorer") {
-      throw new Error("only Solver and Explorer trajectories may flag a fact");
-    }
-    if (
-      Object.values(this.state.claims).some(
-        (claim) => claim.kind === "correction" && claim.sourceTaskId === taskId,
-      )
-    ) {
-      throw new Error("this trajectory has already submitted its one fact correction");
-    }
-    const fact = this.state.facts[factId];
-    if (!fact || (fact.status !== "ACTIVE" && fact.status !== "SUSPICIOUS")) {
-      throw new Error(`active fact ${factId} does not exist`);
-    }
-    const cleanReason = reason.trim();
-    if (cleanReason.length < 20 || cleanReason.length > 2_000) {
-      throw new Error("a concrete 20–2000 character mathematical reason is required");
-    }
-
-    const correctionClaimId = this.allocId("claim");
-    const title = `Correction to ${factId}`;
-    const statement = `The following recorded statement is false or incomplete as stated:\n\n${fact.statement}`;
-    const relPath = path.join("claims", `${correctionClaimId}.md`);
-    const claimMarkdown = [
-      `# ${title}`,
-      "",
-      "## Statement under challenge",
-      "",
-      fact.statement,
-      "",
-      "## Concrete contradiction or disproof",
-      "",
-      cleanReason,
-      "",
-    ].join("\n");
-    writeFileAtomic(path.join(this.paths.dir, relPath), claimMarkdown);
-    this.emitEvent({
-      type: "claim.added",
-      claimId: correctionClaimId,
-      title,
-      statement,
-      proofMarkdown: cleanReason,
-      status: "UNVERIFIED",
-      provenance: `${taskId} correction of ${factId}`,
-      sourceTaskId: taskId,
-      sourceWaveId: task.waveId,
-      path: relPath,
-      relationToGoal: "RELATED",
-      kind: "correction",
-      targetFactId: factId,
-      verificationPolicy: {
-        verifiersPerClaim: this.state.config.trajectory.verifiersPerClaim,
-        passesRequired: this.state.config.trajectory.passesRequired,
-      },
-      dependsOn: [],
-    });
-    this.emitEvent({
-      type: "fact.suspicionRaised",
-      factId,
-      correctionClaimId,
-      reason: cleanReason,
-      by: taskId,
-    });
-    return { correctionClaimId };
   }
 
   /** Convenience for HTTP/tests: expose one task's execution surfaces. */

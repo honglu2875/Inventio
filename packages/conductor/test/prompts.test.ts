@@ -41,7 +41,8 @@ describe("prompt architecture", () => {
   it("documents every prompt module and removes the legacy locations", () => {
     const guide = readFileSync(path.join(PROMPTS_DIR, "README.md"), "utf8");
     for (const name of [
-      "trajectories.ts",
+      "intake.ts",
+      "recurrent.ts",
       "publication.ts",
       "shared.ts",
       "operational.ts",
@@ -61,7 +62,8 @@ describe("prompt architecture", () => {
   });
 
   it("appends the shared writing contract to every generated project AGENTS.md", () => {
-    for (const name of ["trajectories.ts", "publication.ts"]) {
+    for (const name of ["intake.ts",
+      "recurrent.ts", "publication.ts"]) {
       const source = readFileSync(path.join(PROMPTS_DIR, name), "utf8");
       const assignments = source
         .split("\n")

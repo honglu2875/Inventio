@@ -43,7 +43,7 @@ export interface SearchQuery {
 
 export interface RecallRecord {
   taskId: string;
-  role: WorkerRole | "research_manager";
+  role: WorkerRole | "research_manager" | "auditor" | "editor" | "writer";
   op:
     | "search"
     | "expand"
@@ -54,13 +54,22 @@ export interface RecallRecord {
     | "writeup_search"
     | "writeup_open"
     | "mark_milestone"
-    | "flag_fact";
+    | "flag_fact"
+    | "research_search"
+    | "research_open"
+    | "research_checkpoint"
+    | "audit_assess";
   args: string; // JSON.stringify of the tool arguments
   returnedIds: string[];
   refusedIds: string[];
 }
 
 export interface MemoryBackend {
+  supportsRecurrentTools?(): boolean;
+  searchResearch?(scope: TaskScope, query: string, limit: number): { id: string; title: string }[];
+  openResearch?(scope: TaskScope, id: string, start: number, maxCharacters: number): { id: string; title: string; markdown: string; end: number; totalCharacters: number } | null;
+  checkpointResearch?(scope: TaskScope, results: unknown[]): unknown;
+  assessResearch?(scope: TaskScope, assessment: unknown): void;
   searchCards(q: SearchQuery): CardRow[];
   getCards(ids: string[]): MemoryCard[]; // missing ids silently absent
   /** artifact excerpt a card cites; null if none/unreadable */
@@ -103,8 +112,10 @@ export interface WriteupDocument extends WriteupRow {
 
 /** What a bearer token stands for: never taken from tool arguments. */
 export interface TaskScope {
+  turnId?: string;
+  allowedVersionIds?: string[];
   slug: string;
   taskId: string;
-  role: WorkerRole | "research_manager";
+  role: WorkerRole | "research_manager" | "auditor" | "editor" | "writer";
   waveId: string;
 }

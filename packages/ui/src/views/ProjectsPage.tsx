@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { defaultTrajectoryConfig } from "@inventio/schema";
+import { defaultRecurrentConfig } from "@inventio/schema";
 import SourceDropzone from "../components/SourceDropzone";
 import Toasts from "../components/Toasts";
 import { api, errorMessage, type ProjectSummary } from "../lib/api";
@@ -13,7 +13,7 @@ import { useStore } from "../store/store";
 /** ProjectsPage (UI-SPEC §11): the L0 list, the runtime strip, project creation. */
 
 const POLL_MS = 5000;
-const NEW_PROJECT_DEFAULTS = defaultTrajectoryConfig();
+const NEW_PROJECT_DEFAULTS = defaultRecurrentConfig();
 
 function MiniPhases({ project }: { project: ProjectSummary }): JSX.Element {
   const current = project.phase === "AWAITING_CONFIRMATION" ? "INTAKE" : project.phase;
@@ -42,7 +42,7 @@ function MiniBudget({ project }: { project: ProjectSummary }): JSX.Element {
   const workerPct = Math.min(100, (worker / total) * 100);
   const plannerPct = Math.min(100 - workerPct, (planner / total) * 100);
   const readerLabel =
-    project.workflow === "trajectories-v2" ? "summary and final readings" : "Research Manager";
+    project.workflow === "recurrent-v3" ? "intake" : project.workflow === "trajectories-v2" ? "summary and final readings" : "Research Manager";
   const title = `research workers ${formatExact(worker)} + ${readerLabel} ${formatExact(planner)} of ${formatExact(total)}`;
   return (
     <div className="budget mini" title={title}>
@@ -95,10 +95,10 @@ function ProjectCard({ project }: { project: ProjectSummary }): JSX.Element {
           <span className="chip">{project.phase}</span>
         )}
         <span className="muted small">
-          {project.waves} wave{project.waves === 1 ? "" : "s"}
+          {project.waves} round{project.waves === 1 ? "" : "s"}
         </span>
         <span className="muted small">
-          {project.workflow === "trajectories-v2" ? "long trajectories" : project.autonomy}
+          {project.workflow === "recurrent-v3" ? "recurrent research" : project.workflow === "trajectories-v2" ? "long trajectories" : project.autonomy}
         </span>
         {project.updatedAt === null ? null : (
           <span className="muted small">{formatAgo(project.updatedAt)}</span>
@@ -118,63 +118,31 @@ function NewProjectDialog({ onClose }: { onClose: () => void }): JSX.Element {
   const [totalTokens, setTotalTokens] = useState(String(NEW_PROJECT_DEFAULTS.budget.totalTokens));
   const [maxWaves, setMaxWaves] = useState(String(NEW_PROJECT_DEFAULTS.limits.maxWaves));
   const [allowWebSearch, setAllowWebSearch] = useState(NEW_PROJECT_DEFAULTS.allowWebSearch);
-  const [solversPerWave, setSolversPerWave] = useState(
-    String(NEW_PROJECT_DEFAULTS.trajectory.solversPerWave),
-  );
-  const [explorersPerWave, setExplorersPerWave] = useState(
-    String(NEW_PROJECT_DEFAULTS.trajectory.explorersPerWave),
-  );
-  const [verifiersPerClaim, setVerifiersPerClaim] = useState(
-    String(NEW_PROJECT_DEFAULTS.trajectory.verifiersPerClaim),
-  );
-  const [passesRequired, setPassesRequired] = useState(
-    String(NEW_PROJECT_DEFAULTS.trajectory.passesRequired),
-  );
+  const [researchModel, setResearchModel] = useState(NEW_PROJECT_DEFAULTS.researchModels!.research.model ?? "");
+  const [supportModel, setSupportModel] = useState(NEW_PROJECT_DEFAULTS.researchModels!.support.model ?? "");
   // Files cannot be stored before the project exists, so they are staged here
   // and uploaded the moment creation succeeds — before we navigate away.
   const [stagedSources, setStagedSources] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const pushToast = useStore((s) => s.pushToast);
-  const solverCount = Number(solversPerWave);
-  const explorerCount = Number(explorersPerWave);
-  const verifierCount = Number(verifiersPerClaim);
-  const passCount = Number(passesRequired);
-  const trajectoryError =
-    [solverCount, explorerCount, verifierCount, passCount].some(
-      (value) => !Number.isSafeInteger(value),
-    ) ||
-    solverCount < 0 ||
-    explorerCount < 0 ||
-    verifierCount < 1 ||
-    passCount < 1 ||
-    solverCount > 8 ||
-    explorerCount > 8 ||
-    verifierCount > 8 ||
-    passCount > 8
-      ? "Research and verification counts must be whole numbers in the displayed ranges."
-      : solverCount + explorerCount < 1
-        ? "At least one Solver or Explorer is required per round."
-        : solverCount + explorerCount > 8
-          ? "At most eight research trajectories may start per round."
-          : passCount > verifierCount
-            ? "Required passes cannot exceed the number of independent checks."
-            : null;
+  const settingsError = [researchModel, supportModel].some(m => !m.trim() || /\s/.test(m.trim()))
+    ? "Enter a model ID without spaces for each role."
+    : !Number.isSafeInteger(Number(totalTokens)) || Number(totalTokens) <= 0 || !Number.isSafeInteger(Number(maxWaves)) || Number(maxWaves) <= 0
+      ? "Allowance and rounds must be positive whole numbers." : null;
 
   const submit = (): void => {
-    if (busy || title.trim() === "" || statement.trim() === "" || trajectoryError !== null) return;
+    if (busy || title.trim() === "" || statement.trim() === "" || settingsError !== null) return;
     const config: Record<string, unknown> = {};
     const tokens = Number(totalTokens);
     const waves = Number(maxWaves);
     if (Number.isFinite(tokens) && tokens > 0) config["budget"] = { totalTokens: Math.floor(tokens) };
     if (Number.isFinite(waves) && waves > 0) config["limits"] = { maxWaves: Math.floor(waves) };
-    config["workflow"] = "trajectories-v2";
+    config["workflow"] = "recurrent-v3";
     config["autonomy"] = "auto";
     config["allowWebSearch"] = allowWebSearch;
-    config["trajectory"] = {
-      solversPerWave: Math.floor(solverCount),
-      explorersPerWave: Math.floor(explorerCount),
-      verifiersPerClaim: Math.floor(verifierCount),
-      passesRequired: Math.floor(passCount),
+    config["researchModels"] = {
+      research: { ...NEW_PROJECT_DEFAULTS.researchModels!.research, model: researchModel.trim() },
+      support: { ...NEW_PROJECT_DEFAULTS.researchModels!.support, model: supportModel.trim() },
     };
 
     setBusy(true);
@@ -285,7 +253,7 @@ function NewProjectDialog({ onClose }: { onClose: () => void }): JSX.Element {
                 />
               </label>
               <label className="field inline">
-                <span className="field-label">Max waves</span>
+                <span className="field-label">Maximum rounds</span>
                 <input
                   className="input mono"
                   value={maxWaves}
@@ -304,45 +272,12 @@ function NewProjectDialog({ onClose }: { onClose: () => void }): JSX.Element {
                   Allow research trajectories and verification to search the literature
                 </span>
               </label>
-              <label className="field inline">
-                <span className="field-label">Solvers per round (N)</span>
-                <input
-                  className="input mono"
-                  value={solversPerWave}
-                  inputMode="numeric"
-                  onChange={(e) => setSolversPerWave(e.target.value)}
-                />
-              </label>
-              <label className="field inline">
-                <span className="field-label">Explorers per round (M)</span>
-                <input
-                  className="input mono"
-                  value={explorersPerWave}
-                  inputMode="numeric"
-                  onChange={(e) => setExplorersPerWave(e.target.value)}
-                />
-              </label>
-              <label className="field inline">
-                <span className="field-label">Independent checks per claim (V)</span>
-                <input
-                  className="input mono"
-                  value={verifiersPerClaim}
-                  inputMode="numeric"
-                  onChange={(e) => setVerifiersPerClaim(e.target.value)}
-                />
-              </label>
-              <label className="field inline">
-                <span className="field-label">Checks required to become a fact (W)</span>
-                <input
-                  className="input mono"
-                  value={passesRequired}
-                  inputMode="numeric"
-                  onChange={(e) => setPassesRequired(e.target.value)}
-                />
-              </label>
-              {trajectoryError === null ? null : (
+              <p className="muted small">Each round has one Solver and one Explorer. Independent verification uses the support model; the research model audits memory from round two.</p>
+              <label className="field inline"><span className="field-label">Research model</span><input className="input mono" value={researchModel} onChange={e => setResearchModel(e.target.value)} /></label>
+              <label className="field inline"><span className="field-label">Support model</span><input className="input mono" value={supportModel} onChange={e => setSupportModel(e.target.value)} /></label>
+              {settingsError === null ? null : (
                 <div className="settings-help settings-error" role="alert">
-                  {trajectoryError}
+                  {settingsError}
                 </div>
               )}
             </div>
@@ -356,7 +291,7 @@ function NewProjectDialog({ onClose }: { onClose: () => void }): JSX.Element {
             type="button"
             className="button primary"
             disabled={
-              busy || title.trim() === "" || statement.trim() === "" || trajectoryError !== null
+              busy || title.trim() === "" || statement.trim() === "" || settingsError !== null
             }
             onClick={submit}
           >
