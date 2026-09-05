@@ -1,6 +1,8 @@
+import { applyEvent, defaultTrajectoryConfig, initialState, type ProjectState } from "@inventio/schema";
 import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
-import { applyEvent, defaultConfig, initialState, type ProjectState } from "@inventio/schema";
+import TopStrip from "../src/components/TopStrip";
 import IntakeConfirm from "../src/views/IntakeConfirm";
 
 function awaitingW000(): ProjectState {
@@ -13,7 +15,7 @@ function awaitingW000(): ProjectState {
     title: "Editable intake",
     statement: "Prove P.",
     contextMarkdown: "Try the geometric route.",
-    config: defaultConfig(),
+    config: defaultTrajectoryConfig(),
   });
   applyEvent(state, {
     seq: 2,
@@ -51,12 +53,15 @@ function awaitingW000(): ProjectState {
   applyEvent(state, {
     seq: 5,
     ts: "w000",
-    type: "manager.noteRecorded",
+    type: "summary.recorded",
+    changed: true,
+    reason: "Initial reading",
+    usage: null,
     waveId: "W000",
-    path: "artifacts/manager-notes/W000.md",
+    path: "artifacts/mathematical-view/W000.md",
     markdown: "# Current mathematical view\n\nThe geometric route is plausible.",
     abstract: "The geometric route is the present starting point.",
-    source: "research_manager",
+    source: "intake",
   });
   applyEvent(state, {
     seq: 6,
@@ -70,6 +75,23 @@ function awaitingW000(): ProjectState {
 }
 
 describe("intake revision journey", () => {
+  it("keeps an unfinished council intake view-only while allowing export and a fresh project", () => {
+    const state = awaitingW000();
+    state.config.workflow = "council-v1";
+    const intake = renderToStaticMarkup(<IntakeConfirm slug={state.slug} state={state} />);
+    expect(intake).toContain("Original objective");
+    expect(intake).not.toContain("Edit raw input");
+    expect(intake).not.toContain("Regenerate from originals");
+    expect(intake).not.toContain("Accept W000");
+    const strip = renderToStaticMarkup(
+      <MemoryRouter><TopStrip slug={state.slug} state={state} /></MemoryRouter>,
+    );
+    expect(strip).toContain("Legacy archive · view-only");
+    expect(strip).toContain("Export HTML");
+    expect(strip).toContain("Fresh start");
+    expect(strip).not.toMatch(/>(?:Pause|Resume|Continue research|Prepare paper)</);
+  });
+
   it("offers raw-input editing beside ordinary W000 regeneration", () => {
     const html = renderToStaticMarkup(<IntakeConfirm slug="editable-intake" state={awaitingW000()} />);
     expect(html).toContain("Edit raw input");

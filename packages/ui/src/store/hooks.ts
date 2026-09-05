@@ -1,5 +1,5 @@
-import { useCallback } from "react";
 import type { ProjectState } from "@inventio/schema";
+import { useCallback } from "react";
 import { errorMessage } from "../lib/api";
 import { READ_ONLY_TOOLTIP, useStore, type ProjectSlot } from "./store";
 
@@ -23,11 +23,11 @@ export interface ActionGuard {
   title: string | undefined;
 }
 
-/** Fixture replay and portable HTML snapshots are read-only. */
-export function useActionGuard(slug: string): ActionGuard {
+/** Fixture replay, HTML snapshots, and archived council runs are read-only. */
+export function useActionGuard(slug: string, allowArchiveCopy = false): ActionGuard {
   const readOnly = useStore((s) => {
     const connection = s.projects[slug]?.connection;
-    return connection === "fixture" || connection === "static";
+    return connection === "fixture" || connection === "static" || (!allowArchiveCopy && s.projects[slug]?.state?.config.workflow === "council-v1");
   });
   return readOnly
     ? { disabled: true, title: READ_ONLY_TOOLTIP }

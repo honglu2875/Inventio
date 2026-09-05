@@ -1,10 +1,8 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   candidateLifecycle,
-  type CandidateLifecycle,
   type ArtifactKind,
   type ArtifactMeta,
+  type CandidateLifecycle,
   type ClaimState,
   type ClaimStatus,
   type ComputationState,
@@ -12,6 +10,8 @@ import {
   type ProjectState,
   type VerificationState,
 } from "@inventio/schema";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import Markdown from "../components/Markdown";
 import MathText from "../components/MathText";
 import { useProjectSlug } from "../components/ProjectContext";
@@ -471,7 +471,7 @@ function ClaimsSection({
   selectedId: string | undefined;
   onSelect: (id: string | undefined) => void;
 }): JSX.Element {
-  const exported = isProjectExport();
+  const exported = isProjectExport() || state.config.workflow === "council-v1";
   const guard = useActionGuard(slug);
   const run = useApiAction();
   const [statuses, setStatuses] = useState<ClaimStatus[]>([
@@ -703,7 +703,7 @@ function MemorySection({
   selectedId: string | undefined;
   onSelect: (id: string | undefined) => void;
 }): JSX.Element {
-  const exported = isProjectExport();
+  const exported = isProjectExport() || state.config.workflow === "council-v1";
   const guard = useActionGuard(slug);
   const run = useApiAction();
   const [status, setStatus] = useState("active");

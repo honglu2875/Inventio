@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
 import {
   INTAKE_ABSTRACT_MAX_CHARS,
   pendingIntakeDecision,
   type IntakeSource,
   type ProjectState,
 } from "@inventio/schema";
+import { useCallback, useEffect, useState } from "react";
 import Markdown from "../components/Markdown";
 import SourceDropzone from "../components/SourceDropzone";
 import { api, projectSourceLink } from "../lib/api";
@@ -445,6 +445,6 @@ function W000Review({ slug, state }: { slug: string; state: ProjectState }): JSX
 }
 
 export default function IntakeConfirm(props: { slug: string; state: ProjectState }): JSX.Element {
-  if (isProjectExport()) return <StaticIntake {...props} />;
+  if (isProjectExport() || props.state.config.workflow === "council-v1") return <StaticIntake {...props} />;
   return props.state.phase === "CREATED" ? <DraftIntake {...props} /> : <W000Review {...props} />;
 }

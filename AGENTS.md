@@ -5,8 +5,9 @@ projects use the `trajectories-v2` workflow: deterministic code launches long,
 independent Solver and Explorer sessions, independently checks their
 self-contained claims, and preserves accepted results as facts. There is no
 model controller between the problem and these trajectories. Projects created
-under the earlier `council-v1` workflow retain their recurrent Research Manager
-and must remain replayable without reinterpretation.
+under the earlier `council-v1` workflow are view-only archives. Their saved
+Research Manager notes and event meanings must remain replayable without
+reinterpretation; no legacy project may resume execution or receive writes.
 
 When changing this repository:
 

@@ -1,22 +1,24 @@
-import { afterEach, describe, expect, it } from "vitest";
 import { unlinkSync, writeFileSync } from "node:fs";
+import { afterEach, describe, expect, it } from "vitest";
 import type { SimCall } from "./helpers/harness.js";
 import {
-  Harness,
   CLAIM_COMPARISON_MATCH,
-  INTAKE_MATCH,
-  SUMMARY_REVIEW_MATCH,
-  TRAJECTORY_FINAL_MATCH,
-  TRAJECTORY_WORKER_MATCH,
-  USAGE,
-  VERIFICATION_MATCH,
-  finalOutput,
   claimComparisonOutput,
+  finalOutput,
+  Harness,
+  INTAKE_MATCH,
   intakeOutput,
   plannerCall,
+  PUBLICATION_MATCH,
+  publicationOutput,
+  SUMMARY_REVIEW_MATCH,
   summaryRevisionOutput,
+  TRAJECTORY_FINAL_MATCH,
+  TRAJECTORY_WORKER_MATCH,
   trajectoryOutput,
   trajectoryTestConfig,
+  USAGE,
+  VERIFICATION_MATCH,
   verificationOutput,
 } from "./helpers/harness.js";
 
@@ -72,6 +74,7 @@ describe("trajectories-v2 end to end", () => {
         TRAJECTORY_FINAL_MATCH,
         finalOutput("# Final report\n\nThe verified roundness criterion proves the stated result."),
       ),
+      plannerCall(PUBLICATION_MATCH, publicationOutput()),
     ];
     const h = Harness.create("trajectory-proved", calls, trajectoryTestConfig());
     current = h;
@@ -115,6 +118,23 @@ describe("trajectories-v2 end to end", () => {
       "Try the curvature identity before introducing auxiliary machinery.",
     );
     expect(h.read(h.state.terminal!.finalPath)).not.toContain("Research Manager");
+    const firstCheck = h.read("verifications/V001/packet/AGENTS.md");
+    const secondCheck = h.read("verifications/V002/packet/AGENTS.md");
+    expect(firstCheck).toContain("Check the logical argument in order");
+    expect(secondCheck).toContain("Independently derive the step");
+    expect(h.read("verifications/V001/packet/claim.md"))
+      .toBe(h.read("verifications/V002/packet/claim.md"));
+
+    h.engine.requestPublication();
+    await h.waitFor((state) => state.publications[0]?.status === "drafted", "trajectory manuscript");
+    const publication = h.state.publications[0]!;
+    const packet = `decisions/${publication.decisionId}/packet`;
+    expect(h.read(`${packet}/research-record/claims/K001.md`)).toContain(solver.claims[0]!.proofMarkdown);
+    expect(h.read(`${packet}/research-record/facts/F001.md`)).toContain(solver.claims[0]!.proofMarkdown);
+    expect(h.read(`${packet}/research-record/verifications/V001.md`)).toBe(h.read("verifications/V001/report.md"));
+    expect(h.read(`${packet}/research-record/verifications/V002.md`)).toBe(h.read("verifications/V002/report.md"));
+    expect(h.read(`${packet}/research-record-index.md`)).toContain("F001 [ACTIVE; from K001]");
+    expect(h.read(`${packet}/current-record.md`)).toContain("K001");
     expect(h.diskState()).toEqual(h.state);
   });
 

@@ -1,9 +1,9 @@
 /**
- * M10 real-quota smoke (DESIGN §15.5).
+ * Trajectory real-quota smoke (TRAJECTORY-DESIGN.md).
  *
  * Drives one deliberately tiny problem through the entire protocol against the
- * real `codex` CLI: intake → confirm → discovery wave → curation → freeze →
- * sealed review wave → acceptance → final. Asserts a terminal state, a
+ * real `codex` CLI: intake → confirm → independent research trajectories →
+ * independent claim verification → facts → final. Asserts a terminal state, a
  * well-formed stamped final report, and that the event log replays to the same
  * state it ended with.
  *
@@ -14,15 +14,15 @@
  *   SMOKE_MEMORY=1 npm run smoke     # also exercise the MCP memory service
  *   SMOKE_KEEP=1 npm run smoke       # keep the project directory
  */
+import { applyEvent, defaultTrajectoryConfig, initialState, type Event } from "@inventio/schema";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { applyEvent, defaultConfig, initialState, type Event } from "@inventio/schema";
-import { EventLog } from "../src/store/eventLog.js";
 import { ProjectEngine } from "../src/engine/engine.js";
 import { WorkerPool } from "../src/engine/pool.js";
-import { MemoryService } from "../src/memory/service.js";
 import { FileMemoryBackend } from "../src/memory/cardStore.js";
+import { MemoryService } from "../src/memory/service.js";
+import { EventLog } from "../src/store/eventLog.js";
 
 const STATEMENT =
   process.env["SMOKE_STATEMENT"] ??
@@ -48,15 +48,15 @@ async function main(): Promise<void> {
   log(`root: ${root}`);
   log(`statement: ${STATEMENT}`);
 
-  const config = defaultConfig();
+  const config = defaultTrajectoryConfig();
   // Small, real-money budget: enough for ~10 codex turns at this problem size.
   config.budget.totalTokens = Number(process.env["SMOKE_BUDGET"] ?? 3_000_000);
   config.budget.defaultTaskTokens = 400_000;
   config.budget.taskWallClockMinutes = 10;
   config.limits.maxWaves = 6;
   config.limits.maxConcurrentWorkers = 2;
-  config.limits.maxRepairRounds = 1;
-  for (const role of ["planner", "solver", "explorer", "reviewer", "synthesizer"] as const) {
+  config.trajectory = { solversPerWave: 1, explorersPerWave: 1, verifiersPerClaim: 2, passesRequired: 2 };
+  for (const role of ["summaryReader", "solver", "explorer", "verifier"] as const) {
     config.models[role].effort = "medium";
   }
 
@@ -87,7 +87,13 @@ async function main(): Promise<void> {
   if (memoryService) {
     memoryService.registerProject(
       SLUG,
-      new FileMemoryBackend(engine.paths.dir, (rec) => engine.recordRecall(rec)),
+      new FileMemoryBackend(engine.paths.dir, (rec) => engine.recordRecall(rec), {
+        getState: () => engine.state,
+        recordMilestone: (taskId, title, markdown) =>
+          engine.recordTrajectoryMilestone(taskId, title, markdown),
+        flagFact: (taskId, factId, reason) =>
+          engine.flagTrajectoryFact(taskId, factId, reason),
+      }),
     );
   }
 
@@ -134,21 +140,11 @@ async function main(): Promise<void> {
       case "decision.rejected":
         log(`decision ${event.decisionId} REJECTED: ${event.violations.join("; ").slice(0, 300)}`);
         break;
-      case "candidate.frozen":
-        log(`candidate ${event.candidateId} frozen (${event.obligations.length} obligations)`);
+      case "verification.completed":
+        log(`check ${event.verificationId}: ${event.verdict}`);
         break;
-      case "review.recorded":
-        log(`review ${event.reviewId} on ${event.candidateId}: ${event.verdict} (${event.issueIds.length} issues)`);
-        break;
-      case "acceptance.evaluated":
-        log(
-          event.passed
-            ? `acceptance PASSED for ${event.candidateId}`
-            : `acceptance failing for ${event.candidateId}: ${event.failing.join("; ").slice(0, 300)}`,
-        );
-        break;
-      case "question.raised":
-        log(`question ${event.id}${event.blocking ? " [BLOCKING]" : ""}: ${event.text.slice(0, 200)}`);
+      case "fact.recorded":
+        log(`fact ${event.factId} from ${event.claimId}`);
         break;
       case "terminal.reached":
         log(`TERMINAL: ${event.result}`);
@@ -236,15 +232,17 @@ async function main(): Promise<void> {
 
   const accepted = terminal.result === "PROVED" || terminal.result === "DISPROVED";
   if (accepted) {
-    const candidate = Object.values(state.candidates).find((c) => c.acceptance?.passed === true);
-    if (!candidate) fail(`terminal ${terminal.result} without a candidate that passed acceptance`);
-    const passes = candidate.reviewIds.filter((r) => state.reviews[r]?.verdict === "PASS").length;
-    if (passes < 2) fail(`terminal ${terminal.result} with only ${passes} PASS review(s)`);
+    const relation = terminal.result === "PROVED" ? "PROVES" : "DISPROVES";
+    const fact = Object.values(state.facts).find(f => f.status === "ACTIVE" && state.claims[f.claimId]?.relationToGoal === relation);
+    if (!fact) fail(`terminal ${terminal.result} without a decisive active fact`);
+    const claim = state.claims[fact.claimId]!;
+    const passes = claim.verificationIds.filter(id => state.verifications[id]?.verdict === "PASS").length;
+    if (passes < (claim.verificationPolicy?.passesRequired ?? config.trajectory.passesRequired)) fail("decisive fact lacks its required checks");
   }
 
   console.log(`\n✓ SMOKE PASSED — RESULT: ${terminal.result}`);
   console.log(`  waves ${state.waveOrder.length}, tasks completed ${completedTasks}, ` +
-    `claims ${state.claimOrder.length}, cards ${Object.keys(state.cards).length}`);
+    `claims ${state.claimOrder.length}, facts ${state.factOrder.length}`);
   console.log(`  final report: ${finalPath}`);
   console.log(`\n--- final.md (first 40 lines) ---`);
   console.log(finalText.split("\n").slice(0, 40).join("\n"));

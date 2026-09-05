@@ -1,6 +1,6 @@
+import type { ProjectState } from "@inventio/schema";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import type { ProjectState } from "@inventio/schema";
 import { api } from "../../lib/api";
 import { useActionGuard, useApiAction } from "../../store/hooks";
 
@@ -18,7 +18,7 @@ export default function FreshStartDialog({
   onClose: () => void;
 }): JSX.Element {
   const navigate = useNavigate();
-  const guard = useActionGuard(slug);
+  const guard = useActionGuard(slug, true);
   const run = useApiAction();
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);

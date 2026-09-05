@@ -1,5 +1,19 @@
 # Inventio UI — binding design specification
 
+## Legacy archive boundary
+
+Saved `council-v1` projects (including logs without a workflow field) are
+view-only. Preserve their graph, manager notes, claims, candidates, reviews,
+source documents, task transcripts, saved publications, and HTML export.
+Show a visible “Legacy archive · view-only” label. Hide steering, confirmation,
+settings, and ledger-edit controls. Historical running/queued states describe
+the saved record and must never start a worker. Direct mutation requests are
+rejected by the server, not merely disabled in the browser. Fresh start may
+copy the original intake into a new trajectories-v2 project; it does not edit
+or reinterpret the archive. The older council action descriptions below are
+historical interface semantics, not active controls.
+
+
 This document is the authoritative design for `@inventio/ui`. It refines
 DESIGN.md §11 to implementation precision. Executors implement it as written;
 deviations require a note in PLAN.md's deviation log and should be rare and

@@ -8,7 +8,9 @@ versions can still be replayed without reinterpretation.
 
 - Every project records a workflow version. Missing workflow metadata means
   the legacy `council-v1` workflow.
-- New projects use `trajectories-v2`.
+- New projects use `trajectories-v2`. Legacy projects are view-only archives: no
+  startup recovery writes, task resumption, settings changes, or new publication
+  calls. Their original intake may be copied into a separate new project.
 - Existing event types and reducer meanings remain append-only. The new
   workflow adds events and optional fields; it does not rewrite old logs.
 - The deterministic conductor owns scheduling, persistence, budgets, retries,
@@ -64,18 +66,17 @@ versions can still be replayed without reinterpretation.
 
 ## Mathematical English
 
-Every generated project `AGENTS.md` includes one shared ASD-STE100 Simplified
-Technical English contract. The contract applies to all model-authored prose,
-including W000, milestones, write-ups, claims, proofs, checks, summaries,
-stopping reports, and publication manuscripts. Recovery turns use the same
-contract.
+Every generated project `AGENTS.md` includes short guidance for clear academic
+prose: stable terminology, precise hypotheses and quantifiers, defined
+notation, and complete derivations. Mathematical completeness takes priority
+over brevity. There is no obligation to follow a full controlled-language
+standard from memory or satisfy sentence-length quotas.
 
-Established mathematical nouns and verbs are permitted technical terms. The
-model must use short and direct prose, stable terminology, clear referents,
-and gradual exposition. Mathematical rigor and self-containedness have
-priority. The model must not change hypotheses, quantifiers, dependencies, or
-logical scope to shorten a sentence. Formulas, code, JSON keys, citations,
-proper names, and literal source text are outside the controlled-prose rules.
+Verifier reports document the decisive mathematical checks. Odd-numbered
+verifiers emphasize logical and dependency checks; even-numbered verifiers
+independently derive the decisive step. All still receive and assess the full
+proof. A failed command is not computational evidence, and executing code
+successfully does not establish that it models the intended mathematics.
 
 ## Process recovery
 

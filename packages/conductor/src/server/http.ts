@@ -1,9 +1,3 @@
-import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
-import { z } from "zod";
 import {
   INTAKE_ABSTRACT_MAX_CHARS,
   IntakeMemory,
@@ -11,7 +5,13 @@ import {
   SLUG_RE,
   type Event,
 } from "@inventio/schema";
-import type { ProjectEngine } from "../engine/engine.js";
+import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { z } from "zod";
+import type { ProjectReader } from "../legacy/archive.js";
 import { EngineManager, ManagerError } from "./manager.js";
 import {
   buildProjectExportSnapshot,
@@ -121,11 +121,6 @@ const DirectiveBody = z.object({
   urgent: z.boolean().optional(),
 });
 const AnswerBody = z.object({ answer: z.string().min(1).max(50_000) });
-const GateBody = z.object({
-  resolution: z.enum(["approve", "edit", "reject"]),
-  action: z.unknown().optional(),
-  note: z.string().max(10_000).optional(),
-});
 const ExtendBody = z.object({ addTokens: z.number().int().positive() });
 const ContinueBody = z.object({
   note: z.string().min(1).max(10_000),
@@ -137,14 +132,6 @@ const ClaimStatusBody = z.object({
   to: z.enum(["VERIFIED", "FAILED", "REFUTED"]),
   note: z.string().min(1).max(10_000),
 });
-const IssueBody = z.object({
-  candidateId: z.string().min(1).max(64),
-  severity: z.enum(["CRITICAL", "MAJOR", "MINOR"]),
-  location: z.string().max(500).default(""),
-  text: z.string().min(1).max(10_000),
-});
-const QuarantineBody = z.object({ note: z.string().min(1).max(10_000) });
-
 // -------------------------------------------------------------------- helpers
 
 function errorCode(status: number): string {
@@ -272,7 +259,8 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
     return slug;
   };
 
-  const engineOf = (slug: string): ProjectEngine => manager.require(checkedSlug(slug));
+  const engineOf = (slug: string): ProjectReader => manager.require(checkedSlug(slug));
+  const activeEngineOf = (slug: string) => manager.requireActive(checkedSlug(slug));
 
   const checkedId = (id: string, what: string): string => {
     if (!ID_RE.test(id)) throw new ManagerError(`invalid ${what} id`, 400);
@@ -367,8 +355,8 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
    *   → `{ name, size, uploadedAt, mount }`
    *
    * The filename may be percent-encoded (headers are latin-1). On success the
-   * project gains a source mount named `uploads`, so the Research Manager can grant the
-   * files with `grants.sourceMounts: ["uploads"]`.
+   * project gains a source mount named `uploads`, available to authorized
+   * research trajectories through the original-source tools.
    */
   app.post<{ Params: { slug: string } }>(
     "/api/projects/:slug/sources",
@@ -432,7 +420,7 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
   app.get<{ Params: { slug: string }; Querystring: { since?: string } }>(
     "/api/projects/:slug/events",
     (request, reply) => {
-      let engine: ProjectEngine;
+      let engine: ProjectReader;
       try {
         engine = engineOf(request.params.slug);
       } catch (err) {
@@ -623,7 +611,7 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
     "/api/projects/:slug/raw-intake",
     async (request, reply) =>
       run(reply, () => {
-        const engine = engineOf(request.params.slug);
+        const engine = activeEngineOf(request.params.slug);
         const body = parseBody(RawIntakeBody, request.body);
         engine.updateRawIntake(body.statement, body.contextMarkdown);
         return { ok: true, phase: engine.state.phase };
@@ -634,7 +622,7 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
     "/api/projects/:slug/confirm-problem",
     async (request, reply) =>
       run(reply, () => {
-        const engine = engineOf(request.params.slug);
+        const engine = activeEngineOf(request.params.slug);
         const body = parseBody(ConfirmProblemBody, request.body);
         engine.confirmProblem(
           body.problemMarkdown,
@@ -651,7 +639,7 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
     "/api/projects/:slug/regenerate-intake",
     async (request, reply) =>
       run(reply, async () => {
-        const engine = engineOf(request.params.slug);
+        const engine = activeEngineOf(request.params.slug);
         await engine.regenerateIntake();
         return { ok: true, phase: engine.state.phase };
       }),
@@ -659,7 +647,7 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
 
   app.post<{ Params: { slug: string } }>("/api/projects/:slug/start", async (request, reply) =>
     run(reply, () => {
-      const engine = engineOf(request.params.slug);
+      const engine = activeEngineOf(request.params.slug);
       engine.start(); // idempotent
       return { ok: true, phase: engine.state.phase };
     }),
@@ -667,7 +655,7 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
 
   app.post<{ Params: { slug: string } }>("/api/projects/:slug/pause", async (request, reply) =>
     run(reply, () => {
-      const engine = engineOf(request.params.slug);
+      const engine = activeEngineOf(request.params.slug);
       engine.pause();
       return { ok: true, paused: engine.state.paused };
     }),
@@ -675,7 +663,7 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
 
   app.post<{ Params: { slug: string } }>("/api/projects/:slug/resume", async (request, reply) =>
     run(reply, () => {
-      const engine = engineOf(request.params.slug);
+      const engine = activeEngineOf(request.params.slug);
       engine.resume();
       return { ok: true, paused: engine.state.paused };
     }),
@@ -683,7 +671,7 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
 
   app.post<{ Params: { slug: string } }>("/api/projects/:slug/continue", async (request, reply) =>
     run(reply, () => {
-      const engine = engineOf(request.params.slug);
+      const engine = activeEngineOf(request.params.slug);
       const body = parseBody(ContinueBody, request.body);
       engine.continueResearch(
         body.note,
@@ -705,7 +693,7 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
     "/api/projects/:slug/publication",
     async (request, reply) =>
       run(reply, () => {
-        const engine = engineOf(request.params.slug);
+        const engine = activeEngineOf(request.params.slug);
         const publicationId = engine.requestPublication();
         const publication = engine.state.publications.find(
           (entry) => entry.id === publicationId,
@@ -723,7 +711,7 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
     "/api/projects/:slug/publications/:id/compile",
     async (request, reply) =>
       run(reply, () => {
-        const engine = engineOf(request.params.slug);
+        const engine = activeEngineOf(request.params.slug);
         const publicationId = checkedId(request.params.id, "publication");
         engine.requestPublicationCompilation(publicationId);
         const publication = engine.state.publications.find(
@@ -740,7 +728,7 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
 
   app.post<{ Params: { slug: string } }>("/api/projects/:slug/autonomy", async (request, reply) =>
     run(reply, () => {
-      const engine = engineOf(request.params.slug);
+      const engine = activeEngineOf(request.params.slug);
       const body = parseBody(AutonomyBody, request.body);
       engine.setAutonomy(body.mode);
       return { ok: true, autonomy: engine.state.config.autonomy };
@@ -753,7 +741,7 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
 
   app.post<{ Params: { slug: string } }>("/api/projects/:slug/settings", async (request, reply) =>
     run(reply, () => {
-      const engine = engineOf(request.params.slug);
+      const engine = activeEngineOf(request.params.slug);
       const body = parseBody(ProjectSettingsBody, request.body);
       engine.setProjectSettings(body);
       return { ok: true, settings: engine.getProjectSettings() };
@@ -762,7 +750,7 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
 
   app.post<{ Params: { slug: string } }>("/api/projects/:slug/web-search", async (request, reply) =>
     run(reply, () => {
-      const engine = engineOf(request.params.slug);
+      const engine = activeEngineOf(request.params.slug);
       const body = parseBody(WebSearchBody, request.body);
       engine.setWebSearch(body.enabled);
       return { ok: true, enabled: engine.state.config.allowWebSearch };
@@ -771,7 +759,7 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
 
   app.post<{ Params: { slug: string } }>("/api/projects/:slug/models", async (request, reply) =>
     run(reply, () => {
-      const engine = engineOf(request.params.slug);
+      const engine = activeEngineOf(request.params.slug);
       const body = parseBody(ModelSettingsBody, request.body);
       engine.setModelSettings(body);
       const models = engine.state.config.models;
@@ -792,7 +780,7 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
 
   app.post<{ Params: { slug: string } }>("/api/projects/:slug/directives", async (request, reply) =>
     run(reply, () => {
-      const engine = engineOf(request.params.slug);
+      const engine = activeEngineOf(request.params.slug);
       const body = parseBody(DirectiveBody, request.body);
       return { id: engine.submitDirective(body.text, body.urgent ?? false) };
     }),
@@ -802,7 +790,7 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
     "/api/projects/:slug/questions/:id/answer",
     async (request, reply) =>
       run(reply, () => {
-        const engine = engineOf(request.params.slug);
+        const engine = activeEngineOf(request.params.slug);
         const body = parseBody(AnswerBody, request.body);
         engine.answerQuestion(checkedId(request.params.id, "question"), body.answer);
         return { ok: true };
@@ -813,7 +801,7 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
     "/api/projects/:slug/questions/:id/dismiss",
     async (request, reply) =>
       run(reply, () => {
-        const engine = engineOf(request.params.slug);
+        const engine = activeEngineOf(request.params.slug);
         engine.dismissQuestion(checkedId(request.params.id, "question"));
         return { ok: true };
       }),
@@ -823,15 +811,8 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
     "/api/projects/:slug/gates/:decisionId",
     async (request, reply) =>
       run(reply, () => {
-        const engine = engineOf(request.params.slug);
-        const body = parseBody(GateBody, request.body);
-        engine.resolveGate(
-          checkedId(request.params.decisionId, "decision"),
-          body.resolution,
-          body.action,
-          body.note,
-        );
-        return { ok: true };
+        activeEngineOf(request.params.slug);
+        throw new ManagerError("Council decision gates are retired", 410);
       }),
   );
 
@@ -839,7 +820,7 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
     "/api/projects/:slug/waves/:id/interrupt",
     async (request, reply) =>
       run(reply, () => {
-        const engine = engineOf(request.params.slug);
+        const engine = activeEngineOf(request.params.slug);
         engine.softInterruptWave(checkedId(request.params.id, "wave"));
         return { ok: true };
       }),
@@ -849,7 +830,7 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
     "/api/projects/:slug/tasks/:id/interrupt",
     async (request, reply) =>
       run(reply, () => {
-        const engine = engineOf(request.params.slug);
+        const engine = activeEngineOf(request.params.slug);
         engine.hardInterruptTask(checkedId(request.params.id, "task"));
         return { ok: true };
       }),
@@ -859,7 +840,7 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
     "/api/projects/:slug/tasks/:id/extend",
     async (request, reply) =>
       run(reply, () => {
-        const engine = engineOf(request.params.slug);
+        const engine = activeEngineOf(request.params.slug);
         const body = parseBody(ExtendBody, request.body);
         engine.extendTask(checkedId(request.params.id, "task"), body.addTokens);
         return { ok: true };
@@ -872,7 +853,7 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
     "/api/projects/:slug/claims/:id/status",
     async (request, reply) =>
       run(reply, () => {
-        const engine = engineOf(request.params.slug);
+        const engine = activeEngineOf(request.params.slug);
         const body = parseBody(ClaimStatusBody, request.body);
         engine.humanClaimStatus(checkedId(request.params.id, "claim"), body.to, body.note);
         return { ok: true };
@@ -881,11 +862,8 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
 
   app.post<{ Params: { slug: string } }>("/api/projects/:slug/issues", async (request, reply) =>
     run(reply, () => {
-      const engine = engineOf(request.params.slug);
-      const body = parseBody(IssueBody, request.body);
-      return {
-        issueId: engine.humanRaiseIssue(body.candidateId, body.severity, body.location, body.text),
-      };
+      activeEngineOf(request.params.slug);
+      throw new ManagerError("Council issue editing is retired", 410);
     }),
   );
 
@@ -893,10 +871,8 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
     "/api/projects/:slug/memory/:id/quarantine",
     async (request, reply) =>
       run(reply, () => {
-        const engine = engineOf(request.params.slug);
-        const body = parseBody(QuarantineBody, request.body);
-        engine.quarantineCard(checkedId(request.params.id, "card"), body.note);
-        return { ok: true };
+        activeEngineOf(request.params.slug);
+        throw new ManagerError("Council library editing is retired", 410);
       }),
   );
 

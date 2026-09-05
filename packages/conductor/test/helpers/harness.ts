@@ -1,42 +1,34 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   applyEvent,
-  defaultConfig,
   defaultTrajectoryConfig,
   initialState,
-  type ActionEnvelope,
-  type ContinuationRevisionOutput,
-  type CurationOutput,
   type ClaimComparisonOutput,
   type Event,
   type FinalOutput,
   type IntakeOutput,
-  type Memo,
-  type PlannedTask,
   type ProjectConfig,
   type ProjectState,
   type PublicationOutput,
-  type ReviewerOutput,
   type SummaryRevisionOutput,
   type TrajectoryOutput,
   type VerificationOutput,
-  type WorkerOutput,
 } from "@inventio/schema";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   ProjectEngine,
   type EngineDeps,
   type MemoryAccess,
 } from "../../src/engine/engine.js";
 import { WorkerPool } from "../../src/engine/pool.js";
-import { EventLog } from "../../src/store/eventLog.js";
 import type {
   PublicationCompiler,
   TexCompileRequest,
   TexCompileResult,
 } from "../../src/publication/tex.js";
+import { EventLog } from "../../src/store/eventLog.js";
 import { projectPaths, type ProjectPaths } from "../../src/store/projectStore.js";
 
 /**
@@ -53,14 +45,9 @@ export const SIM_BIN = path.resolve(
   "../../../codex-sim/bin/codex-sim.mjs",
 );
 
-/** Prompt discriminators — must match packages/conductor/src/prompts/researchManager.ts. */
+/** Prompt discriminators — must match the active modules under src/prompts/. */
 export const INTAKE_MATCH = "Read the complete raw intake materials";
-export const CONTINUATION_REVISION_MATCH = "Revise your current mathematical view";
-export const DECISION_MATCH = "choose one proportionate next step";
-export const CURATION_MATCH = "Assess the completed research round";
-export const FINAL_MATCH = "Compose the final report";
 export const PUBLICATION_MATCH = "Reassess the concluded mathematics";
-export const WORKER_MATCH = "Work on the question in research-question.md";
 export const TRAJECTORY_WORKER_MATCH = "Work on the original problem in problem.md";
 export const VERIFICATION_MATCH = "Independently check claim.md";
 export const CLAIM_COMPARISON_MATCH = "Compare only the mathematical statements";
@@ -96,7 +83,7 @@ function nextThread(tag: string): string {
   return `th-${tag}-${threadCounter}`;
 }
 
-/** A planner-mode call (intake / next-move / curation / final). */
+/** A mathematical reader call (intake / comparison / summary / final / publication). */
 export function plannerCall(
   promptContains: string,
   finalMessage: unknown,
@@ -111,112 +98,8 @@ export function plannerCall(
   };
 }
 
-/** A worker call, discriminated by the task id appearing in the packet cwd. */
-export function workerCall(taskId: string, finalMessage: unknown, extra: SimCall = {}): SimCall {
-  return {
-    match: { promptContains: WORKER_MATCH, cwdContains: `/${taskId}/` },
-    threadId: nextThread(taskId.toLowerCase()),
-    finalMessage,
-    usage: USAGE,
-    ...extra,
-  };
-}
-
-const EMPTY_ENVELOPE = {
-  plan_wave: null,
-  cross_examine: null,
-  freeze_candidate: null,
-  assess_results: null,
-  record_dispositions: null,
-  abandon_lineage: null,
-  raise_question: null,
-  terminate: null,
-} as const;
-
-export function envelope<K extends ActionEnvelope["action"]>(
-  action: K,
-  payload: NonNullable<ActionEnvelope[K]>,
-): ActionEnvelope {
-  return { ...EMPTY_ENVELOPE, action, [action]: payload } as unknown as ActionEnvelope;
-}
-
-export function plannedTask(o: {
-  role: PlannedTask["role"];
-  methodTag: string;
-  brief: string;
-  tokenBudget: number;
-  direction?: string;
-  computation?: boolean;
-  webSearch?: boolean;
-  reviewOf?: string | null;
-  artifactIds?: string[];
-  cardIds?: string[];
-  sourceMounts?: string[];
-}): PlannedTask {
-  return {
-    role: o.role,
-    methodTag: o.methodTag,
-    direction: o.direction ?? `direction:${o.methodTag}`,
-    briefMarkdown: o.brief,
-    tokenBudget: o.tokenBudget,
-    computation: o.computation ?? false,
-    webSearch: o.webSearch ?? false,
-    reviewOf: o.reviewOf ?? null,
-    grants: {
-      artifactIds: o.artifactIds ?? [],
-      cardIds: o.cardIds ?? [],
-      sourceMounts: o.sourceMounts ?? [],
-    },
-  };
-}
-
-export function planWave(o: {
-  title: string;
-  reserveTokens: number;
-  tasks: PlannedTask[];
-  rationale?: string;
-}): ActionEnvelope {
-  return envelope("plan_wave", {
-    title: o.title,
-    rationale: o.rationale ?? `rationale for ${o.title}`,
-    reserveTokens: o.reserveTokens,
-    tasks: o.tasks,
-  });
-}
-
-export function freezeCandidate(o: {
-  fromArtifactId: string;
-  lineageId?: string | null;
-  newLineageTitle?: string | null;
-  obligations?: string[];
-  reviewQuestions?: string[];
-  usedClaimIds?: string[];
-  scopeMarkdown?: string | null;
-}): ActionEnvelope {
-  return envelope("freeze_candidate", {
-    lineageId: o.lineageId ?? null,
-    newLineageTitle: o.newLineageTitle ?? null,
-    fromArtifactId: o.fromArtifactId,
-    obligations: o.obligations ?? [],
-    reviewQuestions: o.reviewQuestions ?? [],
-    usedClaimIds: o.usedClaimIds ?? [],
-    scopeMarkdown: o.scopeMarkdown ?? null,
-    rationale: `freeze ${o.fromArtifactId}`,
-  });
-}
-
-export function assessResults(
-  items: NonNullable<ActionEnvelope["assess_results"]>["items"],
-): ActionEnvelope {
-  return envelope("assess_results", { items });
-}
-
-export function terminate(rationale = "the frontier is exhausted"): ActionEnvelope {
-  return envelope("terminate", { rationale });
-}
-
 // ---------------------------------------------------------------------------
-// Planner / worker payload builders (schema-exact)
+// Reader / trajectory payload builders (schema-exact)
 // ---------------------------------------------------------------------------
 
 export function intakeOutput(problemMarkdown = "# Problem\n\nShow that the widget is round."): IntakeOutput {
@@ -230,43 +113,6 @@ export function intakeOutput(problemMarkdown = "# Problem\n\nShow that the widge
     ambiguities: [],
     clarifications: [],
     notes: "",
-  };
-}
-
-export function continuationRevisionOutput(
-  over: Partial<ContinuationRevisionOutput> = {},
-): ContinuationRevisionOutput {
-  return {
-    managerAbstract:
-      "The renewed project broadens the earlier local approach while retaining its established conclusions.",
-    managerNoteMarkdown:
-      "## Current mathematical view\n\nThe earlier local reduction remains useful, but it is no longer the sole direction. The owner's continuation asks that genuinely different approaches remain active in the coming rounds.",
-    ...over,
-  };
-}
-
-export function curationOutput(
-  over: Partial<CurationOutput> = {},
-  taskIds: string[] = ["T001"],
-): CurationOutput {
-  return {
-    managerNoteMarkdown:
-      "The first round found a concrete reduction. The remaining question is whether the local lemma closes.",
-    resolutionMarkdown: "# Resolution\n\nThe wave produced a candidate argument.",
-    digestMarkdown: "# Digest\n\nThe project has one attempt on record.",
-    taskDispositions: taskIds.map((taskId) => ({
-      taskId,
-      disposition: "carry_forward" as const,
-      reason: "The note contains concrete mathematical work worth carrying into the next decision.",
-      unblock: null,
-    })),
-    cardDecisions: [],
-    libraryAdditions: [],
-    libraryRetirements: [],
-    claimExtractions: [],
-    claimUpdates: [],
-    capsules: { solver: "solver capsule", explorer: "explorer capsule", reviewer: "reviewer capsule" },
-    ...over,
   };
 }
 
@@ -291,36 +137,6 @@ export function publicationOutput(
     assessment: "The final implication remains open after an independent reading.",
     ...over,
   } as PublicationOutput;
-}
-
-export function memo(over: Partial<Memo> = {}): Memo {
-  return {
-    summary: "worked the assigned direction to a conclusion",
-    newClaims: [],
-    issues: [],
-    obligations: [],
-    deadEnds: [],
-    proposedCards: [],
-    computations: [],
-    budgetReport: "used about half of the assigned budget",
-    ...over,
-  };
-}
-
-export function solverOutput(
-  conclusion: WorkerOutput["conclusion"],
-  artifactMarkdown: string,
-  m: Memo = memo(),
-): WorkerOutput {
-  return { conclusion, artifactMarkdown: substantialTestArtifact(artifactMarkdown), memo: m, recallLog: [] };
-}
-
-export function reviewerOutput(
-  verdict: ReviewerOutput["verdict"],
-  artifactMarkdown: string,
-  m: Memo = memo(),
-): ReviewerOutput {
-  return { verdict, artifactMarkdown: substantialTestArtifact(artifactMarkdown), memo: m, recallLog: [] };
 }
 
 export function trajectoryOutput(
@@ -365,23 +181,6 @@ export function claimComparisonOutput(
   equivalentClaimGroups: string[][] = [],
 ): ClaimComparisonOutput {
   return { equivalentClaimGroups };
-}
-
-function substantialTestArtifact(markdown: string): string {
-  if (markdown.trim().length >= 240) return markdown;
-  return (
-    markdown +
-    "\n\n## Supporting detail\n\n" +
-    "This simulated artifact checks the stated hypotheses, records the logical route, and names what remains to be verified. ".repeat(3)
-  );
-}
-
-export function testConfig(over: (c: ProjectConfig) => void = () => undefined): ProjectConfig {
-  const c = defaultConfig();
-  c.budget.totalTokens = 10_000_000;
-  c.limits.maxConcurrentWorkers = 1;
-  over(c);
-  return c;
 }
 
 export function trajectoryTestConfig(
@@ -487,7 +286,7 @@ export class Harness {
   static create(
     name: string,
     calls: SimCall[],
-    config: ProjectConfig = testConfig(),
+    config: ProjectConfig = trajectoryTestConfig(),
     memory: MemoryAccess | null = null,
   ): Harness {
     const root = mkdtempSync(path.join(os.tmpdir(), `collq-eng-${name}-`));

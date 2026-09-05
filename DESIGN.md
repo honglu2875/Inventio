@@ -4,6 +4,9 @@
 > `council-v1` workflow and shared runtime. New projects use
 > `trajectories-v2`, specified in `TRAJECTORY-DESIGN.md`. Event replay and the
 > HTTP/UI surface continue to support both workflows.
+> Council execution is retired. These historical semantics explain saved runs;
+> current support is view-only replay under `packages/conductor/src/legacy/`.
+> New execution follows `TRAJECTORY-DESIGN.md`.
 
 Inventio is a local system that attacks difficult mathematics problems
 with a council of Codex agents under the constitution in `PROTOCOL.md`.

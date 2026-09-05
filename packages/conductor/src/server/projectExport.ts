@@ -1,13 +1,3 @@
-import { isUtf8 } from "node:buffer";
-import {
-  closeSync,
-  existsSync,
-  openSync,
-  readFileSync,
-  readSync,
-  statSync,
-} from "node:fs";
-import path from "node:path";
 import {
   Memo as MemoSchema,
   PROJECT_EXPORT_FORMAT_VERSION,
@@ -19,7 +9,17 @@ import {
   type ProjectExportTextFile,
   type ProjectState,
 } from "@inventio/schema";
-import type { ProjectEngine } from "../engine/engine.js";
+import { isUtf8 } from "node:buffer";
+import {
+  closeSync,
+  existsSync,
+  openSync,
+  readFileSync,
+  readSync,
+  statSync,
+} from "node:fs";
+import path from "node:path";
+import type { ProjectReader } from "../legacy/archive.js";
 
 /** Keep the portable copy bounded and consistent with the ordinary UI. */
 export const EXPORT_TRANSCRIPT_LINES = 200;
@@ -240,7 +240,7 @@ function artifactRefs(state: ProjectState): ArtifactRef[] {
 
 /** Collect the complete read surface while the engine owns a consistent state. */
 export function buildProjectExportSnapshot(
-  engine: ProjectEngine,
+  engine: ProjectReader,
   exportedAt = new Date().toISOString(),
 ): ProjectExportSnapshot {
   const state = portableState(engine.state);

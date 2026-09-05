@@ -1,12 +1,12 @@
+import { currentTerminalPublication, type ProjectState } from "@inventio/schema";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { currentTerminalPublication, type ProjectState } from "@inventio/schema";
 import { api, errorMessage, projectExportHtmlUrl, type ProjectSummary } from "../lib/api";
 import { formatExact, formatTokens } from "../lib/format";
 import { projectExportSnapshot } from "../lib/projectExport";
 import { PHASES, burnDownChips, resultColor } from "../lib/visual";
-import { useStore } from "../store/store";
 import { useActionGuard, useApiAction, useConnection } from "../store/hooks";
+import { useStore } from "../store/store";
 import ContinueResearchDialog from "./steering/ContinueResearchDialog";
 import FreshStartDialog from "./steering/FreshStartDialog";
 import PublicationDialog from "./steering/PublicationDialog";
@@ -220,7 +220,9 @@ function MathToggle(): JSX.Element {
 
 export default function TopStrip({ slug, state }: { slug: string; state: ProjectState | null }): JSX.Element {
   const exported = projectExportSnapshot();
+  const archived = state?.config.workflow === "council-v1";
   const guard = useActionGuard(slug);
+  const copyGuard = useActionGuard(slug, true);
   const run = useApiAction();
   const pushToast = useStore((s) => s.pushToast);
   const [continueOpen, setContinueOpen] = useState(false);
@@ -283,7 +285,7 @@ export default function TopStrip({ slug, state }: { slug: string; state: Project
             <PhaseTracker state={state} />
             <BudgetBar state={state} />
             <BurnDown state={state} />
-            {exported === null && runningTasks > 0 ? (
+            {exported === null && !archived && runningTasks > 0 ? (
               <span className="pool" title={`${runningTasks} running workers`}>
                 ⚙ {runningTasks}
               </span>
@@ -303,28 +305,18 @@ export default function TopStrip({ slug, state }: { slug: string; state: Project
                   <button
                     type="button"
                     className="button ghost"
-                    disabled={guard.disabled}
-                    title={guard.title ?? "Create a new project from this intake only"}
+                    disabled={copyGuard.disabled}
+                    title={copyGuard.title ?? "Create a new project from this intake only"}
                     onClick={() => setFreshStartOpen(true)}
                   >
                     Fresh start
                   </button>
                 ) : null}
-                {state.config.workflow === "council-v1" ? (
-                  <button
-                    type="button"
-                    className={`toggle${state.config.autonomy === "gated" ? " on" : ""}`}
-                    disabled={guard.disabled}
-                    {...(guard.title === undefined ? {} : { title: guard.title })}
-                    onClick={() => {
-                      const mode = state.config.autonomy === "auto" ? "gated" : "auto";
-                      void run(() => api.setAutonomy(slug, mode));
-                    }}
-                  >
-                    {state.config.autonomy === "auto" ? "Auto" : "Gated"}
-                  </button>
+                {archived ? <span className="badge">Legacy archive · view-only</span> : null}
+                {archived && publication?.texPath ? (
+                  <button type="button" className="button" onClick={() => setPublicationOpen(true)}>Paper</button>
                 ) : null}
-                {state.terminal ? (
+                {archived ? null : state.terminal ? (
                   <>
                     <button
                       type="button"
@@ -400,7 +392,7 @@ export default function TopStrip({ slug, state }: { slug: string; state: Project
         <ThemeToggle />
         {exported === null ? <ConnectionDot slug={slug} /> : null}
       </header>
-      {exported === null && continueOpen && state?.terminal ? (
+      {exported === null && !archived && continueOpen && state?.terminal ? (
         <ContinueResearchDialog slug={slug} state={state} onClose={() => setContinueOpen(false)} />
       ) : null}
       {exported === null && publicationOpen && state?.terminal ? (

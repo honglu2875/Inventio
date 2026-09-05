@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { IssueSeverity, ProjectState } from "@inventio/schema";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { formatExact, formatTokens, truncate } from "../../lib/format";
 import { isProjectExport } from "../../lib/projectExport";
@@ -254,6 +254,7 @@ export default function Inspector({
   const state = useProjectState(slug);
   const kind = classifyNodeId(nodeId);
   const exported = isProjectExport();
+  const readOnly = exported || state?.config.workflow === "council-v1";
   const tabs = useMemo(() => tabsFor(kind), [kind]);
   const [tab, setTab] = useState<TabKey>(() => tabs[0] ?? "events");
   const [width, setWidth] = useState(DEFAULT_W);
@@ -352,8 +353,8 @@ export default function Inspector({
         </RenderBoundary>
       </div>
 
-      {!exported && kind === "task" ? <TaskFooter slug={slug} taskId={nodeId} /> : null}
-      {!exported && kind === "candidate" ? <CandidateFooter slug={slug} candidateId={nodeId} /> : null}
+      {!readOnly && kind === "task" ? <TaskFooter slug={slug} taskId={nodeId} /> : null}
+      {!readOnly && kind === "candidate" ? <CandidateFooter slug={slug} candidateId={nodeId} /> : null}
     </aside>
   );
 }

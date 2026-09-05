@@ -1,12 +1,12 @@
 import { useCallback, useEffect } from "react";
 import { NavLink, Outlet, useParams, useSearchParams } from "react-router-dom";
-import TopStrip from "../components/TopStrip";
+import { ProjectSlugContext } from "../components/ProjectContext";
 import Toasts from "../components/Toasts";
+import TopStrip from "../components/TopStrip";
 import Inspector from "../components/inspector/Inspector";
 import DirectiveDock from "../components/steering/DirectiveDock";
 import GateCard from "../components/steering/GateCard";
 import QuestionsToast from "../components/steering/QuestionsToast";
-import { ProjectSlugContext } from "../components/ProjectContext";
 import { isProjectExport } from "../lib/projectExport";
 import { connectProject } from "../store/connect";
 import { startFixture } from "../store/fixtures";
@@ -26,6 +26,7 @@ export default function ProjectLayout(): JSX.Element {
   const sel = params.get("sel");
   const state = useProjectState(slug);
   const slot = useSlot(slug);
+  const readOnly = exported || state?.config.workflow === "council-v1";
   const setSelection = useStore((s) => s.setSelection);
 
   useEffect(() => {
@@ -76,7 +77,7 @@ export default function ProjectLayout(): JSX.Element {
           <NavLink to={`/p/${slug}/library${query}`} className="view-tab">
             Library
           </NavLink>
-          {exported ? null : (
+          {readOnly ? null : (
             <NavLink to={`/p/${slug}/settings${query}`} className="view-tab">
               Settings
             </NavLink>
@@ -84,14 +85,14 @@ export default function ProjectLayout(): JSX.Element {
           {slot?.lastError ? <span className="strip-error">{slot.lastError}</span> : null}
         </nav>
         <main className="content">
-          {exported ? null : <QuestionsToast slug={slug} />}
+          {readOnly ? null : <QuestionsToast slug={slug} />}
           <div className="content-view">
             <Outlet />
           </div>
         </main>
-        {exported ? null : <DirectiveDock slug={slug} />}
+        {readOnly ? null : <DirectiveDock slug={slug} />}
         {sel === null ? null : <Inspector slug={slug} nodeId={sel} onClose={closeInspector} />}
-        {!exported && state?.openGateDecisionId ? (
+        {!readOnly && state?.openGateDecisionId ? (
           <GateCard slug={slug} decisionId={state.openGateDecisionId} />
         ) : null}
         {exported ? null : <Toasts />}

@@ -1,5 +1,3 @@
-import { existsSync, readFileSync } from "node:fs";
-import path from "node:path";
 import {
   ProjectConfig,
   SLUG_RE,
@@ -7,8 +5,11 @@ import {
   type ProjectState,
   type SourceMount,
 } from "@inventio/schema";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { ProjectEngine, type EngineDeps } from "../engine/engine.js";
 import type { WorkerPool } from "../engine/pool.js";
+import { ArchivedProject, readProjectWorkflow } from "../legacy/archive.js";
 import { FileMemoryBackend } from "../memory/cardStore.js";
 import type { MemoryService } from "../memory/service.js";
 import {
@@ -122,6 +123,7 @@ export function mergeConfig(patch: unknown): ProjectConfig {
       400,
     );
   }
+  if (parsed.data.workflow !== "trajectories-v2") throw new ManagerError("legacy council projects are view-only; new projects use trajectories-v2", 400);
   return parsed.data;
 }
 
@@ -132,7 +134,7 @@ export class EngineManager {
   readonly publicationCompiler: PublicationCompiler;
   private readonly memoryService: MemoryService | null;
   private readonly engineOverrides: Partial<EngineDeps>;
-  private readonly engines = new Map<string, ProjectEngine>();
+  private readonly engines = new Map<string, ProjectEngine | ArchivedProject>();
 
   constructor(opts: EngineManagerOpts) {
     this.root = opts.root;
@@ -170,15 +172,13 @@ export class EngineManager {
     const backend = new FileMemoryBackend(
       engine.paths.dir,
       (rec) => engine.recordRecall(rec),
-      engine.state.config.workflow === "trajectories-v2"
-        ? {
+      {
             getState: () => engine.state,
             recordMilestone: (taskId, title, markdown) =>
               engine.recordTrajectoryMilestone(taskId, title, markdown),
             flagFact: (taskId, factId, reason) =>
               engine.flagTrajectoryFact(taskId, factId, reason),
-          }
-        : undefined,
+      },
     );
     this.memoryService.registerProject(engine.slug, backend);
   }
@@ -250,6 +250,7 @@ export class EngineManager {
     // inherited; project-local uploads are copied below as ordinary bytes.
     const config = ProjectConfig.parse({
       ...source.state.config,
+      workflow: "trajectories-v2",
       sourceMounts: [],
     });
     const legacyDigest = source.state.problem.contextDigestMarkdown;
@@ -280,11 +281,15 @@ export class EngineManager {
     return engine;
   }
 
-  /** Load and start every project on disk (terminal ones just stay readable). */
+  /** Open archives for reading and start only active trajectory engines. */
   openAll(): void {
     const opened: ProjectEngine[] = [];
     for (const slug of listProjectSlugs(this.root)) {
       if (this.engines.has(slug)) continue;
+      if (readProjectWorkflow(projectPaths(this.root, slug).eventsFile) === "council-v1") {
+        this.engines.set(slug, new ArchivedProject(this.root, slug));
+        continue;
+      }
       const engine = ProjectEngine.load(this.deps(), slug);
       this.engines.set(slug, engine);
       opened.push(engine);
@@ -337,7 +342,7 @@ export class EngineManager {
 
   /** Store one uploaded file and make sure the `uploads` mount exists. */
   uploadSource(slug: string, filename: string, data: Buffer): UploadedSource & { mount: string } {
-    const engine = this.require(slug);
+    const engine = this.requireActive(slug);
     if (engine.isRefreshingIntake()) {
       throw new ManagerError("source files cannot change while the initial mathematical view is being regenerated", 409);
     }
@@ -373,7 +378,7 @@ export class EngineManager {
   }
 
   deleteSource(slug: string, name: string): void {
-    const engine = this.require(slug);
+    const engine = this.requireActive(slug);
     if (engine.isRefreshingIntake()) {
       throw new ManagerError("source files cannot change while the initial mathematical view is being regenerated", 409);
     }
@@ -391,15 +396,23 @@ export class EngineManager {
     if (engine.canReviseRawIntake()) engine.refreshRawIntakeSources();
   }
 
-  get(slug: string): ProjectEngine | undefined {
+  get(slug: string): ProjectEngine | ArchivedProject | undefined {
     return this.engines.get(slug);
   }
 
   /** Throwing accessor for the HTTP layer. */
-  require(slug: string): ProjectEngine {
+  require(slug: string): ProjectEngine | ArchivedProject {
     const engine = this.engines.get(slug);
     if (!engine) throw new ManagerError(`unknown project ${slug}`, 404);
     return engine;
+  }
+
+  requireActive(slug: string): ProjectEngine {
+    const project = this.require(slug);
+    if (project instanceof ArchivedProject) {
+      throw new ManagerError("Legacy council projects are view-only. Start a fresh project from the original intake to continue research.", 409);
+    }
+    return project;
   }
 
   list(): ProjectSummary[] {
@@ -431,7 +444,7 @@ export class EngineManager {
     await Promise.all(
       engines.map(async (engine) => {
         try {
-          await engine.stop();
+          if (engine instanceof ProjectEngine) await engine.stop();
         } finally {
           this.memoryService?.unregisterProject(engine.slug);
         }

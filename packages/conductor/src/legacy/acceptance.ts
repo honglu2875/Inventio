@@ -7,7 +7,7 @@ import type { ProjectState, Result } from "@inventio/schema";
 export function evaluateAcceptance(
   state: ProjectState,
   candidateId: string,
-): { passed: boolean; failing: string[]; result: Result | null } {
+): { passed: boolean; failing: string[]; result: Result | null; } {
   const failing: string[] = [];
   const c = state.candidates[candidateId];
   if (!c) return { passed: false, failing: [`candidate ${candidateId} does not exist`], result: null };

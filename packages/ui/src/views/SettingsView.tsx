@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   projectSettingsFromConfig,
   type ModelChoice,
-  type ProjectState,
   type ProjectSettings,
+  type ProjectState,
   type ReasoningEffort,
 } from "@inventio/schema";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useProjectSlug } from "../components/ProjectContext";
 import { api } from "../lib/api";
 import {
@@ -142,6 +142,8 @@ export default function SettingsView(): JSX.Element {
       </div>
     );
   }
+
+  if (state.config.workflow === "council-v1") return <p className="muted">Legacy research archive · view-only. Saved settings remain in the project record.</p>;
 
   return <SettingsForm key={slug} slug={slug} state={state} />;
 }

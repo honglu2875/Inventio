@@ -1,26 +1,24 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { defaultTrajectoryConfig } from "@inventio/schema";
+import type { FastifyInstance } from "fastify";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { connect, type AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { FastifyInstance } from "fastify";
-import { connect, type AddressInfo } from "node:net";
+import { afterEach, describe, expect, it } from "vitest";
 import { WorkerPool } from "../src/engine/pool.js";
 import { MemoryService } from "../src/memory/service.js";
 import { buildApp, taskMemoFromOutput } from "../src/server/http.js";
 import { EngineManager, mergeConfig, slugify } from "../src/server/manager.js";
 import { tailJsonl } from "../src/server/sse.js";
-import { defaultConfig } from "@inventio/schema";
 import {
-  FINAL_MATCH,
-  PUBLICATION_MATCH,
-  DECISION_MATCH,
   FakePublicationCompiler,
   finalOutput,
   plannerCall,
+  PUBLICATION_MATCH,
   publicationOutput,
-  terminate,
-  type SimCall,
+  TRAJECTORY_FINAL_MATCH,
+  type SimCall
 } from "./helpers/harness.js";
 
 /**
@@ -124,7 +122,7 @@ async function parked(h: Harness, title: string, slug?: string): Promise<string>
   const { status, json } = await createProject(h.app, {
     title,
     statement: "Prove that every X is a Y.",
-    config: defaultConfig(),
+    config: { ...defaultTrajectoryConfig(), allowWebSearch: false },
     ...(slug ? { slug } : {}),
   });
   expect(status).toBe(201);
@@ -264,7 +262,7 @@ describe("diagnostics", () => {
 
     const h = harness(1, [], uiDir);
     const slug = await parked(h, "Portable project");
-    const engine = h.manager.get(slug)!;
+    const engine = h.manager.requireActive(slug);
     const before = { seq: engine.state.seq, events: engine.events.length };
     const response = await h.app.inject({
       method: "GET",
@@ -303,20 +301,20 @@ describe("diagnostics", () => {
 describe("standalone publication HTTP", () => {
   it("saves and serves TeX before an explicit local PDF compilation", async () => {
     const h = harness(1, [
-      plannerCall(DECISION_MATCH, terminate("the last implication remains open")),
       plannerCall(
-        FINAL_MATCH,
+        TRAJECTORY_FINAL_MATCH,
         finalOutput("# Final report\n\nA partial theorem is proved, while the main implication remains open."),
       ),
       plannerCall(PUBLICATION_MATCH, publicationOutput()),
     ]);
     const created = await createProject(h.app, {
       title: "Publication boundary",
+      config: { budget: { totalTokens: 50_000 } },
       statement: "Determine whether every widget is round.",
     });
     expect(created.status).toBe(201);
     const slug = created.json["slug"] as string;
-    const engine = h.manager.get(slug)!;
+    const engine = h.manager.requireActive(slug);
     await waitFor(() => engine.state.phase === "AWAITING_CONFIRMATION");
 
     const tooSoon = await h.app.inject({
@@ -429,32 +427,6 @@ describe("projects", () => {
     expect(missing.json()).toMatchObject({ error: "not_found" });
   });
 
-  it("prioritizes projects whose automatic planner recovery needs one click", async () => {
-    const h = harness(1);
-    const slug = await parked(h, "Recovery notice");
-    const confirmed = await h.app.inject({
-      method: "POST",
-      url: `/api/projects/${slug}/confirm-problem`,
-      payload: { problemMarkdown: "# Confirmed\n\nProve X." },
-    });
-    expect(confirmed.statusCode).toBe(200);
-    await h.app.inject({ method: "POST", url: `/api/projects/${slug}/resume` });
-    await waitFor(() =>
-      Object.values(h.manager.get(slug)!.state.questions).some(
-        (question) => question.status === "open" && question.blocking,
-      ),
-    );
-
-    const list = await h.app.inject({ method: "GET", url: "/api/projects" });
-    const row = (list.json() as {
-      slug: string;
-      openBlockingQuestions: number;
-      updatedAt: string | null;
-    }[]).find((project) => project.slug === slug);
-    expect(row).toMatchObject({ slug, openBlockingQuestions: 1 });
-    expect(row?.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-  });
-
   it("rejects a duplicate slug with 409 and a bad body with 400", async () => {
     const h = harness();
     await parked(h, "First project", "dup-slug");
@@ -489,7 +461,7 @@ describe("projects", () => {
       statement: "An early statement that intake will normalize.",
       contextMarkdown: "Long original notes that must remain available verbatim.",
       config: {
-        workflow: "council-v1",
+        workflow: "trajectories-v2",
         budget: { totalTokens: 9_000_000 },
         allowWebSearch: true,
         sourceMounts: [
@@ -538,7 +510,7 @@ describe("projects", () => {
       },
     });
     expect(confirmed.statusCode).toBe(200);
-    expect(Object.keys(source.state.cards)).toHaveLength(1);
+    expect(source.state.cards).toEqual({});
 
     const sameTitle = await h.app.inject({
       method: "POST",
@@ -573,7 +545,7 @@ describe("projects", () => {
     });
     expect(clone.state.contextMarkdown).toBe("Long original notes that must remain available verbatim.");
     expect(clone.state.problem.sources.map((entry) => entry.kind)).toEqual(["objective", "background", "upload"]);
-    expect(clone.state.researchManagerNotes.map((entry) => entry.waveId)).toEqual(["W000"]);
+    expect(clone.state.mathematicalViews.map((entry) => entry.waveId)).toEqual(["W000"]);
     expect(clone.state.config.allowWebSearch).toBe(true);
     expect(clone.state.autonomy).toBe("gated");
     expect(clone.state.config.autonomy).toBe("gated");
@@ -599,19 +571,19 @@ describe("projects", () => {
       "phase.changed",
       "intake.sourcesUpdated",
       "intake.completed",
-      "manager.noteRecorded",
+      "summary.recorded",
       "phase.changed",
     ]);
 
     // Creating the retry is non-destructive: the source remains paused with
-    // its accepted intake memory and original filesystem access intact.
+    // its original intake and filesystem access intact.
     expect(source.state.paused).toBe(true);
     expect(source.state.config.sourceMounts).toContainEqual({
       name: "private-notes",
       path: "/tmp/private-notes",
       note: "source project only",
     });
-    expect(Object.keys(source.state.cards)).toHaveLength(1);
+    expect(source.state.cards).toEqual({});
   });
 
   it("merges config over the defaults", () => {
@@ -639,7 +611,7 @@ describe("steering routes", () => {
       },
     });
     expect(overlongAbstract.statusCode).toBe(400);
-    expect(h.manager.get(slug)!.state.phase).toBe("AWAITING_CONFIRMATION");
+    expect(h.manager.requireActive(slug).state.phase).toBe("AWAITING_CONFIRMATION");
 
     const ok = await h.app.inject({
       method: "POST",
@@ -708,7 +680,7 @@ describe("steering routes", () => {
     const resumed = await h.app.inject({ method: "POST", url: `/api/projects/${slug}/resume` });
     expect((resumed.json() as { paused: boolean }).paused).toBe(false);
     await h.app.inject({ method: "POST", url: `/api/projects/${slug}/pause` });
-    expect(h.manager.get(slug)!.state.paused).toBe(true);
+    expect(h.manager.requireActive(slug).state.paused).toBe(true);
   });
 
   it("updates project model settings durably and rejects malformed choices", async () => {
@@ -729,21 +701,21 @@ describe("steering routes", () => {
     });
     expect(saved.statusCode).toBe(200);
     expect(saved.json()).toMatchObject({ ok: true, models });
-    expect(h.manager.get(slug)!.state.config.models.solver).toEqual(models.solver);
-    expect(h.manager.get(slug)!.events.at(-1)).toMatchObject({
+    expect(h.manager.requireActive(slug).state.config.models.solver).toEqual(models.solver);
+    expect(h.manager.requireActive(slug).events.at(-1)).toMatchObject({
       type: "project.settingsChanged",
       settings: { models, autonomy: "auto", allowWebSearch: false },
       by: "human",
     });
 
-    const beforeNoOp = h.manager.get(slug)!.state.seq;
+    const beforeNoOp = h.manager.requireActive(slug).state.seq;
     const noOp = await h.app.inject({
       method: "POST",
       url: `/api/projects/${slug}/models`,
       payload: models,
     });
     expect(noOp.statusCode).toBe(200);
-    expect(h.manager.get(slug)!.state.seq).toBe(beforeNoOp);
+    expect(h.manager.requireActive(slug).state.seq).toBe(beforeNoOp);
 
     const malformed = await h.app.inject({
       method: "POST",
@@ -754,14 +726,14 @@ describe("steering routes", () => {
 
     await h.manager.shutdown();
     h.manager.openAll();
-    expect(h.manager.get(slug)!.state.config.models.solver).toEqual(models.solver);
-    expect(h.manager.get(slug)!.state.config.models.explorer).toEqual(models.explorer);
+    expect(h.manager.requireActive(slug).state.config.models.solver).toEqual(models.solver);
+    expect(h.manager.requireActive(slug).state.config.models.explorer).toEqual(models.explorer);
   });
 
   it("updates the project Web-search policy durably and avoids duplicate events", async () => {
     const h = harness();
     const slug = await parked(h, "Web search settings project");
-    expect(h.manager.get(slug)!.state.config.allowWebSearch).toBe(false);
+    expect(h.manager.requireActive(slug).state.config.allowWebSearch).toBe(false);
 
     const saved = await h.app.inject({
       method: "POST",
@@ -770,20 +742,20 @@ describe("steering routes", () => {
     });
     expect(saved.statusCode).toBe(200);
     expect(saved.json()).toEqual({ ok: true, enabled: true });
-    expect(h.manager.get(slug)!.events.at(-1)).toMatchObject({
+    expect(h.manager.requireActive(slug).events.at(-1)).toMatchObject({
       type: "project.settingsChanged",
       settings: { autonomy: "auto", allowWebSearch: true },
       by: "human",
     });
 
-    const beforeNoOp = h.manager.get(slug)!.state.seq;
+    const beforeNoOp = h.manager.requireActive(slug).state.seq;
     const noOp = await h.app.inject({
       method: "POST",
       url: `/api/projects/${slug}/web-search`,
       payload: { enabled: true },
     });
     expect(noOp.statusCode).toBe(200);
-    expect(h.manager.get(slug)!.state.seq).toBe(beforeNoOp);
+    expect(h.manager.requireActive(slug).state.seq).toBe(beforeNoOp);
 
     const malformed = await h.app.inject({
       method: "POST",
@@ -794,7 +766,7 @@ describe("steering routes", () => {
 
     await h.manager.shutdown();
     h.manager.openAll();
-    expect(h.manager.get(slug)!.state.config.allowWebSearch).toBe(true);
+    expect(h.manager.requireActive(slug).state.config.allowWebSearch).toBe(true);
   });
 
   it("retrieves and atomically updates the effective project settings", async () => {
@@ -995,21 +967,21 @@ describe("steering routes", () => {
       url: `/api/projects/${slug}/issues`,
       payload: { candidateId: "C001.v1", severity: "MAJOR", location: "§2", text: "gap" },
     });
-    expect(issue.statusCode).toBe(404);
+    expect(issue.statusCode).toBe(410);
 
     const quarantine = await h.app.inject({
       method: "POST",
       url: `/api/projects/${slug}/memory/M001/quarantine`,
       payload: { note: "wrong" },
     });
-    expect(quarantine.statusCode).toBe(404);
+    expect(quarantine.statusCode).toBe(410);
 
     const gate = await h.app.inject({
       method: "POST",
       url: `/api/projects/${slug}/gates/DEC001`,
       payload: { resolution: "approve" },
     });
-    expect(gate.statusCode).toBe(409);
+    expect(gate.statusCode).toBe(410);
 
     const wave = await h.app.inject({ method: "POST", url: `/api/projects/${slug}/waves/W001/interrupt` });
     expect(wave.statusCode).toBe(409);
@@ -1130,7 +1102,7 @@ describe("SSE", () => {
   it("replays the backlog by seq and then streams live events", async () => {
     const h = harness();
     const slug = await parked(h, "Streaming project");
-    const engine = h.manager.get(slug)!;
+    const engine = h.manager.requireActive(slug);
     const backlogLength = engine.events.length;
     expect(backlogLength).toBeGreaterThan(2);
 
@@ -1200,7 +1172,7 @@ describe("SSE", () => {
   it("since= and Last-Event-ID skip what the client already has", async () => {
     const h = harness();
     const slug = await parked(h, "Resume project");
-    const engine = h.manager.get(slug)!;
+    const engine = h.manager.requireActive(slug);
     const seq = engine.state.seq;
 
     await h.app.listen({ host: "127.0.0.1", port: 0 });
@@ -1275,7 +1247,7 @@ describe("source uploads", () => {
     });
     expect(created.status).toBe(201);
     const slug = created.json["slug"] as string;
-    const engine = h.manager.get(slug)!;
+    const engine = h.manager.requireActive(slug);
     expect(engine.state.phase).toBe("CREATED");
     expect(engine.state.decisionOrder).toEqual([]);
 
@@ -1328,7 +1300,7 @@ describe("source uploads", () => {
       start: false,
     });
     const slug = created.json["slug"] as string;
-    const engine = h.manager.get(slug)!;
+    const engine = h.manager.requireActive(slug);
     expect((await upload(h, slug, "notes.md", "old file")).statusCode).toBe(201);
     expect((await h.app.inject({ method: "POST", url: `/api/projects/${slug}/start` })).statusCode).toBe(200);
     await waitFor(() => engine.state.phase === "AWAITING_CONFIRMATION");
@@ -1433,7 +1405,7 @@ describe("source uploads", () => {
   it("registers the uploads mount in the live config and in project.json", async () => {
     const h = harness();
     const slug = await parked(h, "Upload mount");
-    const engine = h.manager.get(slug)!;
+    const engine = h.manager.requireActive(slug);
     expect(engine.state.config.sourceMounts.some((m) => m.name === "uploads")).toBe(false);
 
     expect((await upload(h, slug, "lemma.tex", "\\section{x}")).statusCode).toBe(201);

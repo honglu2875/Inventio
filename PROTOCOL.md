@@ -5,6 +5,9 @@
 > workflow specified in `TRAJECTORY-DESIGN.md`; the shared requirements of
 > statement fidelity, honest uncertainty, and independent checking still
 > apply there through its own event model.
+> Council execution is retired. These historical semantics explain saved runs;
+> current support is view-only replay under `packages/conductor/src/legacy/`.
+> New execution follows `TRAJECTORY-DESIGN.md`.
 
 This document is the epistemic constitution of Inventio, a system for
 attacking difficult mathematics with a council of independent model agents.

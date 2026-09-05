@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PROMPTS_DIR = path.join(PACKAGE_ROOT, "src", "prompts");
@@ -42,10 +42,8 @@ describe("prompt architecture", () => {
     const guide = readFileSync(path.join(PROMPTS_DIR, "README.md"), "utf8");
     for (const name of [
       "trajectories.ts",
-      "researchManager.ts",
-      "workers.ts",
+      "publication.ts",
       "shared.ts",
-      "managerExamples.ts",
       "operational.ts",
       "tools.ts",
       "diagnostics.ts",
@@ -63,7 +61,7 @@ describe("prompt architecture", () => {
   });
 
   it("appends the shared writing contract to every generated project AGENTS.md", () => {
-    for (const name of ["trajectories.ts", "researchManager.ts"]) {
+    for (const name of ["trajectories.ts", "publication.ts"]) {
       const source = readFileSync(path.join(PROMPTS_DIR, name), "utf8");
       const assignments = source
         .split("\n")
@@ -75,7 +73,5 @@ describe("prompt architecture", () => {
       }
     }
 
-    const workers = readFileSync(path.join(PROMPTS_DIR, "workers.ts"), "utf8");
-    expect(workers).toContain('return withMathematicalWritingGuidance(out.join("\\n"));');
   });
 });

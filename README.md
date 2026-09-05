@@ -12,7 +12,9 @@ think, while a claimed proof should still survive independent scrutiny. A
 deterministic runtime handles scheduling, isolation, persistence, budgets, and
 state transitions; it does not tell the researchers which mathematics to try.
 New projects use this long-trajectory workflow. Projects made under the earlier
-Research Manager/council workflow remain fully replayable.
+Research Manager/council workflow remain fully replayable as view-only archives.
+Their saved results, sources, transcripts, and exports remain available; start
+a fresh trajectory project from the original intake to do new research.
 
 ## Documents
 
@@ -66,10 +68,9 @@ browser ── REST + SSE ──> deterministic runtime ──> long Solver/Expl
   milestones, use a private writable calculation directory, search or open the
   project library and original sources, and leave both a readable final
   write-up and their complete Codex event archive.
-- **Research prose uses controlled English.** Every model-authored abstract,
-  claim, proof, note, report, and manuscript follows Inventio's mathematical
-  application of ASD-STE100 Simplified Technical English. Exact mathematical
-  terms, hypotheses, quantifiers, and proof dependencies always take priority.
+- **Research prose uses clear academic English.** Claims and verifier reports
+  retain the decisive derivations and exact source hypotheses. Concision must
+  never replace mathematical evidence.
 - **The current view changes slowly.** After a round's checks settle, a strong
   summary reader may make a small edit to W000 only when the new results
   materially change the mathematical picture. It cannot choose work or brief
@@ -159,12 +160,13 @@ project directory, point Inventio at it explicitly:
 INVENTIO_ROOT=/absolute/path/to/projects npm run dev
 ```
 
-Only one Inventio server may use a given project root at a time. Each project
+Only one Inventio server may write an active project at a time. Each active project
 has a process-owned event-log lock; a second server exits instead of risking
 two writers assigning the same event number. Locks from a crashed process are
 reclaimed automatically on the next start.
 
-Legacy projects may also contain configured source mounts. New projects retain
+Legacy projects are read without acquiring writer leases or changing files.
+They may also contain historical configured source mounts. New projects retain
 their original objective, notes, and uploads directly in the project and expose
 them to trajectories through project-scoped read tools.
 

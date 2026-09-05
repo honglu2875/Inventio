@@ -1,12 +1,12 @@
-import { describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { buildArgs, codexEventErrorMessage, runCodex } from "../src/codex/runner.js";
 import { runStructured } from "../src/codex/structured.js";
-import { workerLaunchPrompt } from "../src/prompts/operational.js";
+import { TRAJECTORY_WORKER_PROMPT } from "../src/prompts/trajectories.js";
 
 const SIM_BIN = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -46,7 +46,7 @@ function setup(calls: ScenarioCall[]) {
     baseOpts: {
       bin: SIM_BIN,
       cwd: dir,
-      prompt: workerLaunchPrompt("research-question.md"),
+      prompt: TRAJECTORY_WORKER_PROMPT,
       sandbox: "read-only" as const,
       eventsArchiveFile: path.join(dir, "archive", "codex-events.jsonl"),
       outputLastMessageFile: path.join(dir, "last-message.json"),

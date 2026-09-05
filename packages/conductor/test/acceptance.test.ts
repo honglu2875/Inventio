@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
 import { applyEvent, initialState, replay } from "@inventio/schema";
+import { describe, expect, it } from "vitest";
 import { buildCanonicalEvents } from "../../schema/test/fixtures.js";
-import { evaluateAcceptance } from "../src/engine/acceptance.js";
+import { evaluateAcceptance } from "../src/legacy/acceptance.js";
 
 describe("candidate computation dependencies", () => {
   it("blocks a candidate only on computations from its own source task", () => {
