@@ -1,5 +1,11 @@
 # Validity at a controlled cost
 
+The subsequent architectural redesign is specified in
+[SESSION-DESIGN.md](../SESSION-DESIGN.md). It retains the validity safeguards
+while replacing rounds with two persistent research sessions. The owner has
+removed backward compatibility as a requirement for that replacement; the
+historical constraints below describe the work already implemented.
+
 ## Objective and boundaries
 
 Reduce false acceptance and make each decisive conclusion traceable to its

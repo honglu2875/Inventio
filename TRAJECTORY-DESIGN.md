@@ -1,5 +1,9 @@
 # Long-trajectory research workflow
 
+The proposed replacement is [SESSION-DESIGN.md](SESSION-DESIGN.md): one persistent
+Solver and one persistent Explorer, without rounds or a backward-compatibility
+requirement. This document continues to describe the current implementation.
+
 This document specifies the second-generation Inventio workflow. It is kept
 separate from the legacy council protocol so projects created by earlier
 versions can still be replayed without reinterpretation.
