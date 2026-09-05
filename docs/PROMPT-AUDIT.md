@@ -3,11 +3,18 @@
 This audit examines the saved evidence in the five projects explicitly placed
 in scope by the owner: `virasoro-quartic-4`, `virasoro-quartic-5`,
 `toda-hierarchy-2`, `toda-hierarchy-on-surfaces`, and `quintic-dnc-bcov`.
-It does not certify their mathematical conclusions. Runtime files remain
+The owner further identifies the D discrepancy as likely a mishandled TRR
+summand: 10/3 is itself a summand, but the exact incorrect step is not yet
+located. K146 concludes A - 2D = -10/3; K156 instead reports D = -35/18
+and A = -35/9. These are conflicting derivations, not an expert-certified
+corrected formula. This audit does not certify their conclusions. Runtime files remain
 private and unchanged. References below are navigation pointers into those
 local archives, not copied research artifacts.
 
 ## Findings
+
+These findings describe the original runs and first revision. Current
+implementation status is recorded in VALIDITY-ROADMAP.md.
 
 | Evidence | Observation | Diagnosis | Response |
 | --- | --- | --- | --- |
@@ -23,7 +30,7 @@ local archives, not copied research artifacts.
 | `toda-hierarchy-on-surfaces`, latest stopping report | Partial sectors and unresolved higher-genus content remain distinguished. | Useful uncertainty calibration worth preserving. | Include correct partial and honestly incomplete arguments in the evaluation, not only dramatic wrong proofs. |
 | `quintic-dnc-bcov`, latest stopping report, C002.v1/v2 and C004.v1 | The report separates accepted scoped results, unchecked assertions, and conjecture; failed versions are excluded. | Useful scope discipline from the council workflow. | Preserve its archived meaning and retain this discipline in trajectory prompts without restoring the council controller. |
 
-## Implemented prompt changes
+## First prompt revision (c9bb777)
 
 - Shorter academic writing guidance replaces the full ASD-STE100 obligation.
 - A claim must contain the decisive calculation and precise imported results;
@@ -82,7 +89,9 @@ claims and unresolved conflicts so useful dissent is not discarded.
    trials. Accept a revision for its validity/cost tradeoff on held-out cases,
    not for longer or more confident reports.
 
-Future runtime work remains: conflict-aware termination, structured dependency
-provenance and reconsideration, durable computation certificates, and a
-source/formula cache confined to each verifier's authorized packet. These
-need schema events, replay tests, and HTTP/UI projections where applicable.
+The subsequent implementation is tracked in VALIDITY-ROADMAP.md. It adds
+conflict-aware stopping, explicit project-fact dependencies, execution evidence
+checks, and offline evaluation. Reproducible calculation certificates, exact
+external theorem/formula snapshots, budget-policy experiments, and live paired
+evaluations remain later work. These require their own validation rather than
+being attributed to the first prompt revision.

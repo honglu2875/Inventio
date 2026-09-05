@@ -18,6 +18,10 @@ a fresh trajectory project from the original intake to do new research.
 
 ## Documents
 
+The [validity roadmap](docs/VALIDITY-ROADMAP.md) records the staged safeguards,
+remaining experiments and costs. [Offline evaluation](docs/EVALUATION.md) scores
+explicitly selected saved checks without model calls or project writes.
+
 | file | what it is |
 |---|---|
 | `TRAJECTORY-DESIGN.md` | The current default workflow: long trajectories, claims, facts, and independent checks. Read this first. |

@@ -1,3 +1,4 @@
+import { sha256 } from "../verification/executionEvidence.js";
 import {
   Memo as MemoSchema,
   PROJECT_EXPORT_FORMAT_VERSION,
@@ -301,6 +302,20 @@ export function buildProjectExportSnapshot(
     };
   }
 
+  const verificationEvidence: Record<string, ProjectExportTextFile> = {};
+  for (const verification of Object.values(state.verifications)) {
+    if (!verification.executionEvidence) continue;
+    const file = portableTextFile(
+      confined(engine.paths.dir, verification.executionEvidence.path),
+      `${verification.id} execution evidence`, omissions,
+    );
+    if (file.included && sha256(file.text) !== verification.executionEvidence.sha256) {
+      const reason = "The execution record no longer matches its recorded hash.";
+      omissions.push(`${verification.id}: ${reason}`);
+      verificationEvidence[verification.id] = omittedTextFile(file.size, reason);
+    } else verificationEvidence[verification.id] = file;
+  }
+
   const sources: Record<string, ProjectExportTextFile> = {};
   for (const source of state.problem.sources) {
     if (source.kind !== "upload") continue;
@@ -328,6 +343,7 @@ export function buildProjectExportSnapshot(
     artifacts,
     tasks,
     sources,
+    verificationEvidence,
     omissions,
   };
 }

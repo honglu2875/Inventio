@@ -1,3 +1,4 @@
+import { VerificationEvidenceDeclaration } from "./verification-evidence.js";
 import { z } from "zod";
 import {
   CardType,
@@ -92,6 +93,7 @@ export const TrajectoryClaim = z.object({
   statementMarkdown: z.string().min(1),
   proofMarkdown: z.string().min(1),
   relationToGoal: ClaimRelation,
+  dependsOnFactIds: z.array(z.string().regex(/^F\d+$/)).max(16).optional(),
 });
 export type TrajectoryClaim = z.infer<typeof TrajectoryClaim>;
 
@@ -236,6 +238,7 @@ export type TrajectoryOutput = z.infer<typeof TrajectoryOutput>;
 
 /** Independent assessment of exactly one self-contained claim. */
 export const VerificationOutput = z.object({
+  evidence: VerificationEvidenceDeclaration.nullable().optional(),
   verdict: z.enum(["PASS", "FAIL"]),
   finding: VerificationFinding,
   summaryMarkdown: z.string().min(1).max(2_000),
@@ -253,6 +256,11 @@ export type VerificationOutput = z.infer<typeof VerificationOutput>;
 /** One narrow comparison of statements before independent proof checking. */
 export const ClaimComparisonOutput = z.object({
   equivalentClaimGroups: z.array(z.array(z.string()).min(2)).max(20),
+  conflicts: z.array(z.object({
+    leftClaimId: z.string(),
+    rightClaimId: z.string(),
+    reason: z.string().min(1).max(4_000),
+  })).max(20),
 });
 export type ClaimComparisonOutput = z.infer<typeof ClaimComparisonOutput>;
 

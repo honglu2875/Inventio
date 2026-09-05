@@ -195,6 +195,10 @@ export function buildCanonicalEvents(): Event[] {
   });
   ev("verification.requested", { verificationId: "V001", claimId: "K003", ordinal: 1 });
   ev("verification.started", { verificationId: "V001" });
+  ev("verification.evidenceRecorded", {
+    verificationId: "V001",
+    evidence: { path: "verifications/V001/execution-evidence.json", sha256: "0".repeat(64), capture: "COMPLETE", succeeded: 0, failed: 0, unfinished: 0, declaredBasis: "derivation", declaredVerdict: "PASS", supportValidated: true, issues: [] },
+  });
   ev("verification.completed", {
     verificationId: "V001",
     verdict: "PASS",
@@ -328,6 +332,9 @@ export function buildCanonicalEvents(): Event[] {
     pdfPath: "publications/P001/manuscript.pdf",
     compiler: "tectonic 0.16.9",
   });
+
+  ev("claim.conflictRecorded", { leftClaimId: "K001", rightClaimId: "K002", reason: "The stated boundary values differ.", by: "summary_reader" });
+  ev("claim.conflictResolved", { leftClaimId: "K001", rightClaimId: "K002", reason: "The owner verified that their hypotheses differ.", by: "human" });
 
   return events;
 }

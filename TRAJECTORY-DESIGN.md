@@ -46,7 +46,11 @@ versions can still be replayed without reinterpretation.
    linked transitively while their distinct proofs remain inspectable. Only one
    proof in an equivalence class is checked at a time; if it fails, the next
    proof may be checked, and if one succeeds the remaining versions point to
-   the resulting fact.
+   the resulting fact. The same pass reads complete statements on demand and
+   records explicit incompatible pairs with reasons. It does not determine
+   which is true. An unavailable comparison stops the run UNCERTAIN; an owner
+   continuation retries it once. Older saved rounds have no inferred conflict
+   coverage.
 6. Each selected claim is checked independently by up to `V` Verifiers. It
    becomes a fact after at least `W` passes (`1 <= W <= V`). Checks run
    concurrently with one another. A claim that can no longer reach `W` passes
@@ -109,9 +113,46 @@ Claims and facts are plain Markdown files and remain retrievable through tools.
 A worker that finds a concrete contradiction or disproof may flag one fact once
 with a short mathematical reason. The flag creates a new correction claim and
 uses the same independent verification process. A passing correction retracts
-the fact; a mathematically failing correction clears the warning. A correction
-that needs a more complete write-up leaves the warning visible. This is
-deliberately narrow: mere doubt is not a correction claim.
+the fact. Failure of a correction's proof does not refute its statement and
+keeps the warning visible. Only explicit refutation of all outstanding
+corrections clears that warning. Earlier suspicion-cleared events retain
+their original meaning when replayed.
+
+New claims may record dependsOnFactIds as provenance; those IDs are validated
+and persisted in the claim's existing dependsOn field. The isolated proof
+must still supply its own mathematical dependencies. A shared eligibility
+calculation follows fact dependencies and equivalent replacements, checks the
+source proof's current status, and propagates unresolved conflicts, suspicion,
+retraction, missing premises and cycles. An affected active fact is displayed
+as UNSETTLED without rewriting its saved acceptance status. It cannot supply
+a settled premise or decisive stopping result. Unknown historical dependencies
+are never inferred during replay.
+
+Conflicts are append-only claim.conflictRecorded and claim.conflictResolved
+events. An explicit owner resolution requires a mathematical reason. A
+refuted claim or retracted fact can resolve its associated conflict, but an
+incomplete or failed proof cannot. Independent, unaffected proofs remain
+usable. Saved stopping reports are historical records, not rewritten verdicts.
+
+## Computational support
+
+New verification requests freeze an evidence requirement. Verifiers declare
+a hand derivation, a computation, or both and name their supporting shell
+commands. The conductor checks those declarations against the parent-owned
+CLI archive, after it finishes writing. Bounded execution records preserve
+command outcomes, output hashes and excerpts; they do not rerun untrusted
+code. Computational support requires a complete capture and successful
+matching executions. An unsupported PASS becomes FAIL/MISSING_DEPENDENCY,
+while the original model output remains on disk and its declared verdict is
+retained in verification.evidenceRecorded. A hand derivation may survive a
+failed exploratory command. Successful execution does not certify the
+mathematics implemented by the code.
+
+Recovery uses the saved output and authentic execution record under the same
+frozen requirement. Old completed verifications are not re-audited or changed;
+missing historical evidence remains unknown. Evidence summaries and manifests
+are available through HTTP, the verification view, HTML export and publication
+packets. Export and HTTP reading check manifest hashes.
 
 ## Roles
 

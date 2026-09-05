@@ -1,7 +1,11 @@
+import { evidenceIssues, readExecutionEvidence, sha256 } from "../verification/executionEvidence.js";
 import {
   ActiveModelSettings,
   ClaimComparisonOutput,
   FinalOutput,
+  factConcerns,
+  factIsSettled,
+  factDisplayStatus,
   IntakeOutput,
   ProjectSettings,
   PublicationOutput,
@@ -236,7 +240,8 @@ const MAX_VERIFICATION_PROCESS_REPLACEMENTS = 2;
  * events and wake it. The event log is the only mutation path.
  */
 function normalizeClaimStatement(statement: string): string {
-  return statement.toLowerCase().replace(/\s+/g, " ").trim().replace(/[.;]+$/, "");
+  // Mathematical symbols are case-sensitive: A and a are not identical.
+  return statement.replace(/\s+/g, " ").trim().replace(/[.;]+$/, "");
 }
 
 export class ProjectEngine extends EventEmitter {
@@ -552,6 +557,18 @@ export class ProjectEngine extends EventEmitter {
         continue;
       }
 
+      // An explicit continuation retries an unavailable comparison once. A
+      // failure never starts an automatic sequence of reconciliation calls.
+      const previousStop = this.state.terminalHistory.at(-1)?.reachedAtSeq ?? 0;
+      const retryComparison = this.state.waveOrder.find(id => {
+        const wave = this.state.waves[id]!;
+        return wave.conflictCheck === "UNAVAILABLE" && wave.claimsComparedAtSeq < previousStop;
+      });
+      if (retryComparison) {
+        await this.compareTrajectoryClaims(retryComparison, true);
+        continue;
+      }
+
       const needsSummary = this.state.waveOrder.find((waveId) => {
         const wave = this.state.waves[waveId]!;
         return wave.status === "closed" && !wave.summaryReviewed;
@@ -564,6 +581,11 @@ export class ProjectEngine extends EventEmitter {
         await this.drainVerifications();
         if (this.stopped) return;
         await this.reviewTrajectorySummary(needsSummary);
+        continue;
+      }
+
+      if (this.state.waveOrder.some(id => this.state.waves[id]!.conflictCheck === "UNAVAILABLE")) {
+        await this.finalizeTrajectory("UNCERTAIN", "the comparison of potentially conflicting statements could not be completed; continuation will retry that comparison");
         continue;
       }
 
@@ -709,13 +731,26 @@ export class ProjectEngine extends EventEmitter {
     return true;
   }
 
+  private trajectoryOutputSchema() {
+    return TrajectoryOutput.superRefine((output, context) => {
+      output.claims.forEach((claim, index) => {
+        for (const id of claim.dependsOnFactIds ?? []) {
+          if (!this.state.facts[id]) context.addIssue({
+            code: "custom", path: ["claims", index, "dependsOnFactIds"],
+            message: `Unknown project fact ${id}; cite only existing facts and state their mathematics in the proof.`,
+          });
+        }
+      });
+    });
+  }
+
   private readTrajectoryOutput(taskId: string): TrajectoryOutputT | null {
     const cached = this.trajectoryOutputs.get(taskId);
     if (cached) return cached;
     const file = path.join(this.paths.tasksDir, taskId, "output.json");
     if (!existsSync(file)) return null;
     try {
-      const parsed = TrajectoryOutput.safeParse(parseModelJson(readFileSync(file, "utf8")));
+      const parsed = this.trajectoryOutputSchema().safeParse(parseModelJson(readFileSync(file, "utf8")));
       if (!parsed.success) return null;
       this.trajectoryOutputs.set(taskId, parsed.data);
       return parsed.data;
@@ -761,7 +796,7 @@ export class ProjectEngine extends EventEmitter {
         const file = path.join(taskDir, name);
         if (!existsSync(file)) continue;
         try {
-          const parsed = TrajectoryOutput.safeParse(
+          const parsed = this.trajectoryOutputSchema().safeParse(
             parseModelJson(stripJsonFence(readFileSync(file, "utf8"))),
           );
           if (parsed.success) {
@@ -1216,7 +1251,7 @@ export class ProjectEngine extends EventEmitter {
             }
           },
         },
-        TrajectoryOutput,
+        this.trajectoryOutputSchema(),
         {
           onInvalidOutput: (errors) =>
             this.emitEvent({ type: "task.outputInvalid", taskId: entry.taskId, errors }),
@@ -1367,7 +1402,7 @@ export class ProjectEngine extends EventEmitter {
             verifiersPerClaim: this.state.config.trajectory.verifiersPerClaim,
             passesRequired: this.state.config.trajectory.passesRequired,
           },
-          dependsOn: [],
+          dependsOn: [...new Set(proposed.dependsOnFactIds ?? [])],
         });
         claim = this.state.claims[claimId]!;
         const normalized = normalizeClaimStatement(claim.statement);
@@ -1393,12 +1428,12 @@ export class ProjectEngine extends EventEmitter {
 
   /**
    * Compare statements once per round before any new proof is sent for
-   * checking. This call cannot edit claims or steer research; it only records
-   * conservative identity relations between exact mathematical statements.
+   * checking. It records identity and explicit incompatibility observations
+   * without selecting a true statement, editing a proof, or steering research.
    */
-  private async compareTrajectoryClaims(waveId: string): Promise<void> {
+  private async compareTrajectoryClaims(waveId: string, retry = false): Promise<void> {
     const wave = this.state.waves[waveId];
-    if (!wave || wave.claimsCompared) return;
+    if (!wave || (wave.claimsCompared && !retry)) return;
     const currentIds = this.state.claimOrder.filter(
       (claimId) => this.state.claims[claimId]?.sourceWaveId === waveId,
     );
@@ -1408,14 +1443,13 @@ export class ProjectEngine extends EventEmitter {
         if (otherId === claimId) return false;
         const other = this.state.claims[otherId]!;
         return (
-          other.kind === claim.kind &&
-          other.targetFactId === claim.targetFactId &&
-          other.relationToGoal === claim.relationToGoal &&
+          other.kind === "mathematical" && claim.kind === "mathematical" &&
           !claim.equivalentIds.includes(otherId)
         );
       });
     });
 
+    let conflictCheck: "COMPLETE" | "UNAVAILABLE" = comparable ? "UNAVAILABLE" : "COMPLETE";
     if (comparable) {
       const decisionId = this.allocId("decision");
       this.emitEvent({ type: "decision.requested", decisionId, kind: "curation", waveId });
@@ -1440,9 +1474,30 @@ export class ProjectEngine extends EventEmitter {
       });
 
       if (call.output) {
+        // Check proposed identity transitively before applying any links. An
+        // inconsistent comparison cannot silently erase its own warning.
+        const identity = new Map(this.state.claimOrder.map(id => [id, new Set(this.state.claims[id]!.equivalentIds)]));
+        for (const group of call.output.equivalentClaimGroups) {
+          for (const id of group) for (const other of group) identity.get(id)?.add(other);
+        }
+        const alsoIdentical = (left: string, right: string): boolean => {
+          const seen = new Set<string>();
+          const pending = [left];
+          while (pending.length) {
+            const id = pending.pop()!;
+            if (id === right) return true;
+            if (seen.has(id)) continue;
+            seen.add(id);
+            pending.push(...identity.get(id) ?? []);
+          }
+          return false;
+        };
+        const invalidReference = call.output.equivalentClaimGroups.flat().some(id => !this.state.claims[id]) ||
+          call.output.conflicts.some(entry => !this.state.claims[entry.leftClaimId] || !this.state.claims[entry.rightClaimId] || alsoIdentical(entry.leftClaimId, entry.rightClaimId));
+        conflictCheck = invalidReference ? "UNAVAILABLE" : "COMPLETE";
         const current = new Set(currentIds);
         const groups: string[][] = [];
-        for (const proposed of call.output.equivalentClaimGroups) {
+        for (const proposed of invalidReference ? [] : call.output.equivalentClaimGroups) {
           const ids = [...new Set(proposed.map((id) => id.trim()))].filter(
             (id) => this.state.claims[id] !== undefined,
           );
@@ -1462,8 +1517,21 @@ export class ProjectEngine extends EventEmitter {
           }
           groups.push(ids);
         }
-        const accepted = { equivalentClaimGroups: groups };
-        this.emitEvent({ type: "decision.accepted", decisionId, action: accepted });
+        // Reject unknown IDs, self-pairs, correction claims and any pair
+        // that is also declared identical. This is a warning, not a truth vote.
+        const conflicts = call.output.conflicts.filter((entry) => {
+          if (invalidReference) return false;
+          const left = this.state.claims[entry.leftClaimId];
+          const right = this.state.claims[entry.rightClaimId];
+          return left && right && left.id !== right.id &&
+            left.kind === "mathematical" && right.kind === "mathematical" &&
+            (current.has(left.id) || current.has(right.id)) &&
+            !left.equivalentIds.includes(right.id) &&
+            !groups.some((ids) => ids.includes(left.id) && ids.includes(right.id));
+        });
+        const accepted = { equivalentClaimGroups: groups, conflicts };
+        if (invalidReference) this.emitEvent({ type: "decision.rejected", decisionId, violations: ["The comparison contains unknown claims or incompatible identity and conflict observations."] });
+        else this.emitEvent({ type: "decision.accepted", decisionId, action: accepted });
         for (const ids of groups) {
           for (let leftIndex = 0; leftIndex < ids.length; leftIndex += 1) {
             for (let rightIndex = leftIndex + 1; rightIndex < ids.length; rightIndex += 1) {
@@ -1480,6 +1548,11 @@ export class ProjectEngine extends EventEmitter {
             }
           }
         }
+        for (const conflict of conflicts) {
+          const [left, right] = [conflict.leftClaimId, conflict.rightClaimId].sort();
+          if (this.state.claimConflicts.some((entry) => entry.leftClaimId === left && entry.rightClaimId === right)) continue;
+          this.emitEvent({ type: "claim.conflictRecorded", ...conflict, by: "summary_reader" });
+        }
       } else {
         this.emitEvent({
           type: "decision.rejected",
@@ -1489,7 +1562,7 @@ export class ProjectEngine extends EventEmitter {
       }
     }
 
-    this.emitEvent({ type: "wave.claimsCompared", waveId });
+    this.emitEvent({ type: "wave.claimsCompared", waveId, conflictCheck });
     this.repairTrajectoryInvariants();
   }
 
@@ -1527,6 +1600,7 @@ export class ProjectEngine extends EventEmitter {
     for (let offset = 0; offset < needed; offset += 1) {
       this.emitEvent({
         type: "verification.requested",
+        evidenceRequired: true,
         verificationId: this.allocId("verification"),
         claimId,
         ordinal: claim.verificationIds.length + 1,
@@ -1602,17 +1676,18 @@ export class ProjectEngine extends EventEmitter {
             : recoveredJson;
         const recovered = VerificationOutput.safeParse(compatible);
         if (recovered.success) {
+          const checked = this.checkVerificationEvidence(verificationId, recovered.data);
           const relPath = path.join("verifications", verificationId, "report.md");
           writeFileAtomic(
             path.join(this.paths.dir, relPath),
-            recovered.data.reportMarkdown.trim() + "\n",
+            checked.reportMarkdown.trim() + "\n",
           );
           this.emitEvent({
             type: "verification.completed",
             verificationId,
-            verdict: recovered.data.verdict,
-            finding: recovered.data.finding,
-            summaryMarkdown: recovered.data.summaryMarkdown,
+            verdict: checked.verdict,
+            finding: checked.finding,
+            summaryMarkdown: checked.summaryMarkdown,
             artifactPath: relPath,
             usage: recoveredMeta.usage,
           });
@@ -1688,8 +1763,9 @@ export class ProjectEngine extends EventEmitter {
     if (this.stopped || this.state.verifications[verificationId]?.status === "completed") return;
 
     if (result.status === "completed" && result.output) {
+      // Save the authentic model return before recording the deterministic
+      // evidence check. Recovery reuses the same archive and frozen policy.
       const relPath = path.join("verifications", verificationId, "report.md");
-      writeFileAtomic(path.join(this.paths.dir, relPath), result.output.reportMarkdown.trim() + "\n");
       writeFileAtomic(
         path.join(dir, "meta.json"),
         JSON.stringify(
@@ -1710,12 +1786,14 @@ export class ProjectEngine extends EventEmitter {
         outputFile,
         JSON.stringify(result.output, null, 2),
       );
+      const checked = this.checkVerificationEvidence(verificationId, result.output);
+      writeFileAtomic(path.join(this.paths.dir, relPath), checked.reportMarkdown.trim() + "\n");
       this.emitEvent({
         type: "verification.completed",
         verificationId,
-        verdict: result.output.verdict,
-        finding: result.output.finding,
-        summaryMarkdown: result.output.summaryMarkdown,
+        verdict: checked.verdict,
+        finding: checked.finding,
+        summaryMarkdown: checked.summaryMarkdown,
         artifactPath: relPath,
         usage: result.usage,
       });
@@ -1735,6 +1813,41 @@ export class ProjectEngine extends EventEmitter {
       });
     }
     this.evaluateTrajectoryClaim(claim.id);
+  }
+
+  private checkVerificationEvidence(verificationId: string, output: z.infer<typeof VerificationOutput>) {
+    const verification = this.state.verifications[verificationId]!;
+    let evidence = verification.executionEvidence;
+    if (!evidence) {
+      const dir = path.join(this.paths.verificationsDir, verificationId);
+      const record = readExecutionEvidence(path.join(dir, "codex-events.jsonl"));
+      const text = JSON.stringify(record, null, 2) + "\n";
+      const relPath = path.join("verifications", verificationId, "execution-evidence.json");
+      writeFileAtomic(path.join(this.paths.dir, relPath), text);
+      const issues = evidenceIssues(output.evidence, verification.evidenceRequired, record);
+      evidence = {
+        path: relPath, sha256: sha256(text), capture: record.capture,
+        succeeded: record.commands.filter((entry) => entry.status === "SUCCEEDED").length,
+        failed: record.commands.filter((entry) => entry.status === "FAILED").length,
+        unfinished: record.commands.filter((entry) => entry.status === "UNFINISHED").length,
+        declaredBasis: output.evidence?.basis ?? null, declaredVerdict: output.verdict,
+        supportValidated: output.evidence || verification.evidenceRequired ? issues.length === 0 : null,
+        issues,
+      };
+      this.emitEvent({ type: "verification.evidenceRecorded", verificationId, evidence });
+    }
+    const rejected = output.verdict === "PASS" && evidence.supportValidated === false;
+    return {
+      ...output,
+      verdict: rejected ? "FAIL" as const : output.verdict,
+      finding: rejected ? "MISSING_DEPENDENCY" as const : output.finding,
+      summaryMarkdown: rejected
+        ? `The claimed support was not established: ${evidence.issues.join(" ")}`.slice(0, 2_000)
+        : output.summaryMarkdown,
+      reportMarkdown: rejected
+        ? `# Unconfirmed verification evidence\n\n${evidence.issues.join("\n\n")}\n\nThe submitted proof needs a supported check. This does not refute its statement. The original referee report follows.\n\n---\n\n${output.reportMarkdown}`
+        : output.reportMarkdown,
+    };
   }
 
   private readVerificationMeta(dir: string): {
@@ -1809,14 +1922,6 @@ export class ProjectEngine extends EventEmitter {
             : `the submitted proof received ${detail}; ${passesRequired} passes out of ${verifiersPerClaim} independent checks are no longer possible. This does not assert that the statement itself is false`,
         by: "conductor",
       });
-      if (nextStatus === "FAILED" && claim.kind === "correction" && claim.targetFactId) {
-        this.emitEvent({
-          type: "fact.suspicionCleared",
-          factId: claim.targetFactId,
-          correctionClaimId: claim.id,
-          reason: "The proposed correction did not pass independent verification.",
-        });
-      }
     }
   }
 
@@ -1864,19 +1969,40 @@ export class ProjectEngine extends EventEmitter {
           });
         }
       } else if (
-        (claim.status === "FAILED" || claim.status === "REFUTED") &&
+        claim.status === "REFUTED" &&
         claim.kind === "correction" &&
         claim.targetFactId &&
-        this.state.facts[claim.targetFactId]?.status === "SUSPICIOUS"
+        this.state.facts[claim.targetFactId]?.status === "SUSPICIOUS" &&
+        this.state.facts[claim.targetFactId]!.correctionClaimIds.every((id) => this.state.claims[id]?.status === "REFUTED")
       ) {
         this.emitEvent({
           type: "fact.suspicionCleared",
           factId: claim.targetFactId,
           correctionClaimId: claim.id,
-          reason: "The proposed correction did not pass independent verification.",
+          reason: "The correction statement was refuted.",
         });
       }
     }
+    for (const conflict of this.state.claimConflicts) {
+      if (conflict.status !== "OPEN") continue;
+      const refuted = [conflict.leftClaimId, conflict.rightClaimId].find((id) => {
+        const claim = this.state.claims[id];
+        return claim?.status === "REFUTED" ||
+          Boolean(claim?.promotedFactId && this.state.facts[claim.promotedFactId]?.status === "RETRACTED");
+      });
+      if (refuted) this.emitEvent({
+        type: "claim.conflictResolved", leftClaimId: conflict.leftClaimId, rightClaimId: conflict.rightClaimId,
+        reason: `The statement ${refuted} was explicitly refuted or its fact was retracted.`, by: "conductor",
+      });
+    }
+  }
+
+  resolveClaimConflict(leftClaimId: string, rightClaimId: string, reason: string): void {
+    const [left, right] = [leftClaimId, rightClaimId].sort();
+    const conflict = this.state.claimConflicts.find((entry) => entry.leftClaimId === left && entry.rightClaimId === right);
+    if (!conflict || conflict.status !== "OPEN") throw new Error("no open conflict exists for these claims");
+    if (!reason.trim() || reason.trim().length > 4_000) throw new Error("a mathematical reason of at most 4000 characters is required");
+    this.emitEvent({ type: "claim.conflictResolved", leftClaimId, rightClaimId, reason: reason.trim(), by: "human" });
   }
 
   private equivalentClaimComponent(claimId: string): string[] {
@@ -1982,7 +2108,7 @@ export class ProjectEngine extends EventEmitter {
     let disproves = false;
     for (const factId of this.state.factOrder) {
       const fact = this.state.facts[factId]!;
-      if (fact.status !== "ACTIVE") continue;
+      if (!factIsSettled(this.state, factId)) continue;
       const relation = this.state.claims[fact.claimId]?.relationToGoal;
       if (relation === "PROVES") proves = true;
       if (relation === "DISPROVES") disproves = true;
@@ -2107,14 +2233,17 @@ export class ProjectEngine extends EventEmitter {
     if (body === null) {
       const facts = this.state.factOrder
         .map((id) => this.state.facts[id]!)
-        .filter((fact) => fact.status === "ACTIVE")
+        .filter((fact) => factIsSettled(this.state, fact.id))
         .map((fact) => `## ${fact.title || fact.id}\n\n${fact.statement}\n\n### Proof\n\n${fact.proofMarkdown}`)
         .join("\n\n");
       const unsettled = this.state.factOrder
         .map((id) => this.state.facts[id]!)
-        .filter((fact) => fact.status === "SUSPICIOUS")
-        .map((fact) => `- ${fact.title || fact.id}: a concrete correction is still unresolved`)
+        .filter((fact) => fact.status === "ACTIVE" || fact.status === "SUSPICIOUS")
+        .flatMap((fact) => factConcerns(this.state, fact.id).map((reason) => `- ${fact.title || fact.id}: ${reason}`))
         .join("\n");
+      const conflicts = this.state.claimConflicts.filter(entry => entry.status === "OPEN")
+        .map(entry => [this.state.claims[entry.leftClaimId]!.statement, this.state.claims[entry.rightClaimId]!.statement, entry.reason].join("\n\n"))
+        .join("\n\n");
       body = [
         "# Research report",
         "",
@@ -2122,6 +2251,7 @@ export class ProjectEngine extends EventEmitter {
         "",
         facts || "No new claim completed the configured independent verification process.",
         ...(unsettled ? ["", "## Results with unresolved challenges", "", unsettled] : []),
+        ...(conflicts ? ["", "## Unresolved incompatible statements", "", conflicts] : []),
       ].join("\n");
     }
     body = body.replace(/^RESULT:.*\n+/i, "");
@@ -2703,12 +2833,17 @@ export class ProjectEngine extends EventEmitter {
       add(
         path.join("research-record", "facts", fact.id + ".md"),
         path.join(this.paths.dir, fact.path),
-        fact.id + " [" + fact.status + "; from " + fact.claimId + "]",
+        fact.id + " [" + factDisplayStatus(this.state, fact.id) + "; from " + fact.claimId + "]",
       );
     }
 
     index.push("", "## Independent verification reports", "");
     for (const verification of Object.values(this.state.verifications)) {
+      if (verification.executionEvidence) add(
+        path.join("research-record", "executions", verification.id + ".json"),
+        path.join(this.paths.dir, verification.executionEvidence.path),
+        verification.id + " recorded executions [" + verification.executionEvidence.capture + "]",
+      );
       if (verification.artifactPath) {
         add(
           path.join("research-record", "verifications", verification.id + ".md"),
@@ -3213,6 +3348,7 @@ export class ProjectEngine extends EventEmitter {
     const claim = this.state.claims[claimId];
     if (!claim) throw new Error(`unknown claim ${claimId}`);
     this.emitEvent({ type: "claim.status", claimId, from: claim.status, to, justification: note, by: "human" });
+    this.repairTrajectoryInvariants();
   }
 
   /** All events so far (for SSE snapshot/replay). Do not mutate. */

@@ -1,3 +1,4 @@
+import { factConcerns, factDisplayStatus } from "@inventio/schema";
 import {
   existsSync,
   mkdirSync,
@@ -375,7 +376,7 @@ export class FileMemoryBackend implements MemoryBackend {
       rows.push({
         id: fact.id,
         kind: "fact",
-        status: fact.status,
+        status: factDisplayStatus(state, fact.id),
         title: fact.title,
         statement: fact.statement,
       });
@@ -418,12 +419,12 @@ export class FileMemoryBackend implements MemoryBackend {
         out.push({
           id,
           kind: "fact",
-          status: fact.status,
+          status: factDisplayStatus(state, fact.id),
           title: fact.title,
           statement: fact.statement,
           markdown:
-            fact.status === "SUSPICIOUS"
-              ? `${base}\n\n## Unresolved challenge\n\nThis fact is not currently settled.\n\n${challenges || "A concrete correction is awaiting independent checking."}`
+            factConcerns(state, fact.id).length > 0
+              ? `${base}\n\n## Unresolved mathematical concerns\n\n${factConcerns(state, fact.id).join("\n\n")}\n\n${challenges}`
               : base,
         });
         continue;

@@ -7,7 +7,7 @@ import { NodeCard } from "./parts";
 export default function FactNode({ id, data }: NodeProps): JSX.Element {
   const status = readString(data, "status", "ACTIVE");
   const statement = readString(data, "statement");
-  const color = status === "SUSPICIOUS" ? "var(--warn)" : "var(--ok)";
+  const color = (status === "SUSPICIOUS" || status === "UNSETTLED") ? "var(--warn)" : "var(--ok)";
   return (
     <NodeCard kind="fact" style={{ borderColor: color }} title={statement}>
       <div className="claim-top"><span style={{ color }}>✓</span><span className="mono claim-id">{id}</span><span className="claim-status" style={{ color }}>{status}</span></div>

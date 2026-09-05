@@ -10,6 +10,7 @@ import type {
   ProjectState,
   Result,
   TaskState,
+  VerificationExecutionRecord,
 } from "@inventio/schema";
 import { exportedText, projectExportFor, projectExportSnapshot } from "./projectExport";
 
@@ -226,6 +227,13 @@ export const api = {
       ? Promise.reject(new ApiError(`artifact ${id} was not included in this HTML snapshot`, 404))
       : Promise.resolve(artifact);
   },
+  verificationEvidence: async (slug: string, id: string): Promise<VerificationExecutionRecord> => {
+    const exported = projectExportFor(slug);
+    if (exported === null) return request("GET", `/projects/${enc(slug)}/verifications/${enc(id)}/evidence`);
+    const file = exported.verificationEvidence?.[id];
+    if (!file) throw new ApiError("No execution record was included in this snapshot", 404);
+    return JSON.parse(exportedText(file)) as VerificationExecutionRecord;
+  },
   task: async (slug: string, id: string): Promise<TaskDetail> => {
     const exported = projectExportFor(slug);
     if (exported !== null) {
@@ -354,6 +362,9 @@ export const api = {
     }),
   deleteSource: (slug: string, name: string): Promise<{ ok: true }> =>
     request("DELETE", `/projects/${enc(slug)}/sources/${enc(name)}`),
+
+  resolveClaimConflict: (slug: string, leftClaimId: string, rightClaimId: string, reason: string): Promise<{ ok: true }> =>
+    request("POST", `/projects/${enc(slug)}/claim-conflicts/resolve`, { leftClaimId, rightClaimId, reason }),
 
   // steering
   submitDirective: (slug: string, text: string, urgent: boolean): Promise<{ id: string }> =>

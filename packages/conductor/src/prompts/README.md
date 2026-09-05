@@ -33,35 +33,58 @@ controller, curation, synthesis, and council worker prompt modules are removed.
   a concrete correction flag use scoped tools. Research-thread recovery uses
   `TRAJECTORY_RESTART_PROMPT` and preserves the existing packet. Claims require
   exact supported scope, complete decisive calculations, and precise imported
-  results. Invalid structured output gets one same-thread repair.
+  results. Optional dependsOnFactIds records existing fact premises without
+  granting any extra verifier access. Unknown fact IDs fail structured-output
+  validation. Invalid structured output gets one same-thread repair.
 - **Statement comparison:** `compareTrajectoryClaims()` uses
   `claimComparisonFiles()` and `CLAIM_COMPARISON_PROMPT`. It links identical
-  statements, never implications or thematic similarity. Failure is an
-  optimization loss. It does not currently detect contradictions.
+  statements, never implications or thematic similarity, and records explicit
+  pairs of incompatible statements with mathematical reasons. Complete
+  statements are available under statements/; index excerpts are not sufficient
+  evidence. No proof or true statement is selected. The existing comparison
+  slot now also runs for differing goal relations. A failed comparison or an
+  unknown/self conflict reference records UNAVAILABLE and stops UNCERTAIN;
+  explicit owner continuation retries that comparison once. Historical rounds
+  without this field are not retroactively marked checked or rewritten.
 - **Verification:** `executeVerification()` uses `verificationFiles()` and
   `VERIFICATION_PROMPT`. The packet contains only the exact problem and one
   complete submitted claim/proof. Filesystem confinement prevents access to
   other project attempts or peer checks. Odd ordinals emphasize a logical and
   dependency audit; even ordinals emphasize independent derivation of the
-  decisive step. This is complementary emphasis, not proof blinding: both
+  decisive step, accounting for surviving and omitted recursion or boundary
+  terms before cancellation. This is complementary emphasis, not proof blinding: both
   receive the same claim and must review the complete proof. The report must
   show the decisive expression or implication, applicable hypotheses, and
   source equation rather than merely endorse correctness. Failed execution
-  cannot be reported as computational confirmation. PASS/finding semantics,
-  frozen W-of-V policy, concurrency, recovery, and budgets are unchanged.
+  cannot be reported as computational confirmation. New verification requests
+  freeze evidenceRequired=true. The return declares derivation, computation,
+  or both; computational support names the exact commands supplied to the
+  shell tool. The parent-owned event archive records actual command outcomes,
+  hashes and bounded output excerpts. A proposed PASS without its required
+  support becomes FAIL/MISSING_DEPENDENCY, with the original return retained.
+  An explicit hand derivation can remain valid after a failed command. Evidence
+  capture never reruns commands or establishes their mathematical correctness.
+  Saved output recovery applies the same frozen policy and reuses the archive
+  without another verification call. Old completed verdicts remain unchanged;
+  old requests without this requirement retain their compatibility policy.
+  Frozen W-of-V counts, concurrency and budgets are unchanged.
 - **Summary:** `reviewTrajectorySummary()` uses `summaryReviewFiles()` and
   `SUMMARY_REVIEW_PROMPT` after the round's checks settle. This is editorial
   maintenance, not research planning. It may leave the view unchanged.
 - **Stopping:** `finalizeTrajectory()` uses `trajectoryFinalFiles()` and
   `TRAJECTORY_FINAL_PROMPT`. Deterministic code fixes the result from the
-  verification record and supplies active facts and unresolved correction
-  warnings. Composition cannot elevate unchecked material. A deterministic
-  fallback handles composition failure. Cross-claim conflict handling remains
-  separate future work.
+  verification record and supplies settled facts, unresolved conflicts,
+  correction warnings, and dependency concerns. An accepted fact with an open
+  conflict or unsettled premise cannot decide the result. FAILED and
+  NEEDS_REVISION proofs do not refute their statements or clear a correction
+  warning. Explicit refutation/retraction may resolve a conflict; an owner
+  resolution records a mathematical reason without changing historical votes.
+  Composition cannot elevate unchecked material. A deterministic fallback
+  handles composition failure.
 - **Publication:** `draftPublication()` uses `publicationPacketFiles()` and
   `PUBLICATION_PROMPT` after an explicit owner request. It receives the
   trajectory claims/facts index, current view, stopping report, and bounded
-  record copies. It may downgrade an unsupported conclusion in its separate
+  record copies, including recorded execution manifests. It may downgrade an unsupported conclusion in its separate
   publication assessment. The saved stopping report is not rewritten. TeX is
   saved before a separate owner-requested local compilation; compilation
   retries make no model calls.
@@ -81,6 +104,12 @@ prevents delimiters crossing alignment cells or rows.
 
 The failure evidence, limits of causal interpretation, token baseline, and
 proposed controlled evaluation are recorded in
-[the prompt audit](../../../../docs/PROMPT-AUDIT.md). These changes add no model
-calls. Simulator tests check execution and packet contracts; improvements in
-mathematical reliability require an explicitly authorized live evaluation.
+[the prompt audit](../../../../docs/PROMPT-AUDIT.md). The staged implementation
+and later experiments are in [the validity roadmap](../../../../docs/VALIDITY-ROADMAP.md).
+No extra verifier or automatic reconciliation model is added. The existing
+comparison pass now covers potentially opposing statements, including pairs
+previously skipped because their goal relations differed. More evidence in a
+report may change actual token use; the offline evaluator measures it rather
+than asserting savings. Simulator tests establish orchestration behavior;
+improvements in mathematical reliability need an explicitly authorized live
+evaluation.

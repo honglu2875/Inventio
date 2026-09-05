@@ -1,3 +1,4 @@
+import { factDisplayStatus } from "./fact-eligibility.js";
 import type { ProjectState } from "./state.js";
 import { candidateLifecycle } from "./candidate-status.js";
 
@@ -589,7 +590,7 @@ export function deriveTrajectoryEvidenceGraph(
       data: {
         title: fact.title,
         statement: fact.statement,
-        status: fact.status,
+        status: factDisplayStatus(state, fact.id),
         claimId: fact.claimId,
         relationToGoal: claim?.relationToGoal ?? "RELATED",
       },

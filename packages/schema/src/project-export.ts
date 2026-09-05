@@ -49,6 +49,8 @@ export interface ProjectExportSnapshot {
   events: Event[];
   artifacts: Record<string, ProjectExportArtifact>;
   tasks: Record<string, ProjectExportTask>;
+  /** Optional for snapshots produced before execution evidence was recorded. */
+  verificationEvidence?: Record<string, ProjectExportTextFile>;
   /** Owner uploads keyed by their stored filename. */
   sources: Record<string, ProjectExportTextFile>;
   /** Human-readable explanations of content that could not be embedded. */

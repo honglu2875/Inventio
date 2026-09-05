@@ -88,6 +88,7 @@ describe("view-only legacy archive", () => {
         ["tasks/T001/interrupt", {}], ["tasks/T001/extend", { addTokens: 100 }],
         ["claims/K001/status", { to: "VERIFIED", note: "Reviewed." }],
         ["issues", {}], ["memory/M001/quarantine", { note: "Questionable." }],
+        ["claim-conflicts/resolve", { leftClaimId: "K001", rightClaimId: "K002", reason: "Different hypotheses." }],
       ];
       for (const [route, payload] of cases) {
         const response = await app.inject({ method: "POST", url: `/api/projects/test-problem/${route}`, payload });

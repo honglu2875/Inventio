@@ -344,7 +344,6 @@ export function runCodex(opts: RunCodexOptions): Promise<RunCodexResult> {
       if (killTimer) clearTimeout(killTimer);
       if (wallTimer) clearTimeout(wallTimer);
       if (stdoutBuffer) handleLine(stdoutBuffer);
-      archive.end();
 
       let status: RunCodexResult["status"];
       if (interruptReason) {
@@ -354,7 +353,7 @@ export function runCodex(opts: RunCodexOptions): Promise<RunCodexResult> {
       } else {
         status = "failed";
       }
-      resolve({
+      const result: RunCodexResult = {
         status,
         threadId,
         usage,
@@ -368,7 +367,8 @@ export function runCodex(opts: RunCodexOptions): Promise<RunCodexResult> {
               eventError ??
               `exit ${code}${usage === null ? ", no turn.completed" : ""}; stderr tail: ${stderrTail.slice(-500)}`
             : null,
-      });
+      };
+      archive.end(() => resolve(result));
     });
   });
 }

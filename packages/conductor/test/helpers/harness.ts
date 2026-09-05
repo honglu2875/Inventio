@@ -160,6 +160,7 @@ export function verificationOutput(
   return {
     verdict,
     finding,
+    evidence: { basis: "derivation", supportingCommands: [] },
     summaryMarkdown,
     reportMarkdown: `# Independent verification\n\nVERDICT: ${verdict}\n\n${summaryMarkdown}`,
   };
@@ -180,7 +181,7 @@ export function summaryRevisionOutput(
 export function claimComparisonOutput(
   equivalentClaimGroups: string[][] = [],
 ): ClaimComparisonOutput {
-  return { equivalentClaimGroups };
+  return { equivalentClaimGroups, conflicts: [] };
 }
 
 export function trajectoryTestConfig(

@@ -523,3 +523,20 @@ blocking ones open a modal with answer textarea (answer/dismiss).
       overview; Generate PDF is separate, errors retain the TeX, a changed
       mathematical assessment is unmistakable, and both files download.
 - [ ] `vite build` succeeds; conductor serves `dist/` at `/`.
+
+## Validity evidence
+
+Trajectory facts display UNSETTLED when an accepted result has an unresolved
+conflict, a changed source proof or an unsettled fact dependency. The original
+acceptance status remains in replay. Library and graph projections use the
+same eligibility rules as the conductor. The library lists conflicting claim
+pairs, their mathematical reasons, and any recorded resolution. An owner can
+record a resolution with a reason; fixture, archive and portable views remain
+read-only. Claim details link explicit fact dependencies.
+
+Verification details distinguish the recorded verdict from the original
+model verdict when computational support was rejected. Execution summaries
+show successful, failed and unfinished commands, capture completeness and
+the declared basis; command details and output hashes load on demand. Missing
+historical evidence is shown as unrecorded. Portable exports include bounded
+evidence files and explicit omissions, and require no live server to open them.

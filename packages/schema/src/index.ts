@@ -9,3 +9,5 @@ export * from "./actions.js";
 export * from "./worker-output.js";
 export * from "./tex-integrity.js";
 export * from "./project-export.js";
+export * from "./fact-eligibility.js";
+export * from "./verification-evidence.js";

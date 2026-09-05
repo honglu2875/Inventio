@@ -1,3 +1,5 @@
+import { VerificationExecutionRecord } from "@inventio/schema";
+import { sha256 } from "../verification/executionEvidence.js";
 import {
   INTAKE_ABSTRACT_MAX_CHARS,
   IntakeMemory,
@@ -483,6 +485,22 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
   );
 
   app.get<{ Params: { slug: string; id: string } }>(
+    "/api/projects/:slug/verifications/:id/evidence",
+    async (request, reply) => run(reply, () => {
+      const engine = engineOf(request.params.slug);
+      const id = checkedId(request.params.id, "verification");
+      const evidence = engine.state.verifications[id]?.executionEvidence;
+      if (!evidence) throw new ManagerError("no recorded execution evidence for this verification", 404);
+      const file = confine(engine.paths.dir, evidence.path);
+      if (!existsSync(file) || !statSync(file).isFile()) throw new ManagerError("execution evidence file is missing", 404);
+      if (statSync(file).size > 8_000_000) throw new ManagerError("execution evidence exceeds the reading limit", 413);
+      const text = readFileSync(file, "utf8");
+      if (sha256(text) !== evidence.sha256) throw new ManagerError("execution evidence no longer matches its recorded hash", 409);
+      return VerificationExecutionRecord.parse(JSON.parse(text));
+    }),
+  );
+
+  app.get<{ Params: { slug: string; id: string } }>(
     "/api/projects/:slug/publications/:id/tex",
     async (request, reply) =>
       run(reply, () => {
@@ -845,6 +863,15 @@ export function buildApp(manager: EngineManager, opts: BuildAppOpts = {}): Fasti
         engine.extendTask(checkedId(request.params.id, "task"), body.addTokens);
         return { ok: true };
       }),
+  );
+
+  app.post<{ Params: { slug: string } }>("/api/projects/:slug/claim-conflicts/resolve", async (request, reply) =>
+    run(reply, () => {
+      const engine = activeEngineOf(request.params.slug);
+      const body = parseBody(z.object({ leftClaimId: z.string(), rightClaimId: z.string(), reason: z.string().min(1).max(4_000) }), request.body);
+      engine.resolveClaimConflict(checkedId(body.leftClaimId, "claim"), checkedId(body.rightClaimId, "claim"), body.reason);
+      return { ok: true };
+    }),
   );
 
   // ------------------------------------------------------ ledger intervention

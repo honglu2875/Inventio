@@ -1,3 +1,6 @@
+import VerificationEvidence from "../components/VerificationEvidence";
+import { factConcerns, factDisplayStatus } from "@inventio/schema";
+import ClaimConflicts from "../components/ClaimConflicts";
 import {
   candidateLifecycle,
   type ArtifactKind,
@@ -964,7 +967,8 @@ function ComputationsSection({ slug, state }: { slug: string; state: ProjectStat
 
 // ------------------------------------------------------- trajectories-v2 library
 
-const FACT_STATUS_COLOR: Record<FactState["status"], string> = {
+const FACT_STATUS_COLOR: Record<string, string> = {
+  UNSETTLED: "var(--warn)",
   ACTIVE: "var(--ok)",
   SUSPICIOUS: "var(--warn)",
   RETRACTED: "var(--danger)",
@@ -1035,6 +1039,7 @@ function TrajectoryClaimDetail({ slug, state, claim }: { slug: string; state: Pr
       <Markdown>{claim.statement}</Markdown>
       <h4 className="section-head">Alleged proof</h4>
       <Markdown>{claim.proofMarkdown || "No proof text was retained."}</Markdown>
+      {claim.dependsOn.length > 0 ? <p className="small">Uses project facts: {claim.dependsOn.map((id) => <Link key={id} className="mono" to={`/p/${encodeURIComponent(slug)}/library/facts/${id}`}>{id}{" "}</Link>)}</p> : null}
       <VerificationList slug={slug} state={state} claim={claim} />
       {claim.equivalentIds.length > 0 ? (
         <p className="small muted">
@@ -1150,7 +1155,7 @@ function FactsSection({ slug, state, selectedId, onSelect }: { slug: string; sta
         <article className="library-detail trajectory-document">
           <header className="detail-head">
             <span className="mono detail-id">{selected.id}</span>
-            <span className="chip" style={{ color: FACT_STATUS_COLOR[selected.status], borderColor: FACT_STATUS_COLOR[selected.status] }}>{selected.status}</span>
+            <span className="chip" style={{ color: FACT_STATUS_COLOR[factDisplayStatus(state, selected.id)], borderColor: FACT_STATUS_COLOR[factDisplayStatus(state, selected.id)] }}>{factDisplayStatus(state, selected.id)}</span>
             {sourceClaim ? <span className="chip">{sourceClaim.relationToGoal}</span> : null}
           </header>
           <h3>{selected.title || selected.id}</h3>
@@ -1158,9 +1163,7 @@ function FactsSection({ slug, state, selectedId, onSelect }: { slug: string; sta
           <Markdown>{selected.statement}</Markdown>
           <h4 className="section-head">Verified proof</h4>
           <Markdown>{selected.proofMarkdown}</Markdown>
-          {selected.status === "SUSPICIOUS" ? (
-            <div className="banner warn">A concrete mathematical challenge is still being checked. Do not treat this fact as settled meanwhile.</div>
-          ) : null}
+          {factConcerns(state, selected.id).map((reason) => <div className="banner warn" key={reason}><Markdown>{reason}</Markdown></div>)}
           {selected.status === "RETRACTED" && selected.retractedByClaimId ? (
             <div className="banner danger">This statement was withdrawn after <Link className="mono" to={`/p/${encodeURIComponent(slug)}/library/claims/${encodeURIComponent(selected.retractedByClaimId)}`}>{selected.retractedByClaimId}</Link> passed independent checking.</div>
           ) : null}
@@ -1192,7 +1195,7 @@ function FactsSection({ slug, state, selectedId, onSelect }: { slug: string; sta
         <table className="table claims-table"><thead><tr><th>id</th><th>status</th><th>relation</th><th>statement</th><th>source claim</th></tr></thead>
           <tbody>{rows.map((fact) => {
             const claim = state.claims[fact.claimId];
-            return <tr key={fact.id} className="clickable" onClick={() => onSelect(fact.id)}><td className="mono">{fact.id}</td><td style={{ color: FACT_STATUS_COLOR[fact.status] }}>{fact.status}</td><td>{claim?.relationToGoal ?? "RELATED"}</td><td><MathText>{fact.statement}</MathText></td><td className="mono">{fact.claimId}</td></tr>;
+            return <tr key={fact.id} className="clickable" onClick={() => onSelect(fact.id)}><td className="mono">{fact.id}</td><td style={{ color: FACT_STATUS_COLOR[factDisplayStatus(state, fact.id)] }}>{factDisplayStatus(state, fact.id)}</td><td>{claim?.relationToGoal ?? "RELATED"}</td><td><MathText>{fact.statement}</MathText></td><td className="mono">{fact.claimId}</td></tr>;
           })}</tbody>
         </table>
       )}
@@ -1220,7 +1223,7 @@ function VerificationReport({ slug, verification }: { slug: string; verification
 function VerificationsSection({ slug, state, selectedId, onSelect }: { slug: string; state: ProjectState; selectedId: string | undefined; onSelect: (id: string | undefined) => void }): JSX.Element {
   const selected = selectedId ? state.verifications[selectedId] : undefined;
   if (selected) {
-    return <><button type="button" className="button ghost small back" onClick={() => onSelect(undefined)}>← all independent checks</button><article className="library-detail trajectory-document"><header className="detail-head"><span className="mono detail-id">{selected.id}</span><span className="chip">{verificationDisplayStatus(selected)}</span><Link className="button ghost small" to={`/p/${encodeURIComponent(slug)}/library/claims/${encodeURIComponent(selected.claimId)}`}>claim {selected.claimId}</Link></header><VerificationReport slug={slug} verification={selected} /></article></>;
+    return <><button type="button" className="button ghost small back" onClick={() => onSelect(undefined)}>← all independent checks</button><article className="library-detail trajectory-document"><header className="detail-head"><span className="mono detail-id">{selected.id}</span><span className="chip">{verificationDisplayStatus(selected)}</span><Link className="button ghost small" to={`/p/${encodeURIComponent(slug)}/library/claims/${encodeURIComponent(selected.claimId)}`}>claim {selected.claimId}</Link></header><VerificationEvidence key={selected.id} slug={slug} verification={selected} /><VerificationReport slug={slug} verification={selected} /></article></>;
   }
   const rows = state.verificationOrder.map((id) => state.verifications[id]).filter((value): value is VerificationState => value !== undefined);
   return rows.length === 0 ? <p className="muted empty-note">No independent checks have been requested yet.</p> : (
@@ -1320,6 +1323,7 @@ export default function LibraryView(): JSX.Element {
       </nav>
 
       <section className="library-content">
+        {isTrajectory ? <ClaimConflicts slug={slug} state={state} /> : null}
         <h2 className="library-head">{SECTION_LABEL[section]}</h2>
 
         {section === "problem" ? (

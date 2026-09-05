@@ -411,6 +411,8 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
         resolutionPath: null,
         summaryReviewed: false,
         claimsCompared: false,
+        conflictCheck: null,
+        claimsComparedAtSeq: 0,
       };
       state.waveOrder.push(event.waveId);
       for (const entry of event.roster) {
@@ -459,6 +461,9 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
     case "wave.claimsCompared": {
       const wave = must(state.waves[event.waveId], `wave ${event.waveId}`);
       wave.claimsCompared = true;
+      wave.claimsComparedAtSeq = event.seq;
+      wave.conflictCheck = event.conflictCheck ?? null;
+      if (event.conflictCheck !== undefined) wave.summaryReviewed = false;
       return state;
     }
     case "task.dispatched": {
@@ -737,10 +742,35 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
       reconcileEquivalentFacts(state, left.id);
       return state;
     }
+    case "claim.conflictRecorded": {
+      if (event.leftClaimId === event.rightClaimId) throw new Error("a conflict needs two distinct claims");
+      must(state.claims[event.leftClaimId], `claim ${event.leftClaimId}`);
+      must(state.claims[event.rightClaimId], `claim ${event.rightClaimId}`);
+      const [left, right] = [event.leftClaimId, event.rightClaimId].sort();
+      if (state.claimConflicts.some((entry) => entry.leftClaimId === left && entry.rightClaimId === right)) {
+        throw new Error("the claim conflict is already recorded");
+      }
+      state.claimConflicts.push({
+        leftClaimId: left!, rightClaimId: right!, reason: event.reason,
+        status: "OPEN", resolutionReason: null, recordedAtSeq: event.seq, resolvedAtSeq: null,
+      });
+      return state;
+    }
+    case "claim.conflictResolved": {
+      const [left, right] = [event.leftClaimId, event.rightClaimId].sort();
+      const conflict = must(state.claimConflicts.find((entry) => entry.leftClaimId === left && entry.rightClaimId === right), "claim conflict");
+      if (conflict.status !== "OPEN") throw new Error("the claim conflict is already resolved");
+      conflict.status = "RESOLVED";
+      conflict.resolutionReason = event.reason;
+      conflict.resolvedAtSeq = event.seq;
+      return state;
+    }
     case "verification.requested": {
       bump(state, "verification", event.verificationId);
       const claim = must(state.claims[event.claimId], `claim ${event.claimId}`);
       state.verifications[event.verificationId] = {
+        evidenceRequired: event.evidenceRequired ?? false,
+        executionEvidence: null,
         id: event.verificationId,
         claimId: event.claimId,
         ordinal: event.ordinal,
@@ -763,6 +793,13 @@ export function applyEvent(state: ProjectState, event: Event): ProjectState {
         `verification ${event.verificationId}`,
       );
       if (verification.status !== "completed") verification.status = "running";
+      return state;
+    }
+    case "verification.evidenceRecorded": {
+      const verification = must(state.verifications[event.verificationId], `verification ${event.verificationId}`);
+      if (verification.executionEvidence) throw new Error("execution evidence is already recorded");
+      if (verification.status === "completed") throw new Error("completed verifications cannot be reinterpreted");
+      verification.executionEvidence = event.evidence;
       return state;
     }
     case "verification.completed": {

@@ -1,3 +1,4 @@
+import type { VerificationEvidenceSummary } from "./verification-evidence.js";
 import type {
   Ambiguity,
   Clarification,
@@ -77,6 +78,9 @@ export interface WaveState {
   summaryReviewed: boolean;
   /** v2 has compared this round's statements for mathematical identity. */
   claimsCompared: boolean;
+  /** Null means a historical comparison with no conflict-check contract. */
+  conflictCheck: "COMPLETE" | "UNAVAILABLE" | null;
+  claimsComparedAtSeq: number;
 }
 
 export interface ArtifactMeta {
@@ -143,7 +147,19 @@ export interface ClaimState {
   history: { from: ClaimStatus; to: ClaimStatus; justification: string; by: string; seq: number }[];
 }
 
+export interface ClaimConflictState {
+  leftClaimId: string;
+  rightClaimId: string;
+  reason: string;
+  status: "OPEN" | "RESOLVED";
+  resolutionReason: string | null;
+  recordedAtSeq: number;
+  resolvedAtSeq: number | null;
+}
+
 export interface VerificationState {
+  evidenceRequired: boolean;
+  executionEvidence: VerificationEvidenceSummary | null;
   id: string;
   claimId: string;
   ordinal: number;
@@ -367,6 +383,7 @@ export interface ProjectState {
   reviews: Record<string, ReviewState>;
   claims: Record<string, ClaimState>;
   claimOrder: string[];
+  claimConflicts: ClaimConflictState[];
   facts: Record<string, FactState>;
   factOrder: string[];
   verifications: Record<string, VerificationState>;
@@ -508,6 +525,7 @@ export function initialState(): ProjectState {
     reviews: {},
     claims: {},
     claimOrder: [],
+    claimConflicts: [],
     facts: {},
     factOrder: [],
     verifications: {},

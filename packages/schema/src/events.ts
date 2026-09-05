@@ -1,3 +1,4 @@
+import { VerificationEvidenceSummary } from "./verification-evidence.js";
 import { z } from "zod";
 import { ActiveModelSettings, ProjectConfig, ProjectSettings, WorkerRole } from "./config.js";
 
@@ -310,7 +311,7 @@ export const EventSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("wave.planned"), waveId: z.string(), title: z.string(), decisionId: z.string(), roster: z.array(RosterEntry), reserveTokens: z.number().int().min(0), rationale: z.string() }),
   z.object({ ...base, type: z.literal("wave.softInterrupted"), waveId: z.string(), by: Actor }),
   z.object({ ...base, type: z.literal("wave.closed"), waveId: z.string(), docketMarkdown: z.string() }),
-  z.object({ ...base, type: z.literal("wave.claimsCompared"), waveId: z.string() }),
+  z.object({ ...base, type: z.literal("wave.claimsCompared"), waveId: z.string(), conflictCheck: z.enum(["COMPLETE", "UNAVAILABLE"]).optional() }),
   z.object({ ...base, type: z.literal("task.dispatched"), taskId: z.string(), waveId: z.string(), role: WorkerRole, methodTag: z.string(), direction: z.string(), packetManifest: z.array(z.string()), budgetTokens: z.number().int().positive() }),
   z.object({ ...base, type: z.literal("task.session"), taskId: z.string(), threadId: z.string() }),
   z.object({ ...base, type: z.literal("task.progress"), taskId: z.string(), estimatedTokens: z.number().min(0), lastItem: z.object({ type: z.string(), preview: z.string() }).nullable() }),
@@ -406,7 +407,24 @@ export const EventSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     ...base,
+    type: z.literal("claim.conflictRecorded"),
+    leftClaimId: z.string(),
+    rightClaimId: z.string(),
+    reason: z.string().min(1).max(4_000),
+    by: Actor,
+  }),
+  z.object({
+    ...base,
+    type: z.literal("claim.conflictResolved"),
+    leftClaimId: z.string(),
+    rightClaimId: z.string(),
+    reason: z.string().min(1).max(4_000),
+    by: Actor,
+  }),
+  z.object({
+    ...base,
     type: z.literal("verification.requested"),
+    evidenceRequired: z.boolean().optional(),
     verificationId: z.string(),
     claimId: z.string(),
     ordinal: z.number().int().positive(),
@@ -415,6 +433,12 @@ export const EventSchema = z.discriminatedUnion("type", [
     ...base,
     type: z.literal("verification.started"),
     verificationId: z.string(),
+  }),
+  z.object({
+    ...base,
+    type: z.literal("verification.evidenceRecorded"),
+    verificationId: z.string(),
+    evidence: VerificationEvidenceSummary,
   }),
   z.object({
     ...base,

@@ -8,7 +8,8 @@
     "start": "tsx src/main.ts",
     "test": "vitest run",
     "typecheck": "tsc -p .",
-    "smoke": "tsx scripts/smoke.ts"
+    "smoke": "tsx scripts/smoke.ts",
+    "evaluate": "node --import tsx scripts/evaluate.ts"
   },
   "dependencies": {
     "@inventio/schema": "*",
