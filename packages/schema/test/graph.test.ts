@@ -143,6 +143,46 @@ describe("trajectory evidence graph", () => {
     expect(graph.edges.some((edge) => edge.type === "attacks" && edge.source === "K003" && edge.target === "F001")).toBe(true);
   });
 
+  it("preserves fact dependencies and their withdrawn provenance", () => {
+    const state = stateBeforeAbandonment();
+    state.config.workflow = "trajectories-v2";
+    state.claims.K003!.dependsOn = ["F001"];
+    state.claims.K003!.targetFactId = null;
+    state.claims.K003!.status = "NEEDS_REVISION";
+    state.facts.F001!.status = "RETRACTED";
+    // A cycle must neither hang projection nor hide the original premise.
+    state.claims.K001!.dependsOn = ["F001"];
+    const graph = deriveTrajectoryEvidenceGraph(state);
+    expect(graph.nodes.find((node) => node.id === "F001")?.data.status).toBe("RETRACTED");
+    expect(graph.nodes.some((node) => node.id === "K001")).toBe(true);
+    expect(graph.edges).toContainEqual({
+      id: "claim-dependency:K003:F001", source: "K003", target: "F001", type: "depends-on",
+    });
+    expect(graph.edges.find((edge) => edge.id === "promotes:K001:F001")?.label).toBe("retracted");
+    const ids = new Set(graph.nodes.map((node) => node.id));
+    expect(graph.edges.every((edge) => ids.has(edge.source) && ids.has(edge.target))).toBe(true);
+  });
+
+  it("keeps open conflicting statements visible even if one proof failed", () => {
+    const state = stateBeforeAbandonment();
+    state.config.workflow = "trajectories-v2";
+    state.facts.F001!.status = "ACTIVE";
+    state.claims.K002!.status = "FAILED";
+    state.claimConflicts.push({
+      leftClaimId: "K001", rightClaimId: "K002", reason: "Incompatible computed values",
+      status: "OPEN", recordedAtSeq: 1, resolvedAtSeq: null, resolutionReason: null,
+    });
+    const graph = deriveTrajectoryEvidenceGraph(state);
+    expect(graph.nodes.some((node) => node.id === "K002")).toBe(true);
+    expect(graph.nodes.find((node) => node.id === "F001")?.data.status).toBe("UNSETTLED");
+    expect(graph.edges.some((edge) => edge.type === "conflicts" && edge.source === "K001" && edge.target === "K002")).toBe(true);
+    expect(graph.edges.find((edge) => edge.id === "promotes:K001:F001")?.label).toBe("unsettled");
+    state.claimConflicts[0]!.status = "RESOLVED";
+    const resolved = deriveTrajectoryEvidenceGraph(state);
+    expect(resolved.edges.some((edge) => edge.type === "conflicts")).toBe(false);
+    expect(resolved.nodes.some((node) => node.id === "K002")).toBe(false);
+  });
+
   it("supports a focused summary while retaining aggregate check counts", () => {
     const events = buildCanonicalEvents();
     const cut = events.findIndex((event) => event.type === "verification.completed");

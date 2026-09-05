@@ -47,6 +47,7 @@ export interface GraphEdge {
     | "attacks"
     | "verifies"
     | "promotes"
+    | "conflicts"
     | "equivalent"
     | "relation";
   label?: string;
@@ -334,8 +335,8 @@ export interface TrajectoryEvidenceOptions {
 
 /**
  * Current mathematical record for trajectories-v2, retaining the route by
- * which each claim was reached. Failed and duplicate claims stay out of this
- * working projection; their complete history remains in the Library.
+ * which each claim was reached. Historical premises and open conflicts remain
+ * visible even when their claims would otherwise be omitted.
  *
  * The defaults preserve the complete semantic projection. A UI may hide
  * individual verification nodes (the aggregate remains on each claim) or ask
@@ -366,7 +367,34 @@ export function deriveTrajectoryEvidenceGraph(
     const status = state.claims[claimId]?.status;
     if (status === "UNVERIFIED" || status === "NEEDS_REVISION") includedClaims.add(claimId);
   }
-  for (const factId of activeFactIds) includedClaims.add(state.facts[factId]!.claimId);
+  const includedFacts = new Set(activeFactIds);
+  for (const factId of includedFacts) includedClaims.add(state.facts[factId]!.claimId);
+  for (const conflict of state.claimConflicts) {
+    if (conflict.status !== "OPEN") continue;
+    includedClaims.add(conflict.leftClaimId);
+    includedClaims.add(conflict.rightClaimId);
+  }
+  // Preserve the exact recorded premises, including withdrawn ones. Set
+  // iteration visits newly added claims and terminates even on cyclic input.
+  const includeFact = (factId: string): void => {
+    const pending = [factId];
+    while (pending.length) {
+      const id = pending.pop()!;
+      const fact = state.facts[id];
+      if (!fact || includedFacts.has(id)) continue;
+      includedFacts.add(id);
+      includedClaims.add(fact.claimId);
+      if (fact.supersededByFactId) pending.push(fact.supersededByFactId);
+    }
+  };
+  for (const claimId of includedClaims) {
+    const claim = state.claims[claimId];
+    for (const dependencyId of claim?.dependsOn ?? []) {
+      if (state.config.workflow === "trajectories-v2") includeFact(dependencyId);
+      else if (state.claims[dependencyId]) includedClaims.add(dependencyId);
+    }
+    if (claim?.targetFactId) includeFact(claim.targetFactId);
+  }
 
   const includedTaskIds = new Set<string>();
   for (const claimId of includedClaims) {
@@ -528,7 +556,7 @@ export function deriveTrajectoryEvidenceGraph(
           },
     );
     for (const dependencyId of claim.dependsOn) {
-      if (!includedClaims.has(dependencyId)) continue;
+      if (!includedClaims.has(dependencyId) && !includedFacts.has(dependencyId)) continue;
       edges.push({
         id: `claim-dependency:${claim.id}:${dependencyId}`,
         source: claim.id,
@@ -559,7 +587,7 @@ export function deriveTrajectoryEvidenceGraph(
         label: checkLabel,
       });
     }
-    if (claim.targetFactId && activeFactIds.includes(claim.targetFactId)) {
+    if (claim.targetFactId && includedFacts.has(claim.targetFactId)) {
       edges.push({
         id: `correction:${claim.id}:${claim.targetFactId}`,
         source: claim.id,
@@ -580,9 +608,21 @@ export function deriveTrajectoryEvidenceGraph(
     }
   }
 
-  for (const factId of activeFactIds) {
+  for (const conflict of state.claimConflicts) {
+    if (conflict.status !== "OPEN") continue;
+    edges.push({
+      id: `conflict:${conflict.leftClaimId}:${conflict.rightClaimId}`,
+      source: conflict.leftClaimId,
+      target: conflict.rightClaimId,
+      type: "conflicts",
+      label: "conflicts",
+    });
+  }
+
+  for (const factId of state.factOrder.filter((id) => includedFacts.has(id))) {
     const fact = state.facts[factId]!;
     const claim = state.claims[fact.claimId];
+    const displayStatus = factDisplayStatus(state, fact.id);
     nodes.push({
       id: fact.id,
       type: "fact",
@@ -590,7 +630,7 @@ export function deriveTrajectoryEvidenceGraph(
       data: {
         title: fact.title,
         statement: fact.statement,
-        status: factDisplayStatus(state, fact.id),
+        status: displayStatus,
         claimId: fact.claimId,
         relationToGoal: claim?.relationToGoal ?? "RELATED",
       },
@@ -600,8 +640,17 @@ export function deriveTrajectoryEvidenceGraph(
       source: fact.claimId,
       target: fact.id,
       type: "promotes",
-      label: "established",
+      label: displayStatus === "ACTIVE" ? "established" : displayStatus.toLowerCase(),
     });
+    if (fact.supersededByFactId && includedFacts.has(fact.supersededByFactId)) {
+      edges.push({
+        id: `superseded:${fact.id}:${fact.supersededByFactId}`,
+        source: fact.id,
+        target: fact.supersededByFactId,
+        type: "revision",
+        label: "superseded by",
+      });
+    }
   }
   return { nodes, edges };
 }

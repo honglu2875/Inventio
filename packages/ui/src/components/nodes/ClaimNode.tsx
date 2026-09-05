@@ -23,10 +23,10 @@ export default function ClaimNode({ id, data }: NodeProps): JSX.Element {
           {CLAIM_STATUS_GLYPH[status]} {status}
         </span>
       </div>
-      <div className="claim-statement clamp-3">
+      <div className={`claim-statement ${checks >= 0 ? "clamp-2" : "clamp-3"}`}>
         <MathText>{truncate(statement, 150)}</MathText>
       </div>
-      {checks >= 0 ? <div className="small muted">{passes}/{required} pass · {checks} checks</div> : null}
+      {checks >= 0 ? <div className="claim-checks small muted">{passes}/{required} pass · {checks} checks</div> : null}
       <NodeHandles />
     </div>
   );

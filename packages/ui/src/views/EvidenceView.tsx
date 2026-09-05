@@ -14,6 +14,7 @@ import {
   candidateLifecycle,
   deriveEvidenceGraph,
   deriveTrajectoryEvidenceGraph,
+  factIsSettled,
   latestActiveCandidateId,
   type Graph,
   type ProjectState,
@@ -23,6 +24,7 @@ import { useProjectSlug } from "../components/ProjectContext";
 import { layoutEvidence } from "../lib/evidenceLayout";
 import { layoutTrajectoryEvidence } from "../lib/trajectoryEvidenceLayout";
 import { buildEdges, buildNodes, stabilizeNodes, type ExtraData } from "../lib/rfGraph";
+import { lineageEdges } from "../lib/lineage";
 import { candidateStageColor } from "../lib/visual";
 import { useProjectState } from "../store/hooks";
 
@@ -48,14 +50,10 @@ function TrajectoryEvidenceCanvas({ graph }: { graph: Graph }): JSX.Element {
     () => stabilizeNodes(cache.current, buildNodes(graph, layout, { selectedId: sel })),
     [graph, layout, sel],
   );
-  const highlighted = useMemo(() => {
-    if (hovered === null) return NO_HIGHLIGHTED_EDGES;
-    return new Set(
-      graph.edges
-        .filter((edge) => edge.source === hovered || edge.target === hovered)
-        .map((edge) => edge.id),
-    );
-  }, [graph, hovered]);
+  const highlighted = useMemo(
+    () => lineageEdges(graph, hovered ?? sel),
+    [graph, hovered, sel],
+  );
   const edges = useMemo(() => buildEdges(graph, { highlighted }), [graph, highlighted]);
   const boxes = useMemo(
     () => new Map(layout.nodes.map((node) => [node.id, node])),
@@ -122,10 +120,12 @@ function TrajectoryEvidence({ state }: { state: ProjectState }): JSX.Element {
     const status = state.claims[id]?.status;
     return status === "UNVERIFIED" || status === "NEEDS_REVISION";
   }).length;
+  const settledFacts = state.factOrder.filter((id) => factIsSettled(state, id)).length;
   const activeFacts = state.factOrder.filter((id) => {
     const status = state.facts[id]?.status;
     return status === "ACTIVE" || status === "SUSPICIOUS";
   }).length;
+  const unsettledFacts = activeFacts - settledFacts;
   const queued = state.verificationOrder.filter((id) => state.verifications[id]?.status === "queued").length;
   const visibleTrajectories = graph.nodes.filter((node) => node.type === "task").length;
   const setOption = useCallback(
@@ -150,14 +150,15 @@ function TrajectoryEvidence({ state }: { state: ProjectState }): JSX.Element {
           <div className="row wrap">
             <strong>Research map</strong>
             <span className="chip">{visibleTrajectories} visible trajector{visibleTrajectories === 1 ? "y" : "ies"}</span>
-            <span className="chip ok">{activeFacts} fact{activeFacts === 1 ? "" : "s"}</span>
+            <span className="chip ok">{settledFacts} settled fact{settledFacts === 1 ? "" : "s"}</span>
+            {unsettledFacts > 0 ? <span className="chip warn">{unsettledFacts} unsettled</span> : null}
             <span className="chip">{activeClaims} open claim{activeClaims === 1 ? "" : "s"}</span>
             {queued > 0 ? <span className="chip warn">{queued} checks waiting</span> : null}
           </div>
           <p>
             Read left to right: independent trajectories → mathematical turning points → claims →
-            independent checks → established facts. Failed and duplicate claims remain in the
-            Library without crowding this working view.
+            independent checks → recorded facts. Select a result to trace its origins and
+            dependents. Dashed links show premises and open conflicts; historical premises stay visible.
           </p>
         </div>
         <div className="research-map-controls" aria-label="Research map display">

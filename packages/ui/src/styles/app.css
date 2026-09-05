@@ -978,7 +978,8 @@ body.resizing {
   gap: 4px;
   font-size: 11px;
   line-height: 1.5;
-  padding: 0 6px;
+  padding: 1px 6px;
+  flex-shrink: 0;
   border-radius: 999px;
   border: 1px solid var(--border);
   color: var(--muted);
@@ -1307,6 +1308,7 @@ body.resizing {
   background: var(--panel-2);
   padding: 6px 8px;
   justify-content: space-between;
+  gap: 2px;
 }
 
 .task-top {
@@ -1349,7 +1351,28 @@ body.resizing {
 }
 
 .task-bottom {
-  min-height: 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 20px;
+  flex: none;
+}
+
+.task-bottom .preview {
+  min-width: 0;
+}
+
+.task-metadata {
+  margin-left: auto;
+}
+
+.task-top,
+.claim-top,
+.claim-checks,
+.verification-top,
+.milestone-top {
+  flex-shrink: 0;
 }
 
 .preview {
@@ -1469,7 +1492,7 @@ body.resizing {
 }
 
 .node-verification {
-  padding: 8px 10px;
+  padding: 6px 10px;
 }
 
 .verification-top,
@@ -1479,19 +1502,22 @@ body.resizing {
   justify-content: space-between;
   gap: 8px;
   font-size: 11px;
-  margin-bottom: 5px;
+  margin-bottom: 0;
 }
 
 .node-milestone {
-  padding: 7px 9px;
+  padding: 4px 9px;
   background: color-mix(in srgb, var(--accent) 6%, var(--panel));
   border-style: dashed;
 }
 
 .milestone-title {
   font-size: 11px;
-  line-height: 1.25;
+  line-height: 1.5;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .milestone-step {
@@ -1500,9 +1526,8 @@ body.resizing {
 }
 
 .milestone-excerpt {
-  margin-top: 4px;
   font-size: 10px;
-  line-height: 1.25;
+  line-height: 1.5;
   overflow: hidden;
 }
 
@@ -1527,6 +1552,8 @@ body.resizing {
 }
 
 .claim-statement {
+  flex-shrink: 0;
+  line-height: 1.6;
   font-size: 11px;
   color: var(--text);
 }
@@ -3893,13 +3920,20 @@ body.resizing {
 }
 
 .node-card .mathtext .katex {
-  /* one line of node text, clipped exactly like the plain-text version */
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* The outer preview truncates; inner clipping cuts off subscripts. */
+  overflow: visible;
 }
 
 /* KaTeX renders its own error markup when TeX is malformed (never throws). */
 .mathtext .katex-error {
   color: var(--danger);
   font-family: var(--font-mono);
+}
+
+/* Line clamping must own the inline text, not a nested block whose full
+   height can push the check count out of its fixed-size card. */
+.node-card .clamp-2 > .mathtext,
+.node-card .clamp-3 > .mathtext {
+  display: inline;
+  overflow: visible;
 }

@@ -1,7 +1,8 @@
-import { initialState, type VerificationState } from "@inventio/schema";
+import { defaultConfig, initialState, type VerificationState } from "@inventio/schema";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import ArtifactTab from "../src/components/inspector/ArtifactTab";
 import ClaimConflicts from "../src/components/ClaimConflicts";
 import VerificationEvidence from "../src/components/VerificationEvidence";
 import { useStore } from "../src/store/store";
@@ -29,6 +30,23 @@ describe("mathematical evidence views", () => {
     expect(html).toContain("same residual");
     expect(html).toContain("Neither statement is refuted merely because its proof failed review");
     expect(html).not.toContain("Record resolution");
+  });
+  it("keeps a fact's current uncertainty visible when opening its graph inspector", () => {
+    const state = initialState();
+    state.config = defaultConfig();
+    state.facts.F001 = {
+      id: "F001", claimId: "K001", title: "A recorded value", statement: "D = 10/3",
+      proofMarkdown: "Original derivation", path: "facts/F001.md", status: "ACTIVE",
+      correctionClaimIds: [], retractedByClaimId: null, supersededByFactId: null, recordedAtSeq: 1,
+    };
+    state.factOrder.push("F001");
+    // The recorded acceptance alone cannot replace its missing source proof.
+    useStore.getState().setSnapshot("test", state);
+    const html = renderToStaticMarkup(<ArtifactTab slug="test" nodeId="F001" kind="fact" />);
+    expect(html).toContain("UNSETTLED");
+    expect(html).toContain("source claim for F001 is missing");
+    expect(html).toContain("Recorded proof");
+    expect(html).not.toContain("Verified proof");
   });
   it("shows the original verdict and failed computational support independently", () => {
     const verification: VerificationState = {

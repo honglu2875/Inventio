@@ -30,6 +30,7 @@ import { isProjectExport } from "../lib/projectExport";
 import { resolveNodeRoute } from "../lib/selection";
 import {
   CARD_STATUS_COLOR,
+  FACT_STATUS_COLOR,
   CLAIM_STATUS_COLOR,
   CLAIM_STATUS_GLYPH,
   candidateStageColor,
@@ -967,14 +968,6 @@ function ComputationsSection({ slug, state }: { slug: string; state: ProjectStat
 
 // ------------------------------------------------------- trajectories-v2 library
 
-const FACT_STATUS_COLOR: Record<string, string> = {
-  UNSETTLED: "var(--warn)",
-  ACTIVE: "var(--ok)",
-  SUSPICIOUS: "var(--warn)",
-  RETRACTED: "var(--danger)",
-  SUPERSEDED: "var(--muted)",
-};
-
 function claimSection(claim: ClaimState): Section {
   return claim.status === "FAILED" || claim.status === "REFUTED" || claim.status === "SUPERSEDED"
     ? "failed-claims"
@@ -1161,7 +1154,7 @@ function FactsSection({ slug, state, selectedId, onSelect }: { slug: string; sta
           <h3>{selected.title || selected.id}</h3>
           <h4 className="section-head">Statement</h4>
           <Markdown>{selected.statement}</Markdown>
-          <h4 className="section-head">Verified proof</h4>
+          <h4 className="section-head">Recorded proof</h4>
           <Markdown>{selected.proofMarkdown}</Markdown>
           {factConcerns(state, selected.id).map((reason) => <div className="banner warn" key={reason}><Markdown>{reason}</Markdown></div>)}
           {selected.status === "RETRACTED" && selected.retractedByClaimId ? (

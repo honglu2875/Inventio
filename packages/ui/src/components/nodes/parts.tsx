@@ -8,6 +8,7 @@ export function NodeHandles(): JSX.Element {
     <>
       <Handle type="target" position={Position.Left} className="cq-handle" isConnectable={false} />
       <Handle type="source" position={Position.Right} className="cq-handle" isConnectable={false} />
+      <Handle id="related" type="target" position={Position.Right} className="cq-handle" isConnectable={false} />
     </>
   );
 }

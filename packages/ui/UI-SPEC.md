@@ -21,6 +21,25 @@ forced (e.g. a library limitation). The layout engines in `src/lib/layout.ts`
 and `src/lib/evidenceLayout.ts` are already written and tested — use them
 unchanged; do not introduce any force-directed or third-party layout.
 
+## Current trajectory map refinements
+
+The trajectories-v2 research map retains exact fact dependencies, including
+withdrawn premises and their source claims. Open conflicts retain both claim
+endpoints even when a proof failed. Render conflicts as undirected, labelled
+warning links; a failed proof does not settle a statement conflict. Historical
+acceptance edges use the fact's current display status, and only settled facts
+receive the green check cue. Selecting or hovering a result traces ancestors
+and descendants separately, without highlighting unrelated sibling branches.
+Selection and hover never change layout positions. Compact task metadata stays
+on one line, with full text available on hover; card previews end on complete
+lines and mathematical subscripts must not be clipped by nested overflow.
+The legacy layout engines and saved event meanings remain unchanged.
+
+The proposed recurrent replacement in `../../SESSION-DESIGN.md` keeps this
+graph-first interaction and adds exact-version repair and audit lineage when
+those records exist. Round summaries and the final report are prominent
+reading views whose references navigate back to the graph.
+
 ## 0. Principles
 
 1. **The graph is a projection, never a guess.** Everything rendered derives

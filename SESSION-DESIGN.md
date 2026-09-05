@@ -371,12 +371,35 @@ and repair turns reference the same originating session. Mathematical status
 is derived from evidence for exact versions, not copied between claim/fact
 entities or inferred from a summary.
 
-The UI keeps a round timeline. Each round opens into Solver, Explorer, audit
-and summary views. The library separates content kind, checking state and
-scope; all notes remain searchable. A result shows its exact versions,
-objections, author responses, audit findings, dependencies and execution
-record. Show audit coverage and the final report prominently. Keep controls
-for pause, continuation, owner guidance and source access.
+The research graph remains the main view, with the round timeline as its
+navigation. Keep stable Solver and Explorer lanes per round and make result
+lineage the central interaction: selecting a result traces its exact premises,
+source document/version, independent checks, author responses and revisions,
+audits and dependent results. Preserve selected lineage while inspecting it;
+hover is temporary. Distinguish mathematical dependency from chronological
+sequence. A conflict link says that statements conflict, never that either
+side has been disproved.
+
+Use progressive disclosure: show current results and unresolved objections by
+default, retaining any historical versions needed to explain their lineage.
+Expand checks, repair exchanges and audit findings locally rather than adding
+every message to the canvas. Keep withdrawn or quarantined premises visible
+when current work depends on them. Their descendants must carry the derived
+warning; historical acceptance must not look like current validation. Show
+content kind, checking state and relation to the goal separately, with text
+and symbols as well as color. Fit complete status labels and complete preview
+lines in each card; reveal full mathematics in the inspector.
+
+Round summaries and final writing remain prominent reading destinations.
+A summary opens as a readable document, with result references selecting the
+same exact versions in the graph. Show per-round audit coverage (checked,
+challenged and remaining) and link findings to the results they concern. The
+final report links its assertions back to their supporting results and states
+the final audit coverage. Neither summary nor report introduces new acceptance
+edges. The library provides search/open access to every mathematical note and
+version. Keep pause, continuation, owner guidance and source access nearby.
+These revision/audit graph elements require the new event contract; do not
+infer them from today's free-form notes or display placeholder evidence.
 
 Replace the earlier specification in these stages:
 

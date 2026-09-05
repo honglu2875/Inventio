@@ -33,6 +33,12 @@ export default function TaskNode({ id, data }: NodeProps): JSX.Element {
   const { frac, color } = gauge(spend, budget);
   const overTarget = budget > 0 && spend > budget;
   const ringColor = TASK_STATUS_COLOR[status];
+  const details = [
+    overTarget ? `target +${formatTokens(spend - budget)}` : "",
+    milestoneCount > 0 ? `${milestoneCount} note${milestoneCount === 1 ? "" : "s"}` : "",
+    researchMap && claimCount > 0 ? `${claimCount} claim${claimCount === 1 ? "" : "s"}` : "",
+    researchMap && factCount > 0 ? `${factCount} fact${factCount === 1 ? "" : "s"}` : "",
+  ].filter(Boolean).join(" · ");
 
   return (
     <div className={`node-card node-task status-${status}`} title={direction}>
@@ -71,17 +77,10 @@ export default function TaskNode({ id, data }: NodeProps): JSX.Element {
             {status} · {formatTokens(spend)}
           </span>
         )}
-        {overTarget ? (
-          <span className="mono preview" style={{ color: "var(--danger)" }}>
-            target +{formatTokens(spend - budget)}
+        {details !== "" ? (
+          <span className="muted preview task-metadata" title={details}>
+            {details}
           </span>
-        ) : null}
-        {milestoneCount > 0 ? <span className="mono muted preview">◇ {milestoneCount}</span> : null}
-        {researchMap && claimCount > 0 ? (
-          <span className="mono muted preview">{claimCount} claim{claimCount === 1 ? "" : "s"}</span>
-        ) : null}
-        {researchMap && factCount > 0 ? (
-          <span className="mono preview map-fact-count">✓ {factCount}</span>
         ) : null}
       </div>
       <NodeHandles />

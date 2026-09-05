@@ -177,3 +177,11 @@ export const PHASES = [
   "TERMINAL",
 ] as const;
 export type TrackedPhase = (typeof PHASES)[number];
+
+export const FACT_STATUS_COLOR: Record<string, string> = {
+  UNSETTLED: "var(--warn)",
+  ACTIVE: "var(--ok)",
+  SUSPICIOUS: "var(--warn)",
+  RETRACTED: "var(--danger)",
+  SUPERSEDED: "var(--muted)",
+};

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import {
   candidateLifecycle,
+  factConcerns,
+  factDisplayStatus,
   usageSpend,
   type ArtifactMeta,
   type ProjectState,
@@ -12,6 +14,7 @@ import { isProjectExport } from "../../lib/projectExport";
 import type { NodeKind } from "../../lib/selection";
 import {
   CARD_STATUS_COLOR,
+  FACT_STATUS_COLOR,
   CLAIM_STATUS_COLOR,
   CLAIM_STATUS_GLYPH,
   SEVERITY_COLOR,
@@ -336,8 +339,23 @@ function MilestoneBody({ slug, nodeId }: { slug: string; nodeId: string }): JSX.
 function FactBody({ slug, nodeId }: { slug: string; nodeId: string }): JSX.Element {
   const state = useProjectState(slug);
   const fact = state?.facts[nodeId];
-  if (!fact) return <p className="muted">Unknown fact.</p>;
-  return <div className="detail"><div className="detail-row"><span className="chip">{fact.status}</span><span className="mono small muted">from {fact.claimId}</span></div><h3 className="section-head">Statement</h3><Markdown>{fact.statement}</Markdown><h3 className="section-head">Verified proof</h3><Markdown>{fact.proofMarkdown}</Markdown></div>;
+  if (!state || !fact) return <p className="muted">Unknown fact.</p>;
+  const status = factDisplayStatus(state, fact.id);
+  return (
+    <div className="detail">
+      <div className="detail-row">
+        <span className="chip" style={{ color: FACT_STATUS_COLOR[status] }}>{status}</span>
+        <span className="mono small muted">from {fact.claimId}</span>
+      </div>
+      {factConcerns(state, fact.id).map((reason) => (
+        <div className="banner warn" key={reason}><Markdown>{reason}</Markdown></div>
+      ))}
+      <h3 className="section-head">Statement</h3>
+      <Markdown>{fact.statement}</Markdown>
+      <h3 className="section-head">Recorded proof</h3>
+      <Markdown>{fact.proofMarkdown}</Markdown>
+    </div>
+  );
 }
 
 function VerificationBody({ slug, nodeId }: { slug: string; nodeId: string }): JSX.Element {

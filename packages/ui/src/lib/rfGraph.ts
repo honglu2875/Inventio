@@ -102,11 +102,20 @@ function edgeStyle(edge: GraphEdge): {
         ...(edge.label === undefined ? {} : { label: edge.label }),
       };
     }
-    case "promotes":
+    case "promotes": {
+      const color = edge.label === "established" ? "var(--ok)" : "var(--warn)";
       return {
-        style: { ...EDGE_BASE, stroke: "var(--ok)", strokeWidth: 2 },
+        style: { ...EDGE_BASE, stroke: color, strokeWidth: 2 },
         marker: true,
-        markerColor: "var(--ok)",
+        markerColor: color,
+        ...(edge.label === undefined ? {} : { label: edge.label }),
+      };
+    }
+    case "conflicts":
+      return {
+        style: { ...EDGE_BASE, stroke: "var(--warn)", strokeDasharray: "5 4" },
+        marker: false,
+        markerColor: "var(--warn)",
         ...(edge.label === undefined ? {} : { label: edge.label }),
       };
     case "equivalent":
@@ -128,14 +137,16 @@ function edgeStyle(edge: GraphEdge): {
         style: { ...EDGE_BASE, stroke: "var(--accent)" },
         marker: true,
         markerColor: "var(--accent)",
+        ...(edge.label === undefined ? {} : { label: edge.label }),
       };
     case "uses":
       return { style: { ...EDGE_BASE }, marker: false, markerColor: "var(--border)" };
     case "depends-on":
       return {
-        style: { ...EDGE_BASE, strokeDasharray: "4 4" },
-        marker: false,
-        markerColor: "var(--border)",
+        style: { ...EDGE_BASE, stroke: "var(--accent)", strokeDasharray: "4 4" },
+        marker: true,
+        markerColor: "var(--accent)",
+        label: "uses",
       };
     case "attacks": {
       const severity = typeof edge.label === "string" ? edge.label : "";
@@ -173,7 +184,12 @@ export function buildEdges(graph: Graph, options: BuildEdgesOptions = {}): Edge[
       source: edge.source,
       target: edge.target,
       type: "smoothstep",
-      style: { ...style, opacity: highlighted.has(edge.id) ? 1 : 0.75 },
+      ...((edge.type === "conflicts" || edge.type === "equivalent") ? { targetHandle: "related" } : {}),
+      style: {
+        ...style,
+        opacity: highlighted.has(edge.id) ? 1 : highlighted.size > 0 ? 0.25 : 0.75,
+        ...(highlighted.has(edge.id) ? { strokeWidth: 2.5 } : {}),
+      },
       interactionWidth: 6,
       focusable: false,
       selectable: false,
