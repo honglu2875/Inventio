@@ -5,6 +5,11 @@ combines the CLI's own tool context, a short stdin message, a composed working
 directory with AGENTS.md, an output schema, and authorized project tools.
 Repository and user instructions are excluded from worker packets.
 
+The proposed [recurrent replacement](../../../../SESSION-DESIGN.md) specifies
+author-session responses, blind memory audit, support-model round summaries
+and strong final writing. Those changes are not yet implemented; the lifecycle
+below describes the current executable prompts.
+
 Only trajectories-v2 executes. Council projects are view-only archives;
 their original prompts remain in their private saved packets. The old
 controller, curation, synthesis, and council worker prompt modules are removed.

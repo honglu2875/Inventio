@@ -18,9 +18,10 @@ a fresh trajectory project from the original intake to do new research.
 
 ## Documents
 
-The proposed [persistent-session replacement](SESSION-DESIGN.md) removes rounds
-in favor of one Solver and one Explorer for the whole investigation. It records
-the new design and cutover plan; the current runtime is still described below.
+The proposed [recurrent research redesign](SESSION-DESIGN.md) keeps one long
+Solver and Explorer per round, adds author-session repairs and independent
+strong memory audit, and retains round summaries and final writing. It records
+the replacement design; the current runtime is still described below.
 
 The [validity roadmap](docs/VALIDITY-ROADMAP.md) records the staged safeguards,
 remaining experiments and costs. [Offline evaluation](docs/EVALUATION.md) scores

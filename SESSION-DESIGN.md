@@ -1,331 +1,422 @@
-# Persistent research sessions
+# Recurrent research with independent memory audit
 
-Replacement design for Inventio, proposed on 2026-09-05. This specifies the
-next framework; the running implementation still follows TRAJECTORY-DESIGN.md.
-The owner has explicitly removed backward compatibility as a requirement for
-this redesign. Implementation should replace the old workflow, not maintain
-another execution path alongside it.
+Replacement design, revised on 2026-09-05 with the owner's feedback. This
+supersedes the earlier proposal for two project-long conversations without
+rounds. The running implementation still follows TRAJECTORY-DESIGN.md.
+Backward compatibility is not a requirement for the replacement.
 
 ## Central decision
 
-A project has exactly one Solver session and one Explorer session. Each keeps
-its conversation, private working directory, and mathematical notes throughout
-the investigation. Both use an explicitly selected strong research model.
-They may run concurrently, but there are no additional researchers, rounds,
-rosters, or periodic fresh starts.
+Keep recurrence. Each round has one long Solver session and one long Explorer
+session, using the strongest research model selected for the project. They
+produce refined mathematical results, calculations and useful notes. The next
+round starts fresh from the original problem and a compact, faithful account
+of the durable mathematics, with the complete note library available on demand.
+
+Retain an originating session for responding to objections about its results.
+Do not carry that session's detailed thinking history into the next round's
+researchers. This separates continuity needed for a repair from the fresh
+perspective needed for a new investigation.
+
+The owner reports that long, strong trajectories and recurrent distillation
+have worked well. Preserve that philosophy while improving classification,
+verification and memory integrity. Smaller models handle routine checking and
+editorial work. A separate strong auditor independently inspects mathematical
+memory from round two onward. No model manages the researchers' methods.
 
 ```mermaid
-flowchart LR
-    P[Problem and sources] --> S[Persistent Solver]
-    P --> E[Persistent Explorer]
-    S --> Q[Submitted results]
-    E --> Q
-    Q --> V[Independent checks]
-    V --> R[Results and objections]
-    R --> S
-    R --> E
+flowchart TD
+    P[Original problem and compact mathematical brief] --> S[One long Solver session]
+    P --> E[One long Explorer session]
+    S --> R[Refined results and complete notes]
+    E --> R
+    R --> V[Smaller independent verifier]
+    V --> O[Objection]
+    O --> A[Originating author session: revise, withdraw or defend]
+    A --> V
+    V --> M[Versioned mathematical memory]
+    M --> U[Strong blind audit from round two]
+    U --> M
+    M --> C[Smaller editor: round summary and next-round brief]
+    C --> N[Fresh research sessions next round]
+    M --> F[Strong final writer at stopping]
 ```
 
-The Solver pursues the original problem. The Explorer pursues relevant
-examples, alternative approaches, special cases, and obstructions. Their
-methods remain their own choices. The runtime owns execution, delivery of
-messages, budgets, and evidence records; it makes no mathematical plans.
+## Roles and authority
 
-The owner's experience motivates this allocation. It is a working design
-choice, not a measured claim that two persistent sessions outperform every
-other allocation on every problem.
+Use two model settings initially: research and support. Pin the actual model
+choices when a run starts; do not silently change them during a conversation.
 
-## Research lifecycle
+| Role | Model | Responsibility | Authority |
+| --- | --- | --- | --- |
+| Solver | Research | Attack the original problem; refine results; respond to objections | Author its own result versions and notes |
+| Explorer | Research | Pursue useful examples, methods, special cases and obstructions | Author its own result versions and notes |
+| Verifier | Support | Independently check a frozen result and identify concrete defects | Record a check or objection, not rewrite the author's mathematics |
+| Memory auditor | Research | Independently audit every established fact, dependencies and consistency | Confirm, quarantine, downgrade or retract with mathematical reasons |
+| Editor | Support | Organize notes, write round summaries and the next-round brief | Presentation and indexing only; no acceptance decisions or research directions |
+| Final writer | Research | Produce one coherent, self-contained final report | Exposition of supported mathematics; no new acceptance decisions |
+| Runtime | Code | Schedule, isolate, preserve evidence, meter usage and apply validated decisions | Sole writer of shared durable state |
 
-1. Preserve the owner's problem and sources verbatim. The owner starts the
-   project directly from these materials. No mandatory intake-model rewrite
-   or separate initial mathematical summary is needed. A researcher can ask
-   the owner about a material ambiguity without silently changing the goal.
-2. Start the Solver and Explorer once, with distinct private workspaces and
-   stable session identities. Keep the research instructions and tools stable.
-3. Let each work for a long uninterrupted stretch. It maintains its own notes
-   and calculations. It may publish a useful note or submit a complete result
-   through project-scoped tools without ending its research session.
-4. Check submitted results asynchronously. Deliver feedback to their author;
-   a revision continues the same investigation in the same conversation.
-5. At a natural model-turn ending, retain a small checkpoint: current draft,
-   next mathematical step, and whether to continue, wait for feedback, ask the
-   owner, or finish. A continuation is another turn in that session, not a new
-   research assignment. Never require a result merely to justify continuing.
-6. Stop on a checked decisive result, owner stop, exhausted allowance, or both
-   researchers finishing without a decisive result. Preserve useful partial
-   work and open questions. Operational failures pause affected work; they
-   are not mathematical disproofs.
+The default proposal is one support-model verifier per submitted proof version,
+followed by the independent strong audit of mathematical memory. This replaces
+the earlier proposed fixed pair of routine checks. The author is never its own
+independent verifier. Strong audit also covers disagreements the weaker checker
+cannot resolve. Measure this allocation against the previous verification
+policy before claiming equal or better accuracy.
 
-There is no end-of-round comparison call, summary editor, or automatic final
-writing call. Ordinary progress is the researchers' own readable work. A
-checked result already contains its statement and proof. At stopping, the
-runtime assembles a report from these records with their current qualifications.
-An optional paper-writing pass remains a separate owner-requested action.
+## The round lifecycle
 
-## What one long session means
+1. Start from the owner's original problem, source catalog, a concise
+   mathematical brief and the memory index. Preserve original hypotheses and
+   terminology. A material ambiguity becomes a question for the owner.
+2. Launch exactly one Solver and one Explorer, each with a long private
+   session and working directory. They choose their own methods and timing.
+   No prescribed sequence of mathematical microtasks or periodic progress call.
+3. During useful pauses they may share notes, consult the full project note
+   library through MCP and submit a worthwhile self-contained result. At the
+   end of their main work, they refine the write-up and classify what it
+   actually establishes. A round need not invent a positive result to finish.
+4. Verify submissions and route any disagreement back to their originating
+   author sessions. Revisions are bounded and preserve exact proof versions.
+5. From round two, run a separate strong auditor in parallel with research.
+   It starts with every established fact in memory, then checks newly admitted
+   facts before the round's audit is declared complete.
+6. At the round boundary, finish the admitted checks and bounded author
+   responses. Seal the result versions and let the auditor finish its remaining
+   targets. An unresolved objection or unfinished audit stays explicit; it
+   cannot be hidden by closing a round.
+7. The editor writes the user-facing round summary and a compact next-round
+   brief from that sealed record. Launch fresh Solver and Explorer sessions
+   for the next round if useful work and allowance remain.
 
-A session is a durable research identity, not an immortal operating-system
-process or an unlimited context window. Process restarts and later turns reuse
-the same provider conversation and working directory. Context compaction may
-still occur; mathematical notes, source excerpts, scripts, and submitted
-versions must survive it as files. Compaction is not an occasion to create a
-new researcher or ask another model to reconstruct a global plan.
+Service recovery resumes an interrupted session in the same round. A new
+research round deliberately starts new provider conversations. These are two
+different transitions in the runtime and UI, not a single generic resume.
 
-Maintain one private notes document per researcher, updated at meaningful
-pauses rather than on a token or clock schedule. Keep the actual derivations
-in ordinary files and link them from the notes. Do not repeatedly rewrite or
-prepend the whole project history to continuation requests.
+## Context and the note filesystem
 
-Initial implementation should reuse the existing CLI process driver and
-same-thread resume capability behind a small session interface. One process
-at a time may advance a given session. If a saved provider conversation is
-unavailable, pause and expose recovery from the saved files as an explicit
-replacement session. Never silently describe a fresh context as a resumption.
+Use the existing project-scoped MCP for catalog/search/open access. Do not
+introduce a second memory service or a model memory manager. A small index is
+always present; all saved mathematical notes, result versions, calculations,
+source excerpts and unsuccessful approaches are available to researchers on
+demand, including items omitted from the next-round brief.
 
-## Communication
+Catalogue every saved mathematical note in the designated notes tree at a
+checkpoint, including drafts. The author does not need to nominate each note
+for promotion or send a notification to make it discoverable.
 
-Proposed default: the two researchers can share selected mathematical notes
-and checked results. They cannot read each other's private workspace or full
-transcript. Notes are attributed and visibly unchecked; passing a note does
-not certify its assertions. There is no requirement to debate, reply, reach
-consensus, or send periodic updates.
+Selected notes and checked results are shared at natural pauses. Selection
+controls notifications and initial context, not whether a researcher is allowed
+to find the rest of the mathematical record. Unchecked notes and disputed or
+retracted results remain accessible with their current qualifications.
 
-The runtime appends a small notification when a relevant note, review, result,
-or owner instruction arrives. The recipient can read updates during work or
-at its next natural pause. Notifications contain identifiers and short
-descriptions; full mathematics is fetched only when useful. Reading an update
-does not create another model call. Do not interrupt a substantial derivation
-merely because the other researcher has posted something.
+Publish immutable snapshots of saved notes at natural pauses so readers never
+see half-written files. Researchers cannot mount or modify each other's live
+scratch directories. MCP exposes a logical project filesystem with bounded
+reads and stable document/version identifiers; it does not grant arbitrary
+host filesystem access. Keep source-copy limits and project confinement.
 
-This separates research collaboration from independent checking. A verifier
-never inherits either researcher's conversation, private notes, or prior
-verifier verdicts.
+Distinguish deliberate mathematical notes from raw model execution traces.
+Discard detailed traces from future research context; retain the original
+session and execution archive for author repair, recovery and owner inspection.
+They are not part of the ordinary researcher memory tools. Do not permanently
+delete the only evidence needed to revisit an incorrect result.
 
-## Results and verification
+The next-round brief contains useful results, open questions, concrete failed
+approaches and precise links. It carries no model confidence scores, rankings
+of researchers, or narrative that an approach must succeed. Full statements
+and proofs remain authoritative over their editorial summaries.
 
-### One result record, with immutable versions
+## Result classification
 
-Keep one result entity instead of a claim entity plus a promoted fact copy.
-Each submission freezes its statement, proof, declared relation to the goal,
-source references, any calculation attachments, and dependencies on exact
-versions of other results. Content hashes identify what was actually checked.
-Changing the proof or its hypotheses creates a new version; previous passes
-do not transfer automatically.
+Separate the kind of mathematical content from its verification status and its
+relation to the goal. One label must not try to express all three.
 
-Researchers may retain unlimited ordinary scratch work within storage limits,
-but each has at most one unresolved submitted version in the review queue.
-It can continue other mathematics while that version is checked. This avoids
-turning every small observation into two expensive model calls. Reject exact
-resubmissions already checked or queued; do not infer mathematical equivalence
-using a separate model pass.
+| Content kind | What must be recorded | How it can be used |
+| --- | --- | --- |
+| Proposition | Exact statement, hypotheses, scope and complete alleged proof | A premise only with its current checking qualifications |
+| Calculation or example | Inputs, conventions, derivation or script, exact versus numerical scope | Evidence for the stated calculation, not an unsupported general theorem |
+| Conjecture or question | Precise unresolved assertion or question | A research direction or explicit assumption, never an established premise |
+| Research note | Approach, partial derivation, obstruction or unsuccessful attempt | Context to consult, not a proof or a disproof merely because an attempt failed |
 
-### Two independent checks, scheduled sequentially
+An exact calculation with a proof may itself establish a proposition. Finite
+numerical evidence does not become a general theorem through reclassification.
+The author specifies the content kind and supported scope. The editor can
+organize these records but cannot strengthen their mathematical status.
 
-Use a fixed two-check rule instead of configurable W-out-of-V voting:
+For a checkable result version, show a small independent status vocabulary:
 
-1. A fresh verifier checks the complete frozen submission, including its
-   dependencies, source hypotheses, and relation to the original problem.
-2. If it finds an incorrect step or missing justification, return that report
-   to the author. Do not spend the second check on the same defective version.
-3. If it passes, a second fresh verifier checks the same complete version,
-   with particular emphasis on independently deriving the decisive step. It
-   receives neither the first verdict nor the first report.
-4. Both must pass that exact version. An explicit objection or unresolved
-   incompatible calculation prevents the result from becoming settled.
+- UNCHECKED: no completed supporting independent check.
+- CHECKED: routine verification supports this version; strong audit is pending.
+- AUDITED: strong independent audit supports this exact version.
+- NEEDS_REVISION: the submitted proof or dependencies are incomplete.
+- DISPUTED: a concrete objection or incompatible calculation is unresolved.
+- RETRACTED: this version has been withdrawn from usable mathematical memory,
+  with the mathematical reason preserved. Retraction need not prove its
+  statement false; record a disproof only when one is actually supplied.
 
-Both checks assess the whole argument; the first is not a cheap stylistic
-screen. For a TRR calculation, the report must derive the relevant surviving
-terms and justify omitted terms before cancellation. Do not add a separate
-model just to decide whether the proof is ready to be checked.
+Queue/running/error states are operational, not mathematical classifications.
+Keep scope (proves the goal, disproves it, partial, related) separate; the
+checker and auditor must assess that scope as part of their review.
 
-Two passing reports still do not constitute a formal correctness guarantee.
-This preserves independent scrutiny while avoiding duplicated reviews of a
-proof already found incomplete. It can increase latency for successful
-submissions; research proceeds while the queue runs.
+Store one versioned result record rather than a claim plus a separate promoted
+fact copy. A version freezes its statement, proof, attachments, source
+references and dependencies on exact other versions. A changed proof receives
+a new version and does not inherit old passes. An unaffected older proof can
+remain valid; a new version is not by itself a refutation of the old one.
 
-### Conflicts and unsettled premises
+CHECKED and AUDITED results form working mathematical memory, with the
+difference visible. Researchers may explore using a checked but unaudited
+premise, while decisive acceptance requires strong audit of the conclusion and
+its nontrivial dependency closure. A quarantined premise immediately makes
+dependent results unsettled. Do not present a merely checked dependency as
+already audited, or propagate certainty through a cycle or missing reference.
 
-Each verifier receives the original problem, frozen target proof and its
-authorized source material. It also receives a compact catalog of submitted
-statements, with complete statements available on demand. Other proof texts,
-acceptance labels, and referee reports are absent. The catalog is for noticing
-incompatibilities, not for supplying missing proof steps or choosing a side
-by apparent consensus. Capture its exact version in the review record.
+## Verification and author response
 
-Report concrete conflicting pairs in the same review return, alongside the
-proof assessment. The runtime records these observations and propagates them
-through explicit dependencies. A failed opposing proof does not establish
-that its statement is false. A withdrawn submission also does not dispose of
-a concrete mathematical objection. A conflict is resolved by a recorded owner
-assessment or a checked mathematical reconciliation, not by another vote.
+Give the support verifier the original problem, exact target statement and
+proof, and authorized mathematical dependencies and sources. Do not provide
+the author transcript, researcher commentary, other verdicts or expectations
+about which conclusion should win. A verifier can report inability to check;
+lack of expertise or a failed tool invocation does not refute a statement.
 
-For the disputed D case, an accepted nonzero residual and an incomplete
-derivation of a zero residual remain a conflict. Neither is silently discarded
-because one passed more checks. The author must reconcile the contributing
-terms, and any revised proof is reviewed as a new version.
+At least one disagreement is enough to trigger an author response; it does not
+need a majority. If more than one check is running, collect the available
+objections before resuming the author rather than creating a repair turn for
+each arrival. Distinguish mathematical error, proof gap, missing dependency
+and operational failure. Mere stylistic preference does not block acceptance.
 
-Before the second check of a potentially decisive submission, request final
-checkpoints from both researchers and stop launching research continuations.
-Let their current turns yield and their in-flight submissions become durable;
-only then seal the submission boundary and finish relevant pending reviews.
-Give the final verifier a catalog covering that frozen record. If
-checkpointing or coverage is incomplete, keep the result unresolved. This
-prevents a success report from racing an opposing calculation in the other
-session. If the final check fails and allowance remains, resume the same
-research sessions with the feedback.
+The runtime appends the exact mathematical objections and their target
+version to the saved session that produced the result. The author may:
 
-After stopping, later owner amendments remain visible and can unsettle the
-current result. Saved reports retain the evidence and qualifications that
-existed when written.
+- Revise: agree with the objection and supply a corrected, self-contained
+  proof as a new version.
+- Withdraw: agree that the result is unsupported and state precisely what
+  remains usable.
+- Defend: disagree and give a concrete mathematical response to the alleged
+  defect, rather than insist that the stronger model must be right.
+- Leave unresolved: identify the step it cannot currently settle.
 
-### Computation evidence
+An author response is not an independent PASS. A revised proof is checked
+again in a fresh verifier context. If the author defends the original, keep
+both the objection and the mathematical defense until independently resolved;
+do not erase the dissent or automatically prefer the weaker checker.
 
-Retain the existing parent-owned command archive, execution outcomes, hashes,
-and distinction between derivation and computational support. An unsuccessful
-execution cannot support a computational PASS. Successful execution does not
-prove that the code implements the right mathematics. Never run worker code
-in the conductor's unrestricted process to reproduce a calculation.
+Give defended or disputed mathematics to the strong auditor as self-contained
+arguments or competing calculations, stripped of model identities and verdict
+labels. Its job is to settle the mathematics, not arbitrate reputations. A
+fresh independent check of the response must address the concrete issue; a
+generic PASS does not dispose of a specific counterexample.
 
-External source text is copied or retrieved with precise provenance and
-conventions. A locally cached source prevents unnecessary fetching; it does
-not certify the source's applicability or a solver's reduction of it.
+Allow two author-response cycles per result per round as an initial operating
+limit, counted across versions. After that, retain the dispute for audit or
+later work instead of running an unbounded checker-author debate. Cache hits
+and repeated assertions do not justify more retries. This limit is a budget
+policy to evaluate, not a mathematical stopping theorem.
 
-## Efficiency and limits
+Within a round, queue feedback until the author's active turn yields. Only one
+process may advance a provider session at a time. When a later audit challenges
+an older result, resume its older originating session for repair at a natural
+pause in current research. Serialize these repairs with the corresponding
+research role; do not spawn another independent Solver to reconstruct it.
 
-- There are two research sessions and, by default, one active verification
-  process. No routine manager, summarizer, statement matcher, or synthesizer.
-- Keep a project-wide allowance and a review reserve. Reserve allowances for
-  active work before launching it so both researchers cannot spend the same
-  remainder. Give each a substantial research allocation; expose the split
-  as an advanced setting rather than multiplying role/round/task controls.
-- Keep existing conservative in-flight estimates until completed usage is
-  available. Missing usage is unknown, not free. A hard exact monetary ceiling
-  cannot be promised when the provider supplies delayed or incomplete usage.
-- Prioritize pending verification when a process slot becomes free. Waiting
-  researchers release their slots. Pause/resume, budget exhaustion, and
-  service recovery operate per session, with a project-wide stop as well.
-- Do not impose periodic checkpoints, minimum word counts, or automatic
-  "think again" calls. An unchanged checkpoint with no new input must not
-  cause an unbounded chain of paid continuations. Let the researcher explicitly
-  wait or finish, and show that status to the owner.
-- Bound infrastructure retries and schema repair. Never automatically retry
-  a mathematically failed proof until its author submits a new version.
-
-### Prefix reuse
-
-The main opportunity is preserving each long session's own growing context.
-The two checks of one frozen proof also have substantial common input. Keep
-stable mathematical instructions and authorized reference material together,
-and put varying identifiers, updates, and review emphases afterward where the
-transport permits. Do not import solver reasoning into a verifier to obtain
-a larger cache hit.
-
-Exact caching depends on the rendered request, including tools, output schema,
-and provider settings. Identical files or a reused conversation identifier
-alone do not guarantee a hit. Current CLI-generated context must be measured
-before promising cross-session prefix savings. A different transport is an
-optional optimization if evidence justifies its added implementation surface.
+Append feedback without rewriting the earlier context. Keep the original
+workspace, tools and output contract where possible. Reusing the conversation
+preserves useful context, but a provider cache hit is conditional on prefix
+matching and cache availability, particularly after several long rounds. If
+the old conversation cannot be resumed, expose that failure and offer a
+clearly identified fresh repair context from the saved mathematics.
 See [OpenAI's prompt caching guide](https://developers.openai.com/api/docs/guides/prompt-caching).
 
-Report uncached input, cache reads, cache writes when available, output tokens,
-and elapsed time separately. Keep unknown fields explicit. The old
-uncached-input-plus-output budget proxy is not a monetary cost estimate.
-Compare total cost as well as cache-hit rate; do not add irrelevant material
-or keep an unhelpful context solely to increase cached-token counts.
+## Independent audit of mathematical memory
 
-## Small implementation surface
+Each round from the second has one new, strong audit session, running in
+parallel with the Solver and Explorer. Every established fact is in scope,
+including unchanged facts audited in earlier rounds. Previous audit passes
+are not a substitute for this round's audit. Dependency ordering can reduce
+repeated work within one audit, but every target needs an explicit assessment.
 
-Retain TypeScript, the local HTTP/SSE server, simulator, Markdown artifacts,
-and one append-only event log. No new database, distributed queue, or agent
-framework is required.
+At launch, seal an audit manifest of exact result versions and their hashes.
+Supply only the mathematics: statements, complete proofs, calculations,
+required definitions, dependency bodies and original source citations. Remove
+model names, prior PASS/FAIL counts, confidence, summaries of previous reviews,
+researcher commentary and managerial recommendations. Preserve citations to
+actual mathematical sources. Use a separate read-only MCP projection and
+packet; hiding commentary only in the prompt is insufficient.
 
-The core records are a project, its two sessions, immutable result versions,
-independent reviews, and attributed messages/challenges. Session turns are
-execution records, not another mathematical task hierarchy. Review status and
-settled-result eligibility are derived from those records.
+A blind audit still sees the submitted proof; it is not a derivation from a
+bare conclusion with no supporting material. For delicate steps it derives
+from definitions or the original source formula independently. For the D
+case, this means writing the relevant TRR terms and contractions before
+cancellation, and comparing incompatible calculations on that basis.
 
-The runtime needs six cohesive responsibilities:
+The auditor can record justified changes as it works:
 
-| Responsibility | Scope |
-| --- | --- |
-| Session execution | Start/resume, private workspace, process lifecycle, usage |
-| Scheduling | Two researchers, review queue, reservations, stopping |
-| Research records | Immutable submissions, notes, messages, provenance |
-| Verification | Sealed packets, sequential independent checks, evidence |
-| Persistence | Event append/replay, artifact writes, lease, recovery |
-| HTTP/UI | Controls and readable projections of those same records |
+- Confirm a version after checking its proof, scope and dependencies.
+- Quarantine a fact immediately when a concrete defect or contradiction is
+  found; propagate the warning through its dependents.
+- Downgrade an overclaimed result to unresolved or to the scope actually
+  justified. A changed statement is a new version, not an overwritten theorem.
+- Retract an unusable version with the reason, preserving its text and evidence.
+- Resolve a dispute or restore eligibility when the mathematical objection
+  has been explicitly answered by a checked argument.
 
-Tools should cover source/library reading, receiving updates, sharing a note,
-and submitting a result. Reuse the existing bounded source readers and path
-confinement. The conductor alone freezes shared artifacts and writes events.
-There is no need for separate memory cards, milestone entities, claim/fact
-copies, candidate lineages, or a model-maintained global summary.
+The runtime validates target identities, versions and evidence and writes
+these changes as events. The auditor has real authority over usable memory,
+but no raw filesystem write access to shared records and no authority to erase
+history. It does not brief researchers on what strategy to pursue. Editorial
+opinions or unsupported doubt are not sufficient to retract a result.
 
-The main interface shows two persistent research panels, a review queue, and
-a results library. Each panel shows current notes, activity, allowance, and
-pause/continue controls. Open a result to see versions, exact proofs, reviews,
-execution evidence, and any conflict or dependency concern. Keep source and
-transcript access, owner steering, readable Markdown, and portable export.
-Remove the round graph and legacy role settings. An optional dependency view
-should serve a concrete question rather than dictate the data model.
+A corrected or split theorem proposed by the auditor is new mathematics. It
+must receive an independent check before admission; the auditor cannot act as
+both its author and its only verifier. A mathematical disproof, proof defect,
+missing source and operational inability remain distinct findings.
+Its own proposed correction cannot receive AUDITED status from that same
+session; a later independent audit must assess the new version.
 
-## Replacement sequence
+Track coverage per exact version. New checked facts and revised versions
+arriving during the round join an explicit audit tail. At closing, seal that
+tail so completion has a finite meaning. An assessment of an obsolete version
+does not certify its replacement. Unfinished, unavailable or failed audit work
+remains visible, and no round or final report calls the audit complete unless
+all required targets have substantive assessments. An operational error or
+inability to inspect a proof leaves that target unassessed. An assessment can
+be a rigorous objection; coverage is not the same as every result passing.
 
-1. **Specify the new record and session contract.** Define only the new project
-   format, two stable session identities, immutable results, messages,
-   reservations and reviews. Establish a simulator scenario in which both
-   researchers continue across several turns and a service restart.
-2. **Build the vertical runtime slice.** Implement intake, start/resume,
-   notes, submissions, update delivery and the simple queue. Reuse the tested
-   process, storage and confinement utilities where their interfaces fit.
-   Do not extend the current wave loop with another compatibility branch.
-3. **Connect verification and stopping.** Carry forward execution evidence,
-   explicit dependencies and conflict warnings. Add sequential review and the
-   frozen final-record barrier. A failed check goes back to its original
-   author session. No unsupported result can trigger a decisive stop.
-4. **Replace the UI and remove the old framework in the same cutover.** Use
-   the two-session view and new results library. Remove council replay,
-   trajectory rounds, old schemas/reducers, unused tools, graph components,
-   legacy settings, and redundant design documents. Keep no runtime migration
-   or compatibility adapter. Old project directories are not modified or
-   deleted; unsupported formats are reported clearly and are never launched.
-5. **Validate and measure.** Run simulator tests and all repository checks.
-   Use expert-labelled saved mathematics only when explicitly selected for
-   evaluation. A live comparison requires a separate request; use a fixed
-   total allowance and record success, false acceptance, false rejection,
-   time, and all available usage components. No performance improvement is
-   established by the design or simulator alone.
+## Round summaries and final writing
 
-Use a development branch for the replacement. Ship one completed workflow,
-not two partially supported engines. The current implementation remains usable
-until the new vertical slice, interface and removal are ready together.
+Both are first-class user outputs. Use the support editor for recurring
+summaries and reserve one strong writing pass for the final mathematical
+exposition. Research sessions need not repeatedly narrate their activity.
 
-## Acceptance scenarios
+Once the round's record is sealed, one editorial call produces:
 
-- Exactly one Solver and one Explorer identity, with no concurrent turns in
-  either; ordinary continuation and service recovery retain their histories.
-- A result is submitted while its author continues work; its review returns
-  to the same session without restarting the other researcher.
-- A failed first check spends no second call. Two passes bind to one exact
-  proof version. A revised version starts without inherited passes; an older
-  version's record is not rewritten merely because a revision was submitted.
-- The D analogue remains unresolved when the opposing proof is incomplete;
-  disputes propagate to dependent results without rewriting historical votes.
-- A late opposing submission cannot be lost during decisive final checking.
-  Interrupting that check preserves an unresolved result and its evidence.
-- Failed commands do not certify computation. Saved review recovery consumes
-  no duplicate call or charge; missing provider history is exposed explicitly.
-- Duplicate tool submissions, torn event tails, budget contention, owner
-  pause/stop and an unavailable source never create duplicate results or work.
-- Neither researcher can read the other's private files; verifiers cannot
-  read author histories or other verifier verdicts. Source-copy limits hold.
-- Unsupported old projects receive no execution or writes. New-format replay,
-  HTTP/UI projections, simulator fixtures and exports agree.
+1. A substantial readable round summary: what was established, under which
+   hypotheses, the decisive mathematics, corrected errors, useful unsuccessful
+   approaches, and the questions still open.
+2. A shorter next-round brief and source-linked index updates. These point to
+   the full note filesystem rather than replacing it.
+
+The editor receives complete relevant result texts and current qualifications,
+not merely verifier one-line verdicts. It may reorder, format, link and shorten
+exposition. It cannot promote a conjecture, drop a hypothesis, resolve a
+conflict, silently repair a proof or prescribe the next research strategy.
+Canonical statement/proof blocks remain bound to their source versions and
+are inserted directly by the runtime. The editor writes exposition around
+them. A compact brief can use a title and link instead of reproducing a long
+statement, but a paraphrase cannot replace its formal hypotheses or conclusion.
+Current status and conflict notices are also projected from the record rather
+than inferred by the editor.
+
+At stopping, a separate final writing pass produces a coherent, self-contained
+mathematical report with the original problem, established results and their
+proofs, sources, limitations and open questions. It is not just an event list
+or a concatenation of round summaries. Use the research model for this one
+call: coherent mathematical exposition can require judgment beyond secretarial
+work. Supply the complete audited mathematics and source material.
+
+The runtime fixes the outcome and eligible result versions before composition.
+The writer cannot turn an unresolved investigation into PROVED or DISPROVED.
+Missing mathematical transitions are exposed, not invented for narrative
+smoothness. Any issue requiring a new argument returns to an author/auditor
+within the allowance. If editorial generation fails, retain a deterministic
+readable fallback and the full underlying results.
+
+## Stopping and cost discipline
+
+A potentially decisive result does not stop the project while the other
+researcher may still submit an opposing calculation. Request closing
+checkpoints, finish admitted bounded responses, freeze the result record,
+and complete strong audit of the decisive proof, its dependencies and relevant
+conflicting statements. New versions reopen the affected audit targets.
+The current round's full memory audit must also have complete coverage before
+a decisive stopping report; unrelated challenged facts may remain explicitly
+quarantined without defeating an independent audited proof.
+
+If research ends in round one, run the strong final audit before declaring a
+decisive result; otherwise the audit layer would be bypassed. A partial or
+budget-limited stop can remain UNCERTAIN with incomplete audit coverage stated
+explicitly. Round and final writing must preserve this distinction.
+
+Use one project allowance with reservations for research, verification/repair,
+audit and writing. Reserve audit and final-writing capacity before launching
+another long round. The strong audit of all memory can become the dominant
+cost as the library grows. Do not silently sample facts or replace the
+requested full audit with checking only changed items. If the allowance cannot
+cover it, report incomplete coverage and reduce further research or stop.
+
+The economical default adds one routine check per submitted version, bounded
+returns to an existing author session, one full strong audit per round from
+round two, one support-model round editorial call, and one strong final
+writing call.
+These are proposed operating choices, not a claim of measured savings. Keep
+infrastructure retries bounded and charge every repair and audit continuation.
+
+Retain the existing execution-evidence guard: failed commands cannot certify
+computations, and successful execution does not certify the encoded
+mathematics. Do not rerun worker code in the unrestricted conductor process.
+Track uncached input, cache reads, cache writes when available, output and time
+separately; unknown usage is not free, and the old token proxy is not a price.
+
+## Implementation and interface
+
+Keep TypeScript, the existing process driver, project-scoped MCP, Markdown,
+HTTP/SSE, simulator and append-only event log. Reuse confinement, source
+readers, execution evidence and crash-safe storage. No new database, external
+agent framework or second memory system is needed.
+
+The core records are rounds, their author sessions, versioned mathematical
+documents, checks/audits, author responses and editorial artifacts. Research
+and repair turns reference the same originating session. Mathematical status
+is derived from evidence for exact versions, not copied between claim/fact
+entities or inferred from a summary.
+
+The UI keeps a round timeline. Each round opens into Solver, Explorer, audit
+and summary views. The library separates content kind, checking state and
+scope; all notes remain searchable. A result shows its exact versions,
+objections, author responses, audit findings, dependencies and execution
+record. Show audit coverage and the final report prominently. Keep controls
+for pause, continuation, owner guidance and source access.
+
+Replace the earlier specification in these stages:
+
+1. Define the new round/session, document, response and audit-coverage contract.
+   Map the MCP's existing search/open tools onto the complete note filesystem
+   and its separate blind verifier/auditor views.
+2. Implement one long Solver and one Explorer per round, fresh next-round
+   context, saved author-session repair, bounded weaker verification and
+   exact-version dependency/status handling.
+3. Implement the parallel strong audit, all-fact coverage, quarantine and
+   dependency propagation, and the closing-record barrier. Preserve a
+   mathematical response path for mistaken weak-verifier objections.
+4. Implement support-model round summaries and next-round briefs, then the
+   strong final writing pass, with source-bound mathematics and no editorial
+   acceptance power.
+   Update every model-call and tool contract under src/prompts/.
+5. Replace the UI and remove old workflow/schema compatibility in one tested
+   cutover. Keep no parallel compatibility engine or runtime migration.
+   Unsupported old projects are reported clearly; do not modify or delete
+   private project data as part of removing code support.
+
+Use the simulator for recovery, access-control, budget and output-validation
+coverage. Key cases include a weak checker correctly flagging D, a weak checker
+being wrong and receiving a valid defense, routine passes being overturned by
+a strong audit, a new round receiving no old raw trace, all notes remaining
+retrievable, an older originating session being resumed for correction, a late
+conflict blocking stopping, and summaries retaining exact scope and audit
+qualifications. Test that the auditor cannot read old verdicts through tools,
+that old-version audits do not certify revisions, and that an incomplete audit
+never appears complete. Run all repository checks before code handoff.
+
+Live evaluation needs a separate request. Compare the whole allocation at a
+fixed allowance, including audit and writing, with expert-labelled correct,
+incorrect, incomplete and disputed cases. Include false rejection by weaker
+checkers and whether the repair/audit path actually resolves it.
 
 ## Status
 
-This turn records a replacement specification and removal plan. It does not
-change the running scheduler to persistent sessions or claim measured cache
-savings. The four validity safeguards implemented in 350488a remain useful
-components to carry forward; their old entity layout is not a constraint.
+This revision records the agreed recurrent direction and the proposed defaults
+needed to make it concrete. It supersedes the project-long-session design in
+dd46c72. The scheduler and model prompts have not yet been changed to implement
+this replacement. The validity work in 350488a remains reusable; its historical
+entity layout and compatibility contracts do not constrain the new framework.

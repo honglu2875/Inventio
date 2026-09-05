@@ -2,9 +2,11 @@
 
 The subsequent architectural redesign is specified in
 [SESSION-DESIGN.md](../SESSION-DESIGN.md). It retains the validity safeguards
-while replacing rounds with two persistent research sessions. The owner has
-removed backward compatibility as a requirement for that replacement; the
-historical constraints below describe the work already implemented.
+while retaining recurrence, limiting each round to one Solver and Explorer,
+adding author-session repairs and a strong memory auditor, and using smaller
+models for routine checks and editorial work. The owner has removed backward
+compatibility as a requirement for that replacement; the historical constraints
+below describe the work already implemented.
 
 ## Objective and boundaries
 
